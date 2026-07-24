@@ -3,16 +3,20 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/settings.php';
 
 function callRebrickableApi(string $path): array
 {
-    $config = require __DIR__ . '/config.php';
-    $apiKey = trim($config['rebrickable']['api_key']);
+    $apiKey = trim((string) getAppSetting('rebrickable_api_key'));
     if ($apiKey === '') {
-        throw new RuntimeException('Rebrickable-API-Key ist nicht konfiguriert. Tragen Sie ihn in src/config.php ein.');
+        throw new RuntimeException('Rebrickable-API-Key ist nicht konfiguriert. Legen Sie ihn in den Anwendungseinstellungen fest.');
     }
 
-    $url = rtrim($config['rebrickable']['api_url'], '/') . '/' . ltrim($path, '/');
+    $apiUrl = trim((string) getAppSetting('rebrickable_api_url'));
+    if ($apiUrl === '') {
+        $apiUrl = 'https://rebrickable.com/api/v3/';
+    }
+    $url = rtrim($apiUrl, '/') . '/' . ltrim($path, '/');
     $ch = curl_init($url);
     if ($ch === false) {
         throw new RuntimeException('Rebrickable-API konnte nicht initialisiert werden.');

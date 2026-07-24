@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-$config = require __DIR__ . '/config.php';
-
 function getPDO(bool $withDatabase = true): PDO
 {
     static $pdo;

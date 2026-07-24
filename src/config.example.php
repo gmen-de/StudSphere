@@ -10,9 +10,4 @@ return [
         // MariaDB 10 is assumed for compatibility
     ],
     'base_url' => '/',
-    'rebrickable' => [
-        'api_key' => '',
-        'api_url' => 'https://rebrickable.com/api/v3/',
-        'download_page' => 'https://rebrickable.com/downloads/',
-    ],
 ];
