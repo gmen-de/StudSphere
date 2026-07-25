@@ -38,3 +38,7 @@ StudSphere ist so gebaut, dass es auch auf Hostern ohne Zugriff auf die PHP-Konf
 
 Die Tabellen werden zur Laufzeit von `installDatabase()` in `src/setup.php` angelegt (Single Source of Truth).
 `db/schema.sql` dokumentiert denselben Stand zum Nachlesen/Referenzieren außerhalb von PHP — bei Schemaänderungen bitte beide Stellen synchron halten.
+
+## Lizenz
+
+Alle Rechte vorbehalten, siehe [LICENSE](LICENSE). Das Repository ist öffentlich einsehbar und darf für den privaten, nicht-kommerziellen Gebrauch heruntergeladen und betrieben werden — Kopieren, Forken, Weiterverbreiten und kommerzielle Nutzung sind ohne Zustimmung des Rechteinhabers nicht gestattet.

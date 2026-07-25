@@ -153,6 +153,61 @@ function getStorageLocationTree(): array
 }
 
 /**
+ * Immediate children of a location (or the top-level rooms when $parentId is
+ * null) — used to populate one level of the "add to inventory" cascading
+ * location picker at a time, rather than shipping the whole tree to the
+ * client.
+ */
+function getChildLocations(?int $parentId): array
+{
+    $pdo = getPDO();
+    if ($parentId === null) {
+        $stmt = $pdo->query('SELECT id, name, location_type FROM storage_locations WHERE parent_id IS NULL ORDER BY name');
+    } else {
+        $stmt = $pdo->prepare('SELECT id, name, location_type FROM storage_locations WHERE parent_id = ? ORDER BY name');
+        $stmt->execute([$parentId]);
+    }
+    return $stmt->fetchAll();
+}
+
+/**
+ * Adds quantity to a specific location/part/color/condition combination
+ * (upsert on the existing UNIQUE KEY) and writes a matching audit row to
+ * storage_movements. Returns the resulting total quantity at that spot.
+ */
+function addStorageStock(int $locationId, int $partId, int $colorId, string $conditionType, int $quantity, ?int $userId): int
+{
+    $pdo = getPDO();
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT INTO storage_items (location_id, part_id, color_id, condition_type, quantity)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)'
+        );
+        $stmt->execute([$locationId, $partId, $colorId, $conditionType, $quantity]);
+
+        $resultStmt = $pdo->prepare(
+            'SELECT quantity FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        );
+        $resultStmt->execute([$locationId, $partId, $colorId, $conditionType]);
+        $resultingQuantity = (int) $resultStmt->fetchColumn();
+
+        $moveStmt = $pdo->prepare(
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity)
+             VALUES (?, ?, ?, ?, ?, \'in\', ?, ?)'
+        );
+        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $quantity, $resultingQuantity]);
+
+        $pdo->commit();
+        return $resultingQuantity;
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/**
  * Flat (id => indented label) list for populating a parent-location <select>.
  */
 function getStorageLocationOptions(): array

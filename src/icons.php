@@ -18,3 +18,13 @@ function getNavIcon(string $key): string
 
     return $icons[$key] ?? '';
 }
+
+function getFlagIcon(string $locale): string
+{
+    $flags = [
+        'de' => '<svg viewBox="0 0 30 18"><rect width="30" height="18" fill="#FFCE00"/><rect width="30" height="12" fill="#DD0000"/><rect width="30" height="6" fill="#000000"/></svg>',
+        'en' => '<svg viewBox="0 0 30 18"><rect width="30" height="18" fill="#00247D"/><path d="M0 0L30 18M30 0L0 18" stroke="#ffffff" stroke-width="4"/><path d="M0 0L30 18M30 0L0 18" stroke="#CF142B" stroke-width="2"/><path d="M15 0V18M0 9H30" stroke="#ffffff" stroke-width="6"/><path d="M15 0V18M0 9H30" stroke="#CF142B" stroke-width="3.6"/></svg>',
+    ];
+
+    return $flags[$locale] ?? '';
+}

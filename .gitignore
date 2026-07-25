@@ -11,3 +11,7 @@
 # src/config.example.php is the tracked template; setup.php generates the
 # real file on first run.
 /src/config.php
+
+# Claude Code's own local tool config/permissions — personal to this machine,
+# not something the project should ship or impose on other contributors.
+/.claude/

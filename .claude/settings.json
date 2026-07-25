@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(\"/d/xampp/php/php.exe\" -l *)",
-      "Bash(gunzip -c*)",
-      "Bash(curl -sI*)"
-    ]
-  }
-}

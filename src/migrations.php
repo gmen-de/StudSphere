@@ -18,13 +18,94 @@ require_once __DIR__ . '/settings.php';
 function getSchemaMigrations(): array
 {
     return [
-        // 2 => function (PDO $pdo): void {
-        //     $pdo->exec('ALTER TABLE ... ');
-        // },
+        2 => function (PDO $pdo): void {
+            addIndexIfMissing($pdo, 'parts', 'idx_parts_category', 'part_category');
+            addIndexIfMissing($pdo, 'inventory_parts', 'idx_inventory_parts_part_id', 'part_id');
+        },
+        3 => function (PDO $pdo): void {
+            addIndexIfMissing($pdo, 'part_relationships', 'idx_partrel_child_type', 'child_part_id, relationship_type');
+            addIndexIfMissing($pdo, 'inventory_parts', 'idx_inventory_parts_color_id', 'color_id');
+        },
+        4 => function (PDO $pdo): void {
+            // Composite index lets the color facet's COUNT(DISTINCT part_id)
+            // GROUP BY color_id use a loose index scan instead of a
+            // temporary table + filesort (measured ~69s -> sub-second on a
+            // ~950k-row inventory_parts table). Its leading column (color_id)
+            // already covers everything the old single-column index did, so
+            // that one is dropped rather than kept alongside it.
+            dropIndexIfExists($pdo, 'inventory_parts', 'idx_inventory_parts_color_id');
+            addIndexIfMissing($pdo, 'inventory_parts', 'idx_inventory_parts_color_part', 'color_id, part_id');
+        },
+        5 => function (PDO $pdo): void {
+            // A category tile's thumbnail lookup filters inventory_parts by
+            // "has a downloaded image" — without an index that column can
+            // only be checked via a full-table scan-and-join, which measured
+            // ~126s even after batching the per-category N+1 loop into one
+            // query. A 1-char prefix is enough to distinguish NULL/empty from
+            // any real path, and keeps the index small despite the column
+            // being a VARCHAR(512).
+            addIndexIfMissing($pdo, 'inventory_parts', 'idx_inventory_parts_has_image', 'local_image_path(1)');
+        },
+        6 => function (PDO $pdo): void {
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS part_translations (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    part_id INT NOT NULL,
+                    locale VARCHAR(10) NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    user_id INT DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY part_translation_unique (part_id, locale),
+                    CONSTRAINT fk_parttranslation_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_parttranslation_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
-const CURRENT_SCHEMA_VERSION = 1;
+/**
+ * ALTER TABLE ... ADD INDEX has no IF NOT EXISTS in MariaDB versions we must
+ * support on shared hosting, so check information_schema first to keep the
+ * migration safe to re-run after a partial failure. $columns may be a single
+ * column name, a comma-separated list for a composite index, or include a
+ * prefix length like "local_image_path(1)" for a long text/varchar column.
+ */
+function addIndexIfMissing(PDO $pdo, string $table, string $indexName, string $columns): void
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.statistics
+         WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?'
+    );
+    $stmt->execute([$table, $indexName]);
+    if ((int) $stmt->fetchColumn() > 0) {
+        return;
+    }
+    $columnList = implode(', ', array_map(function (string $c) {
+        $c = trim($c);
+        if (preg_match('/^([a-zA-Z0-9_]+)(\(\d+\))$/', $c, $m)) {
+            return '`' . $m[1] . '`' . $m[2];
+        }
+        return '`' . $c . '`';
+    }, explode(',', $columns)));
+    $pdo->exec("ALTER TABLE `$table` ADD INDEX `$indexName` ($columnList)");
+}
+
+function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.statistics
+         WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?'
+    );
+    $stmt->execute([$table, $indexName]);
+    if ((int) $stmt->fetchColumn() === 0) {
+        return;
+    }
+    $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
+}
+
+const CURRENT_SCHEMA_VERSION = 6;
 
 function getInstalledSchemaVersion(): int
 {

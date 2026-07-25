@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS parts (
     name VARCHAR(255) NOT NULL,
     part_category VARCHAR(255) DEFAULT NULL,
     part_url VARCHAR(512) DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_parts_category (part_category)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS inventories (
@@ -87,7 +88,8 @@ CREATE TABLE IF NOT EXISTS part_relationships (
     relationship_type VARCHAR(10) DEFAULT NULL,
     CONSTRAINT fk_partrel_parent FOREIGN KEY (parent_part_id) REFERENCES parts(id) ON DELETE CASCADE,
     CONSTRAINT fk_partrel_child FOREIGN KEY (child_part_id) REFERENCES parts(id) ON DELETE CASCADE,
-    UNIQUE KEY relation_unique (parent_part_id, child_part_id, relationship_type)
+    UNIQUE KEY relation_unique (parent_part_id, child_part_id, relationship_type),
+    INDEX idx_partrel_child_type (child_part_id, relationship_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS elements (
@@ -130,7 +132,10 @@ CREATE TABLE IF NOT EXISTS inventory_parts (
     is_spare TINYINT(1) DEFAULT 0,
     img_url VARCHAR(512) DEFAULT NULL,
     local_image_path VARCHAR(512) DEFAULT NULL,
-    UNIQUE KEY inventory_part_unique (inventory_id, part_id, color_id, is_spare)
+    UNIQUE KEY inventory_part_unique (inventory_id, part_id, color_id, is_spare),
+    INDEX idx_inventory_parts_part_id (part_id),
+    INDEX idx_inventory_parts_color_part (color_id, part_id),
+    INDEX idx_inventory_parts_has_image (local_image_path(1))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS inventory_sets (
@@ -197,4 +202,17 @@ CREATE TABLE IF NOT EXISTS app_settings (
     setting_key VARCHAR(100) NOT NULL UNIQUE,
     setting_value TEXT NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS part_translations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    part_id INT NOT NULL,
+    locale VARCHAR(10) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    user_id INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY part_translation_unique (part_id, locale),
+    CONSTRAINT fk_parttranslation_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_parttranslation_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
