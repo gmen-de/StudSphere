@@ -2,10 +2,43 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/icons.php';
+require_once __DIR__ . '/i18n.php';
+
 // Infinite-scroll batch size: first batch loaded on page render, then one
 // more batch of the same size per scroll-triggered continuation request.
 const PARTS_SEARCH_PAGE_SIZE = 500;
 const PARTS_POPULAR_CATEGORY_LIMIT = 12;
+
+/**
+ * One part card, used everywhere a part appears in a grid — the bricks
+ * search results, and (via renderPartDetailModal(), which delegates its
+ * click-to-open handler on `document` rather than a specific grid id) any
+ * other page that lists parts, e.g. a set's inventory tab. $meta, when
+ * given, is rendered as an extra line under the name (e.g. "Rot · 4x" for a
+ * set's per-color quantity) — the bricks search grid doesn't need it.
+ *
+ * $fetchColorId, when given (Rebrickable's own color_id — see
+ * part_images.php), marks the card as still needing its color-correct image
+ * (data-color-id attribute, no visible per-card control) — only meaningful
+ * where a card already represents one specific color (a set's inventory
+ * list), not the catalog-wide bricks search grid. A single bulk "load
+ * missing images" button elsewhere on the page (see
+ * renderFetchMissingImagesButton() in part_images.php) scans for these.
+ */
+function renderPartCard(array $part, ?string $meta = null, ?int $fetchColorId = null): string
+{
+    $dataColorAttr = $fetchColorId !== null ? ' data-color-id="' . $fetchColorId . '"' : '';
+    $html = '<div class="part-card" data-part-id="' . (int) $part['id'] . '"' . $dataColorAttr . ' role="button" tabindex="0">';
+    $html .= '<span class="part-card-image">' . ($part['thumbnail'] !== null ? '<img src="' . htmlspecialchars($part['thumbnail']) . '" alt="">' : getNavIcon('bricks')) . '</span>';
+    $html .= '<span class="part-card-num">' . htmlspecialchars($part['part_num']) . '</span>';
+    $html .= '<span class="part-card-name" title="' . htmlspecialchars($part['name']) . '">' . htmlspecialchars($part['name']) . '</span>';
+    if ($meta !== null) {
+        $html .= '<span class="part-card-meta">' . htmlspecialchars($meta) . '</span>';
+    }
+    $html .= '</div>';
+    return $html;
+}
 
 /**
  * Canonical category list (id + name), matching Rebrickable's part_categories

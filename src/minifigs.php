@@ -1,0 +1,160 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/icons.php';
+
+const MINIFIGS_SEARCH_PAGE_SIZE = 100;
+
+/**
+ * One minifig card — mirrors parts.php's renderPartCard(), used by both the
+ * minifigs search results and a set's minifig tab.
+ */
+function renderMinifigCard(array $fig, ?string $meta = null): string
+{
+    $html = '<div class="minifig-card">';
+    $html .= '<span class="minifig-card-image">' . ($fig['thumbnail'] !== null ? '<img src="' . htmlspecialchars($fig['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
+    $html .= '<span class="minifig-card-num">' . htmlspecialchars($fig['fig_num']) . '</span>';
+    $name = (string) ($fig['name'] ?? $fig['fig_num']);
+    $html .= '<span class="minifig-card-name" title="' . htmlspecialchars($name) . '">' . htmlspecialchars($name) . '</span>';
+    if ($meta !== null) {
+        $html .= '<span class="minifig-card-meta">' . htmlspecialchars($meta) . '</span>';
+    }
+    $html .= '</div>';
+    return $html;
+}
+
+/**
+ * Minifigs have no category field of their own — the only place Rebrickable
+ * groups them is via the sets they appear in, so "theme" here is derived by
+ * walking minifigs -> inventory_minifigs -> rebrickable_inventories -> sets
+ * -> themes (see sets.php's getSetThemes() for why that last join, through
+ * sets.theme, is needed for a display name). A minifig that appears in sets
+ * from more than one theme is counted under each — expected, not a bug.
+ *
+ * @return array<int, array{theme_id:int, name:string, cnt:int}>
+ */
+function getMinifigThemes(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        'SELECT th.theme_id, th.name, COUNT(DISTINCT m.id) AS cnt
+         FROM themes th
+         INNER JOIN sets s ON s.theme = th.theme_id
+         INNER JOIN rebrickable_inventories ri ON ri.set_num = s.rebrickable_set_num
+         INNER JOIN inventory_minifigs im ON im.inventory_id = ri.inventory_id
+         INNER JOIN minifigs m ON m.id = im.minifig_id
+         GROUP BY th.theme_id, th.name
+         HAVING cnt > 0
+         ORDER BY th.name ASC'
+    );
+    return $stmt->fetchAll();
+}
+
+/**
+ * One representative minifig image per theme, for the theme tile grid —
+ * mirrors sets.php's getThemeTileImages().
+ *
+ * @param int[] $themeIds
+ * @return array<string, string>
+ */
+function getMinifigThemeTileImages(PDO $pdo, array $themeIds): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT m.local_image_path
+         FROM minifigs m
+         INNER JOIN inventory_minifigs im ON im.minifig_id = m.id
+         INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
+         INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num
+         WHERE s.theme = ? AND m.local_image_path IS NOT NULL AND m.local_image_path != ''
+         LIMIT 1"
+    );
+
+    $result = [];
+    foreach ($themeIds as $themeId) {
+        $stmt->execute([$themeId]);
+        $path = $stmt->fetchColumn();
+        if ($path !== false) {
+            $result[(string) $themeId] = (string) $path;
+        }
+    }
+    return $result;
+}
+
+/**
+ * Minifigs needed for one set's inventory (via rebrickable_inventories.
+ * inventory_id, same as sets.php's getSetPartsList() for regular parts).
+ *
+ * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, quantity:int}>
+ */
+function getSetMinifigsList(PDO $pdo, int $inventoryId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT m.id AS minifig_id, m.fig_num, m.name, m.local_image_path AS thumbnail, im.quantity
+         FROM inventory_minifigs im
+         INNER JOIN minifigs m ON m.id = im.minifig_id
+         WHERE im.inventory_id = ?
+         ORDER BY m.name ASC'
+    );
+    $stmt->execute([$inventoryId]);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['minifig_id'] = (int) $row['minifig_id'];
+        $row['quantity'] = (int) $row['quantity'];
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
+ * @param string[] $selectedThemes
+ * @return array{items: array, total: int, page: int, perPage: int}
+ */
+function searchMinifigs(PDO $pdo, string $query, array $selectedThemes, int $page, int $perPage): array
+{
+    $joins = '';
+    $where = [];
+    $params = [];
+
+    if (!empty($selectedThemes)) {
+        $joins = 'INNER JOIN inventory_minifigs im ON im.minifig_id = m.id
+                  INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
+                  INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num';
+        $placeholders = implode(',', array_fill(0, count($selectedThemes), '?'));
+        $where[] = "s.theme IN ($placeholders)";
+        foreach ($selectedThemes as $themeId) {
+            $params[] = $themeId;
+        }
+    }
+
+    if ($query !== '') {
+        $where[] = '(m.name LIKE ? OR m.fig_num LIKE ?)';
+        $params[] = '%' . $query . '%';
+        $params[] = '%' . $query . '%';
+    }
+
+    $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+
+    $countStmt = $pdo->prepare("SELECT COUNT(DISTINCT m.id) FROM minifigs m $joins $whereSql");
+    $countStmt->execute($params);
+    $total = (int) $countStmt->fetchColumn();
+
+    $perPage = max(1, $perPage);
+    $offset = (max(1, $page) - 1) * $perPage;
+    $stmt = $pdo->prepare(
+        "SELECT DISTINCT m.id, m.fig_num, m.name, m.local_image_path AS thumbnail
+         FROM minifigs m
+         $joins
+         $whereSql
+         ORDER BY m.name ASC
+         LIMIT $perPage OFFSET $offset"
+    );
+    $stmt->execute($params);
+
+    return [
+        'items' => $stmt->fetchAll(),
+        'total' => $total,
+        'page' => $page,
+        'perPage' => $perPage,
+    ];
+}

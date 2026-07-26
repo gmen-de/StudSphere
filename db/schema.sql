@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS sets (
     rebrickable_set_id INT DEFAULT NULL,
     name VARCHAR(255) NOT NULL,
     year INT DEFAULT NULL,
+    year_retired INT DEFAULT NULL,
     theme VARCHAR(255) DEFAULT NULL,
     num_parts INT DEFAULT NULL,
     image_url VARCHAR(512) DEFAULT NULL,
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS parts (
     name VARCHAR(255) NOT NULL,
     part_category VARCHAR(255) DEFAULT NULL,
     part_url VARCHAR(512) DEFAULT NULL,
+    ldraw_id VARCHAR(50) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_parts_category (part_category)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -120,7 +122,8 @@ CREATE TABLE IF NOT EXISTS rebrickable_inventories (
     year INT DEFAULT NULL,
     theme VARCHAR(255) DEFAULT NULL,
     num_parts INT DEFAULT NULL,
-    UNIQUE KEY inventory_version_unique (inventory_id, version)
+    UNIQUE KEY inventory_version_unique (inventory_id, version),
+    INDEX idx_rebrickable_inventories_set_num (set_num)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS inventory_parts (
@@ -215,4 +218,14 @@ CREATE TABLE IF NOT EXISTS part_translations (
     UNIQUE KEY part_translation_unique (part_id, locale),
     CONSTRAINT fk_parttranslation_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE,
     CONSTRAINT fk_parttranslation_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS part_color_images (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    part_id INT NOT NULL,
+    color_id INT NOT NULL,
+    local_image_path VARCHAR(512) DEFAULT NULL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY part_color_image_unique (part_id, color_id),
+    CONSTRAINT fk_partcolorimage_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

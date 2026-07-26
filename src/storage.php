@@ -208,6 +208,68 @@ function addStorageStock(int $locationId, int $partId, int $colorId, string $con
 }
 
 /**
+ * Current stock of one part across all storage locations, for the part
+ * detail modal's "Lager" tab — one row per location/color/condition combo
+ * that actually holds stock.
+ *
+ * @return array<int, array{location_id:int, location_path:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int}>
+ */
+function getPartStock(int $partId): array
+{
+    $pdo = getPDO();
+    $stmt = $pdo->prepare(
+        'SELECT si.location_id, si.condition_type, si.quantity,
+                c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb
+         FROM storage_items si
+         LEFT JOIN colors c ON c.id = si.color_id
+         WHERE si.part_id = ? AND si.quantity > 0
+         ORDER BY si.location_id'
+    );
+    $stmt->execute([$partId]);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['location_id'] = (int) $row['location_id'];
+        $row['location_path'] = getStorageLocationPath($row['location_id']);
+        $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
+        $row['quantity'] = (int) $row['quantity'];
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
+ * All parts/colors currently stored directly at one location — powers the
+ * location detail page reached by clicking a location card in a part's
+ * "Lager" tab. Thumbnails aren't included here (they need parts.php's
+ * batched lookup, a different module) — callers merge those in themselves.
+ *
+ * @return array<int, array{part_id:int, part_num:string, part_name:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int}>
+ */
+function getLocationStock(int $locationId): array
+{
+    $pdo = getPDO();
+    $stmt = $pdo->prepare(
+        'SELECT si.part_id, p.part_num, p.name AS part_name,
+                c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb,
+                si.condition_type, si.quantity
+         FROM storage_items si
+         INNER JOIN parts p ON p.id = si.part_id
+         LEFT JOIN colors c ON c.id = si.color_id
+         WHERE si.location_id = ? AND si.quantity > 0
+         ORDER BY p.part_num'
+    );
+    $stmt->execute([$locationId]);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['part_id'] = (int) $row['part_id'];
+        $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
+        $row['quantity'] = (int) $row['quantity'];
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
  * Flat (id => indented label) list for populating a parent-location <select>.
  */
 function getStorageLocationOptions(): array

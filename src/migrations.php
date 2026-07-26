@@ -62,6 +62,47 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        7 => function (PDO $pdo): void {
+            // The set-detail page looks up a set's current inventory via
+            // WHERE set_num = ? — without an index that's a full scan of
+            // rebrickable_inventories on every page load (the table's only
+            // existing index is the composite (inventory_id, version) key,
+            // which set_num isn't a leftmost prefix of).
+            addIndexIfMissing($pdo, 'rebrickable_inventories', 'idx_rebrickable_inventories_set_num', 'set_num');
+        },
+        8 => function (PDO $pdo): void {
+            // Rebrickable's sets.csv only ships a set's introduction year,
+            // never a retirement/end-of-life date — that data isn't
+            // available from any import, so it's a manually-editable field
+            // instead (same reasoning as part_translations: crowdsourced,
+            // not synced).
+            addColumnIfMissing($pdo, 'sets', 'year_retired', 'INT DEFAULT NULL');
+        },
+        9 => function (PDO $pdo): void {
+            // Color-correct part images, fetched on demand (one CDN request
+            // per part+color, not a bulk sync — most parts/colors are
+            // already covered well enough by the bulk-downloaded
+            // inventory_parts image). color_id here is Rebrickable's own
+            // numbering, same as inventory_parts.color_id — not colors.id.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS part_color_images (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    part_id INT NOT NULL,
+                    color_id INT NOT NULL,
+                    local_image_path VARCHAR(512) DEFAULT NULL,
+                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY part_color_image_unique (part_id, color_id),
+                    CONSTRAINT fk_partcolorimage_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+            // Rebrickable's part_num often matches the LDraw part library's
+            // own numbering, but not always (e.g. part 2436 is LDraw
+            // "2436a") — confirmed via the API's external_ids.LDraw field.
+            // Resolved lazily, once per part, and cached here: '' means
+            // "resolved, no LDraw mapping exists" (e.g. printed/decorated
+            // parts), NULL means "not looked up yet".
+            addColumnIfMissing($pdo, 'parts', 'ldraw_id', 'VARCHAR(50) DEFAULT NULL');
+        },
     ];
 }
 
@@ -92,6 +133,25 @@ function addIndexIfMissing(PDO $pdo, string $table, string $indexName, string $c
     $pdo->exec("ALTER TABLE `$table` ADD INDEX `$indexName` ($columnList)");
 }
 
+/**
+ * ALTER TABLE ... ADD COLUMN has no IF NOT EXISTS in the MariaDB versions we
+ * must support on shared hosting either — same information_schema check as
+ * addIndexIfMissing(), for the same reason (safe to re-run after a partial
+ * failure).
+ */
+function addColumnIfMissing(PDO $pdo, string $table, string $columnName, string $columnDefinition): void
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?'
+    );
+    $stmt->execute([$table, $columnName]);
+    if ((int) $stmt->fetchColumn() > 0) {
+        return;
+    }
+    $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$columnName` $columnDefinition");
+}
+
 function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
 {
     $stmt = $pdo->prepare(
@@ -105,7 +165,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 9;
 
 function getInstalledSchemaVersion(): int
 {

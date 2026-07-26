@@ -734,6 +734,81 @@ button[type='submit'] {
   display: inline;
 }
 
+.location-detail-path {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.location-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 3px;
+  margin: 1rem 0;
+}
+
+.location-detail-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.4rem;
+  padding: 0.9rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.85rem;
+  background: #ffffff;
+}
+
+.location-detail-card-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 4.5rem;
+  height: 4.5rem;
+  color: #94a3b8;
+}
+
+.location-detail-card-thumb svg {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.location-detail-card-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.location-detail-card-swatch {
+  display: block;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+}
+
+.location-detail-card-num {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.location-detail-card-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.35;
+  max-height: calc(0.78rem * 1.35 * 3);
+}
+
+.location-detail-card-meta {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
 .link-button {
   background: none;
   border: none;
@@ -795,14 +870,31 @@ footer {
 }
 
 .category-tile-grid,
-.parts-grid {
+.parts-grid,
+.sets-grid,
+.minifigs-grid {
   display: grid;
   gap: 3px;
   margin: 1rem 0;
 }
 
+.minifigs-grid {
+  /* Wider column to match the 4x-larger minifig image (see .minifig-card-image). */
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+}
+
+.sets-grid {
+  /* Wider column to match the 3x-larger set image (see .set-card-image). */
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+}
+
 .category-tile-grid {
   grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+}
+
+.minifig-theme-grid {
+  /* Wider column to match the 2x-larger minifig theme tile (see .minifig-theme-tile-image). */
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
 }
 
 .parts-grid {
@@ -813,7 +905,9 @@ footer {
 }
 
 .category-tile,
-.part-card {
+.part-card,
+.set-card,
+.minifig-card {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -834,7 +928,9 @@ footer {
 }
 
 .category-tile-image,
-.part-card-image {
+.part-card-image,
+.set-card-image,
+.minifig-card-image {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -844,13 +940,17 @@ footer {
 }
 
 .category-tile-image svg,
-.part-card-image svg {
+.part-card-image svg,
+.set-card-image svg,
+.minifig-card-image svg {
   width: 2.25rem;
   height: 2.25rem;
 }
 
 .category-tile-image img,
-.part-card-image img {
+.part-card-image img,
+.set-card-image img,
+.minifig-card-image img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
@@ -862,13 +962,51 @@ footer {
   color: #334155;
 }
 
-.part-card-num {
+.part-card-num,
+.set-card-num,
+.minifig-card-num {
   font-size: 0.85rem;
   font-weight: 700;
   color: #0f172a;
 }
 
-.part-card-name {
+.fetch-missing-images-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.fetch-missing-images-btn {
+  width: auto;
+  padding: 0.55rem 1rem;
+  border-radius: 0.6rem;
+  border: none;
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.fetch-missing-images-btn:hover {
+  background: #1d4ed8;
+}
+
+.fetch-missing-images-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.fetch-missing-images-status {
+  font-size: 0.85rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.part-card-name,
+.set-card-name,
+.minifig-card-name {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -877,6 +1015,79 @@ footer {
   color: #64748b;
   line-height: 1.35;
   max-height: calc(0.78rem * 1.35 * 3);
+}
+
+.part-card-meta {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+/* Set images are shown 3x the size of the shared part/category/minifig tile
+   image (4.5rem -> 13.5rem) — the grid column width and text sizing scale
+   up to match so the card stays proportioned instead of a huge photo over
+   tiny captions. */
+.set-card-image {
+  width: 13.5rem;
+  height: 13.5rem;
+}
+
+.set-card-image svg {
+  width: 6.75rem;
+  height: 6.75rem;
+}
+
+.set-card-num {
+  font-size: 1rem;
+}
+
+.set-card-name {
+  font-size: 0.9rem;
+  max-height: calc(0.9rem * 1.35 * 3);
+}
+
+/* Minifig content-view images shown 4x the size of the shared tile image
+   (4.5rem -> 18rem) — grid column and text sizing scale up to match, same
+   reasoning as .set-card-image's 3x. */
+.minifig-card-image {
+  width: 18rem;
+  height: 18rem;
+}
+
+.minifig-card-image svg {
+  width: 9rem;
+  height: 9rem;
+}
+
+.minifig-card-num {
+  font-size: 1.05rem;
+}
+
+.minifig-card-name {
+  font-size: 0.95rem;
+  max-height: calc(0.95rem * 1.35 * 3);
+}
+
+.minifig-card-meta {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+/* Minifig theme-overview tiles are their own size independent of the
+   shared .category-tile-image (also used by bricks/sets theme tiles) — 2x
+   the shared 4.5rem base, i.e. what .minifig-card-image used to be before
+   it became 4x. */
+.minifig-theme-tile-image {
+  width: 9rem;
+  height: 9rem;
+}
+
+.minifig-theme-tile-image svg {
+  width: 4.5rem;
+  height: 4.5rem;
+}
+
+.minifig-theme-tile-label {
+  font-size: 0.9rem;
 }
 
 .parts-load-sentinel {
@@ -995,7 +1206,9 @@ footer {
 }
 
 .part-card:hover,
-.part-card:focus-visible {
+.part-card:focus-visible,
+.set-card:hover,
+.set-card:focus-visible {
   border-color: #93c5fd;
   box-shadow: 0 12px 24px rgba(37, 99, 235, 0.1);
   outline: none;
@@ -1243,6 +1456,299 @@ footer {
   margin: 0 0 0.85rem;
   font-size: 1.05rem;
   color: #0f172a;
+}
+
+.part-modal-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 1.1rem;
+}
+
+.part-modal-tab-btn {
+  padding: 0.6rem 1rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.part-modal-tab-btn:hover {
+  color: #334155;
+}
+
+.part-modal-tab-btn.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+.set-detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.set-detail-image {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40rem;
+  height: 40rem;
+  background: #f8fafc;
+  border-radius: 0.75rem;
+  color: #94a3b8;
+}
+
+.set-detail-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.set-detail-image svg {
+  width: 16rem;
+  height: 16rem;
+}
+
+.set-detail-info h1 {
+  margin: 0 0 0.4rem;
+  font-size: 1.6rem;
+}
+
+.set-detail-meta {
+  margin: 0;
+  color: #64748b;
+  font-size: 1.05rem;
+}
+
+.set-detail-retired-year {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+.set-detail-retired-year a {
+  font-weight: 600;
+}
+
+.set-retired-year-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.set-retired-year-form input {
+  width: 8rem;
+  margin-top: 0;
+  padding: 0.4rem 0.6rem;
+}
+
+.set-retired-year-form button {
+  width: auto;
+  padding: 0.4rem 0.8rem;
+}
+
+.set-retired-year-form button[type='button'] {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.set-retired-year-message {
+  font-size: 0.8rem;
+  color: #dc2626;
+}
+
+.set-detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid #e2e8f0;
+  margin: 1rem 0 1.5rem;
+}
+
+.set-detail-tabs a {
+  padding: 0.6rem 1rem;
+  border-bottom: 2px solid transparent;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: -1px;
+  text-decoration: none;
+}
+
+.set-detail-tabs a:hover {
+  color: #334155;
+}
+
+.set-detail-tabs a.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.set-compare-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.set-compare-table th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid #e2e8f0;
+  color: #334155;
+  font-size: 0.85rem;
+}
+
+.set-compare-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+
+.set-compare-thumb {
+  width: 3rem;
+}
+
+.set-compare-thumb img {
+  max-width: 2.5rem;
+  max-height: 2.5rem;
+  object-fit: contain;
+  display: block;
+}
+
+.set-compare-thumb svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: #94a3b8;
+}
+
+.set-compare-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.set-compare-swatch {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+}
+
+.set-compare-qty {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* All three panels are stacked into the same grid cell so the row height
+   (and therefore the dialog's height) is always the tallest panel among
+   them, regardless of which one is currently shown — switching tabs then
+   never resizes the dialog. visibility (not display) keeps a hidden panel's
+   box counted for that sizing while still removing it from view/hit-testing. */
+.part-modal-tab-panels {
+  display: grid;
+}
+
+.part-modal-tab-panel {
+  grid-column: 1;
+  grid-row: 1;
+  visibility: hidden;
+}
+
+.part-modal-tab-panel.active {
+  visibility: visible;
+}
+
+.part-stock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 3px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.part-stock-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.5rem;
+  padding: 0.9rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.85rem;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.part-stock-card:hover,
+.part-stock-card:focus-visible {
+  border-color: #93c5fd;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.1);
+  outline: none;
+}
+
+.part-stock-card-newtab {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.part-stock-card-newtab:hover {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.part-stock-card-newtab svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.part-stock-card-swatch {
+  display: block;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+}
+
+.part-stock-card-qty {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.part-stock-card-meta {
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.part-purchase-placeholder {
+  color: #94a3b8;
+  font-style: italic;
 }
 
 .add-stock-form {
