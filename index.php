@@ -93,7 +93,7 @@ function render(string $title, string $content): void
     echo '<div class="container">';
     echo '<header><div class="brand"><span class="brand-mark">' . file_get_contents(__DIR__ . '/logo.svg') . '</span><div><h1>' . htmlspecialchars(t('app_title')) . '</h1><small>' . htmlspecialchars(t('app_tagline')) . '</small></div></div></header>';
     echo $content;
-    echo '<footer>' . htmlspecialchars(t('app_footer', ['year' => date('Y')])) . '</footer>';
+    echo '<footer>' . htmlspecialchars(t('app_footer', ['year' => date('Y'), 'version' => getCurrentVersion(), 'date' => getVersionDate()])) . '</footer>';
     echo '</div></body></html>';
 }
 
@@ -259,7 +259,7 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
 
     echo '<div class="container">';
     echo '<main>' . renderBreadcrumbs($breadcrumbs) . $content . '</main>';
-    echo '<footer>' . htmlspecialchars(t('app_footer', ['year' => date('Y')])) . '</footer>';
+    echo '<footer>' . htmlspecialchars(t('app_footer', ['year' => date('Y'), 'version' => getCurrentVersion(), 'date' => getVersionDate()])) . '</footer>';
     echo '</div>';
     echo '</body></html>';
 }

@@ -17,6 +17,18 @@ function getCurrentVersion(): string
 }
 
 /**
+ * No separate release-date tracking exists — the VERSION file's own mtime
+ * is a reasonable stand-in, since it's rewritten every time the version
+ * bumps (either by hand or by applyUpdate() after a self-update).
+ */
+function getVersionDate(): string
+{
+    $path = dirname(__DIR__) . '/VERSION';
+    $mtime = is_file($path) ? filemtime($path) : false;
+    return $mtime !== false ? date('d.m.Y', $mtime) : '';
+}
+
+/**
  * Paths (relative to project root) an update must never touch: local config,
  * user data, and generated caches. None of these ship in the git repo /
  * release zip in the first place (see .gitignore), so this list is really

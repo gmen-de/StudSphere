@@ -854,6 +854,7 @@ footer {
   margin-top: 2rem;
   color: #64748b;
   font-size: 0.95rem;
+  text-align: center;
 }
 
 /* Parts search: on-page filter form, category tile browser and results grid */

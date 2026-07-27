@@ -100,7 +100,7 @@ return [
     'lang_current' => 'Aktuelle Sprache',
     'app_title' => 'StudSphere',
     'app_tagline' => 'Lokale Klemmbaustein-Verwaltung',
-    'app_footer' => 'StudSphere © {year}',
+    'app_footer' => 'StudSphere by Jan-Henning Grell © {year} · v{version} ({date})',
     'setup_completed_title' => 'Setup abgeschlossen',
     'setup_completed_heading' => 'Setup abgeschlossen',
     'setup_completed_reload' => 'Bitte laden Sie die Seite neu.',

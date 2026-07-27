@@ -100,7 +100,7 @@ return [
     'lang_current' => 'Current language',
     'app_title' => 'StudSphere',
     'app_tagline' => 'Local brick management',
-    'app_footer' => 'StudSphere © {year}',
+    'app_footer' => 'StudSphere by Jan-Henning Grell © {year} · v{version} ({date})',
     'setup_completed_title' => 'Setup Completed',
     'setup_completed_heading' => 'Setup Completed',
     'setup_completed_reload' => 'Please reload the page.',

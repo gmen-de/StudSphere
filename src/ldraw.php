@@ -25,7 +25,14 @@ const LDRAW_EXTRACT_BATCH_SIZE = 400; // zip entries extracted per tick
 // render is its own leocad+Xvfb process spawn (~1.3s measured), so a short
 // budget would spend most ticks on HTTP round-trip overhead instead of work.
 const LDRAW_RENDER_TIME_BUDGET_SECONDS = 20.0;
-const LDRAW_RENDER_IMAGE_SIZE = 300;
+// Matches .part-modal-image's 16rem (256px) display size — the largest
+// context these renders show up in (part-detail modal); the card grid uses
+// a much smaller 4.5rem, so this comfortably covers both.
+const LDRAW_RENDER_IMAGE_SIZE = 256;
+
+// LeoCAD's stud styles 0/1/6/7 render blank studs; 2-5 emboss the LEGO logo.
+// 4 ("LDraw raised rounded") was picked by comparing renders of all eight.
+const LDRAW_STUD_STYLE = 4;
 
 // Rebrickable's API enforces its own rate limit (confirmed via a real 429
 // during testing — hundreds of not-yet-cached parts in one batch blew
@@ -124,12 +131,19 @@ function isLdrawLibraryReady(): bool
 }
 
 /**
- * Parses LDConfig.ldr's "0 !COLOUR <name> CODE <code> VALUE #RRGGBB ..."
- * lines into [code => 'RRGGBB'] (no '#', matching colors.rgb's own stored
- * format). Cheap enough (a few hundred lines) to just re-parse per call —
- * called at most a few times per render tick, not per part.
+ * Parses LDConfig.ldr's "0 !COLOUR <name> CODE <code> VALUE #RRGGBB ...
+ * [ALPHA n]" lines into [code => ['rgb' => 'RRGGBB', 'trans' => bool]] (rgb
+ * has no '#', matching colors.rgb's own stored format). The ALPHA attribute
+ * marks a transparent color (e.g. Trans_Red) — tracking it is what lets
+ * matchLdrawColorCode() avoid pairing an opaque Rebrickable color with a
+ * transparent LDraw one just because the two happen to share an RGB value
+ * (confirmed on real data: Rebrickable's opaque "Red" is #C91A09, which is
+ * also LDraw code 36 "Trans_Red"'s exact VALUE — LDraw's own opaque "Red",
+ * code 4, is the slightly different #B40000). Cheap enough (a few hundred
+ * lines) to just re-parse per call — called at most a few times per render
+ * tick, not per part.
  *
- * @return array<int, string>
+ * @return array<int, array{rgb:string, trans:bool}>
  */
 function getLdrawColorCodeMap(): array
 {
@@ -142,7 +156,10 @@ function getLdrawColorCodeMap(): array
     $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     foreach ($lines as $line) {
         if (preg_match('/^0\s+!COLOUR\s+\S+\s+CODE\s+(\d+)\s+VALUE\s+#([0-9A-Fa-f]{6})/', $line, $m)) {
-            $map[(int) $m[1]] = strtoupper($m[2]);
+            $map[(int) $m[1]] = [
+                'rgb' => strtoupper($m[2]),
+                'trans' => (bool) preg_match('/\bALPHA\b/', $line),
+            ];
         }
     }
     return $map;
@@ -151,10 +168,15 @@ function getLdrawColorCodeMap(): array
 /**
  * Rebrickable's colors.rgb and LDraw's canonical VALUE rarely differ for the
  * same named color, but "rarely" isn't "never" — falls back to nearest
- * Euclidean RGB distance so an odd/newer color still gets a plausible render
- * instead of failing outright.
+ * Euclidean RGB distance so an odd/newer color still gets a plausible
+ * render instead of failing outright. Only ever matches within LDraw colors
+ * whose transparency (the ALPHA attribute) agrees with $isTrans — an exact
+ * RGB hit against the wrong transparency group is worse than a slightly-off
+ * RGB match within the right one (see getLdrawColorCodeMap()'s doc comment
+ * for the real collision that motivated this). Only falls back to the full
+ * palette if the matching-transparency group has nothing usable at all.
  */
-function matchLdrawColorCode(string $rgbHex): ?int
+function matchLdrawColorCode(string $rgbHex, bool $isTrans): ?int
 {
     $rgbHex = strtoupper(ltrim($rgbHex, '#'));
     if (strlen($rgbHex) !== 6) {
@@ -166,9 +188,13 @@ function matchLdrawColorCode(string $rgbHex): ?int
         return null;
     }
 
-    $exact = array_search($rgbHex, $map, true);
-    if ($exact !== false) {
-        return (int) $exact;
+    $sameGroup = array_filter($map, fn (array $c): bool => $c['trans'] === $isTrans);
+    $searchIn = !empty($sameGroup) ? $sameGroup : $map;
+
+    foreach ($searchIn as $code => $c) {
+        if ($c['rgb'] === $rgbHex) {
+            return (int) $code;
+        }
     }
 
     $target = sscanf($rgbHex, '%02x%02x%02x');
@@ -176,8 +202,8 @@ function matchLdrawColorCode(string $rgbHex): ?int
 
     $bestCode = null;
     $bestDistance = null;
-    foreach ($map as $code => $hex) {
-        $parsed = sscanf($hex, '%02x%02x%02x');
+    foreach ($searchIn as $code => $c) {
+        $parsed = sscanf($c['rgb'], '%02x%02x%02x');
         [$r, $g, $b] = $parsed;
         $distance = ($r - $tr) ** 2 + ($g - $tg) ** 2 + ($b - $tb) ** 2;
         if ($bestDistance === null || $distance < $bestDistance) {
@@ -213,11 +239,12 @@ function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outp
     }
 
     $cmd = sprintf(
-        'xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --viewpoint home %s 2>&1',
+        'xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --viewpoint home %s 2>&1',
         escapeshellarg(getLdrawLibraryRootDir()),
         escapeshellarg($outputPath),
         LDRAW_RENDER_IMAGE_SIZE,
         LDRAW_RENDER_IMAGE_SIZE,
+        LDRAW_STUD_STYLE,
         escapeshellarg($snippetPath)
     );
     exec($cmd, $outputLines, $exitCode);
@@ -405,15 +432,25 @@ function getMissingLdrawRenderPairs(PDO $pdo, array $items): array
     $ldrawIdStmt->execute($partIds);
     $ldrawIdByPart = array_column($ldrawIdStmt->fetchAll(), 'ldraw_id', 'id');
 
+    // getSetPartsList()'s rows carry color_rgb but not is_trans — needed so
+    // matchLdrawColorCode() only matches within the correct
+    // opaque/transparent LDraw color group (see its doc comment).
+    $colorIds = array_values(array_unique(array_column($candidates, 'color_id')));
+    $colorIdPlaceholders = implode(',', array_fill(0, count($colorIds), '?'));
+    $transStmt = $pdo->prepare("SELECT color_id, is_trans FROM colors WHERE color_id IN ($colorIdPlaceholders)");
+    $transStmt->execute($colorIds);
+    $isTransByColor = array_column($transStmt->fetchAll(), 'is_trans', 'color_id');
+
     foreach ($candidates as $key => $c) {
         $candidates[$key]['ldraw_id'] = $ldrawIdByPart[$c['part_id']] ?? null;
+        $candidates[$key]['is_trans'] = !empty($isTransByColor[$c['color_id']] ?? 0);
     }
 
     return array_values($candidates);
 }
 
 /**
- * @param array<int, array{part_id:int, color_id:int, part_num:string, ldraw_id:?string, rgb:?string}> $pairs
+ * @param array<int, array{part_id:int, color_id:int, part_num:string, ldraw_id:?string, rgb:?string, is_trans:bool}> $pairs
  * @return array{pairs:array, index:int, stats:array{processed:int, rendered:int, skipped:int, errors:int}}
  */
 function initLdrawSetRenderState(array $pairs): array
@@ -497,7 +534,7 @@ function stepLdrawSetRenderBatch(array &$state): array
         $state['index']++;
         $state['stats']['processed']++;
 
-        $ldrawColorCode = $pair['rgb'] !== null ? matchLdrawColorCode($pair['rgb']) : null;
+        $ldrawColorCode = $pair['rgb'] !== null ? matchLdrawColorCode($pair['rgb'], $pair['is_trans']) : null;
 
         if ($ldrawId === null || $ldrawColorCode === null) {
             // Definitively resolved either way (confirmed no LDraw mapping,
