@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS storage_items (
     color_id INT DEFAULT NULL,
     condition_type ENUM('new','used') NOT NULL DEFAULT 'used',
     quantity INT NOT NULL DEFAULT 0,
+    damaged_quantity INT NOT NULL DEFAULT 0,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_storageitem_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
     CONSTRAINT fk_storageitem_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,

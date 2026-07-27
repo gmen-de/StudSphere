@@ -164,12 +164,14 @@ function getOwnedSetCompleteness(PDO $pdo, array $ownedSet): array
 }
 
 /**
- * Per-part-line nominal vs. actual quantities, for the instance detail
- * page's "fehlende Teile" editor. Parts with no resolvable color are left
- * out — storage_items (like the rest of the storage module) can't
- * represent a colorless part.
+ * Per-part-line nominal vs. actual quantities, for the instance's inventory
+ * editor. Parts with no resolvable color are left out — storage_items (like
+ * the rest of the storage module) can't represent a colorless part.
  *
- * @return array<int, array{part_id:int, part_num:string, name:string, color_id:int, color_name:?string, color_rgb:?string, thumbnail:?string, nominal_quantity:int, actual_quantity:int}>
+ * damaged_quantity is a subset of actual_quantity (still "owned", not
+ * "missing" — see setOwnedSetPartInventory()'s doc comment).
+ *
+ * @return array<int, array{part_id:int, part_num:string, name:string, color_id:int, color_name:?string, color_rgb:?string, thumbnail:?string, nominal_quantity:int, actual_quantity:int, damaged_quantity:int}>
  */
 function getOwnedSetPartsWithStatus(PDO $pdo, array $ownedSet, string $locale = 'en'): array
 {
@@ -179,11 +181,14 @@ function getOwnedSetPartsWithStatus(PDO $pdo, array $ownedSet, string $locale = 
     }
     $nominalItems = getSetPartsList($pdo, $inventoryId, false, $locale);
 
-    $actualStmt = $pdo->prepare('SELECT part_id, color_id, quantity FROM storage_items WHERE location_id = ?');
+    $actualStmt = $pdo->prepare('SELECT part_id, color_id, quantity, damaged_quantity FROM storage_items WHERE location_id = ?');
     $actualStmt->execute([$ownedSet['location_id']]);
     $actualByKey = [];
+    $damagedByKey = [];
     foreach ($actualStmt->fetchAll() as $row) {
-        $actualByKey[$row['part_id'] . ':' . $row['color_id']] = (int) $row['quantity'];
+        $key = $row['part_id'] . ':' . $row['color_id'];
+        $actualByKey[$key] = (int) $row['quantity'];
+        $damagedByKey[$key] = (int) $row['damaged_quantity'];
     }
 
     $result = [];
@@ -202,6 +207,7 @@ function getOwnedSetPartsWithStatus(PDO $pdo, array $ownedSet, string $locale = 
             'thumbnail' => $item['ldraw_thumbnail'] ?? $item['thumbnail'] ?? $item['remote_thumbnail'] ?? null,
             'nominal_quantity' => $item['quantity'],
             'actual_quantity' => $actualByKey[$key] ?? $item['quantity'],
+            'damaged_quantity' => $damagedByKey[$key] ?? 0,
         ];
     }
     return $result;
@@ -255,6 +261,15 @@ function addOwnedSet(
     $set = getSetById($pdo, $setId);
     if ($set === null) {
         throw new RuntimeException('Set nicht gefunden.');
+    }
+
+    // A still-sealed set trivially has its instructions, box, and a complete
+    // box — enforced server-side too, not just via the wizard's disabled
+    // checkboxes, since those wouldn't stop a direct POST.
+    if ($conditionType === 'new') {
+        $hasInstructions = true;
+        $hasBox = true;
+        $boxComplete = true;
     }
 
     $instanceNumber = getNextOwnedSetInstanceNumber($pdo, $setId);
@@ -317,40 +332,45 @@ function updateOwnedSet(
 }
 
 /**
- * Shared by the owned_set_detail page's own missing-parts form and the
+ * Shared by the owned_set_detail page's inventory editor and the
  * add-to-collection wizard's inline inventory step — both post the same
- * "missing[part:color]=qty" shape, just one via a page reload and the other
- * via fetch().
+ * parallel "owned[part:color]=qty" / "damaged[part:color]=qty" shape, one
+ * via a page reload and the other via fetch().
  *
- * @param array<string, mixed> $missingInput
+ * @param array<string, mixed> $ownedInput
+ * @param array<string, mixed> $damagedInput
  */
-function applyOwnedSetMissingParts(PDO $pdo, array $ownedSet, array $missingInput, ?int $userId): void
+function applyOwnedSetInventory(PDO $pdo, array $ownedSet, array $ownedInput, array $damagedInput, ?int $userId): void
 {
     $nominalByKey = [];
     foreach (getOwnedSetPartsWithStatus($pdo, $ownedSet, 'en') as $part) {
         $nominalByKey[$part['part_id'] . ':' . $part['color_id']] = $part['nominal_quantity'];
     }
-    foreach ($missingInput as $key => $rawMissing) {
+    foreach ($ownedInput as $key => $rawOwned) {
         if (!isset($nominalByKey[$key])) {
             continue;
         }
         [$partId, $colorId] = array_map('intval', explode(':', (string) $key, 2));
-        $missingQuantity = max(0, (int) $rawMissing);
-        setOwnedSetPartMissing($pdo, $ownedSet, $partId, $colorId, $nominalByKey[$key], $missingQuantity, $userId);
+        $ownedQuantity = max(0, (int) $rawOwned);
+        $damagedQuantity = max(0, (int) ($damagedInput[$key] ?? 0));
+        setOwnedSetPartInventory($pdo, $ownedSet, $partId, $colorId, $nominalByKey[$key], $ownedQuantity, $damagedQuantity, $userId);
     }
 }
 
 /**
- * Records that $missingQuantity of $partId/$colorId is missing from this
- * instance — i.e. sets the actual stock to (nominal - missingQuantity).
- * Needs the nominal quantity as input (the caller already has it from
- * getOwnedSetPartsWithStatus(), no need to re-derive it here).
+ * Records how many of $partId/$colorId this instance actually has
+ * ($ownedQuantity, clamped to the nominal count — the rest is "missing",
+ * computed as nominal - owned, never stored) and how many of those are
+ * damaged-but-present ($damagedQuantity, clamped to $ownedQuantity — damaged
+ * parts are still "owned", not "missing"). Needs the nominal quantity as
+ * input (the caller already has it from getOwnedSetPartsWithStatus(), no
+ * need to re-derive it here).
  */
-function setOwnedSetPartMissing(PDO $pdo, array $ownedSet, int $partId, int $colorId, int $nominalQuantity, int $missingQuantity, ?int $userId): void
+function setOwnedSetPartInventory(PDO $pdo, array $ownedSet, int $partId, int $colorId, int $nominalQuantity, int $ownedQuantity, int $damagedQuantity, ?int $userId): void
 {
-    $missingQuantity = max(0, min($missingQuantity, $nominalQuantity));
-    $actualQuantity = $nominalQuantity - $missingQuantity;
-    setStorageItemQuantity($ownedSet['location_id'], $partId, $colorId, $ownedSet['condition_type'], $actualQuantity, $userId);
+    $ownedQuantity = max(0, min($ownedQuantity, $nominalQuantity));
+    $damagedQuantity = max(0, min($damagedQuantity, $ownedQuantity));
+    setStorageItemQuantity($ownedSet['location_id'], $partId, $colorId, $ownedSet['condition_type'], $ownedQuantity, $userId, $damagedQuantity);
 }
 
 /**
@@ -361,7 +381,7 @@ function setOwnedSetPartMissing(PDO $pdo, array $ownedSet, int $partId, int $col
  * back), and never a free-standing form field. Migrates the instance's
  * already-materialized storage_items rows from condition_type 'new' to
  * 'used' in place (a plain UPDATE, not a new INSERT) so a later
- * setOwnedSetPartMissing() call — which writes under the *current*
+ * setOwnedSetPartInventory() call — which writes under the *current*
  * condition_type — adjusts those same rows instead of creating duplicates
  * alongside them.
  */
@@ -521,12 +541,25 @@ function renderAddOwnedSetWizardModal(int $setId): string
 
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-1" data-step="1">';
     $html .= '<h3>' . htmlspecialchars(t('owned_set_wizard_step1_heading')) . '</h3>';
-    $html .= '<label>' . htmlspecialchars(t('owned_set_location_label')) . '<select id="owned-set-wizard-location">';
-    $html .= '<option value="">' . htmlspecialchars(t('location_parent_none')) . '</option>';
-    foreach (getStorageLocationOptions() as $optId => $optLabel) {
-        $html .= '<option value="' . $optId . '">' . htmlspecialchars($optLabel) . '</option>';
+    $locationLevels = [
+        [1, 'add_stock_level1_label'],
+        [2, 'add_stock_level2_label'],
+        [3, 'add_stock_level3_label'],
+    ];
+    foreach ($locationLevels as [$level, $labelKey]) {
+        $html .= '<div class="location-level">';
+        $html .= '<span class="location-level-label">' . htmlspecialchars(t($labelKey)) . '</span>';
+        $html .= '<select id="owned-set-wizard-location-' . $level . '"' . ($level > 1 ? ' disabled' : '') . '>';
+        $html .= '<option value="">' . htmlspecialchars(t('add_stock_select_placeholder')) . '</option>';
+        if ($level === 1) {
+            foreach (getChildLocations(null) as $loc) {
+                $html .= '<option value="' . (int) $loc['id'] . '">' . htmlspecialchars($loc['name']) . '</option>';
+            }
+        }
+        $html .= '</select>';
+        $html .= '<span class="location-hint" id="owned-set-wizard-location-' . $level . '-hint"></span>';
+        $html .= '</div>';
     }
-    $html .= '</select></label>';
     $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step1-error"></p>';
     $html .= '<div class="owned-set-wizard-nav"><button type="button" class="owned-set-wizard-next" data-next="2">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button></div>';
     $html .= '</div>';
@@ -567,7 +600,12 @@ function renderAddOwnedSetWizardModal(int $setId): string
 
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-5" data-step="5" style="display:none;">';
     $html .= '<h3>' . htmlspecialchars(t('owned_set_wizard_step5_heading')) . '</h3>';
-    $html .= '<div class="owned-set-parts-list" id="owned-set-wizard-parts-list"></div>';
+    $html .= '<p class="owned-set-inventory-progress" id="owned-set-wizard-inventory-progress"></p>';
+    $html .= '<div class="owned-set-inventory-tiles" id="owned-set-wizard-parts-list"></div>';
+    $html .= '<div class="owned-set-inventory-nav">';
+    $html .= '<button type="button" id="owned-set-wizard-inventory-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button>';
+    $html .= '<button type="button" id="owned-set-wizard-inventory-next">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button>';
+    $html .= '</div>';
     $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step5-error"></p>';
     $html .= '<div class="owned-set-wizard-nav"><a href="#" id="owned-set-wizard-skip">' . htmlspecialchars(t('owned_set_wizard_skip')) . '</a><button type="button" id="owned-set-wizard-finish">' . htmlspecialchars(t('owned_set_wizard_finish')) . '</button></div>';
     $html .= '</div>';
@@ -578,8 +616,12 @@ function renderAddOwnedSetWizardModal(int $setId): string
         'stepLabel' => t('owned_set_wizard_step_label'),
         'locationRequired' => t('owned_set_wizard_location_required'),
         'errorRetry' => t('import_error_retry'),
-        'missingLabel' => t('owned_set_missing_label'),
-        'nominalOf' => t('owned_set_nominal_of'),
+        'selectPlaceholder' => t('add_stock_select_placeholder'),
+        'noChildren' => t('add_stock_no_children'),
+        'ownedLabel' => t('owned_set_inventory_owned_label'),
+        'damagedLabel' => t('owned_set_inventory_damaged_label'),
+        'inventorySummary' => t('owned_set_inventory_summary'),
+        'partProgress' => t('owned_set_inventory_part_progress'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $html .= <<<SCRIPT
@@ -599,6 +641,63 @@ function renderAddOwnedSetWizardModal(int $setId): string
   var totalSteps = 4;
   var createdOwnedSetId = null;
 
+  var loc1 = document.getElementById('owned-set-wizard-location-1');
+  var loc2 = document.getElementById('owned-set-wizard-location-2');
+  var loc3 = document.getElementById('owned-set-wizard-location-3');
+  var loc2Hint = document.getElementById('owned-set-wizard-location-2-hint');
+  var loc3Hint = document.getElementById('owned-set-wizard-location-3-hint');
+
+  function fillLocationSelect(select, hint, parentId) {
+    hint.textContent = '';
+    var params = new URLSearchParams();
+    params.set('action', 'location_children');
+    params.set('parent_id', parentId);
+    return fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+        (data.children || []).forEach(function(loc) {
+          var opt = document.createElement('option');
+          opt.value = loc.id;
+          opt.textContent = loc.name;
+          select.appendChild(opt);
+        });
+        var hasChildren = (data.children || []).length > 0;
+        select.disabled = !hasChildren;
+        if (!hasChildren) {
+          hint.textContent = texts.noChildren;
+        }
+      });
+  }
+
+  // The deepest level the user actually picked becomes the owned-set's
+  // parent location — drilling all 3 levels isn't required (unlike the
+  // part-detail "add stock" picker, which always needs an exact slot; here
+  // any node in the tree is a valid place to put a whole set).
+  function getSelectedLocationId() {
+    return loc3.value || loc2.value || loc1.value;
+  }
+
+  loc1.addEventListener('change', function() {
+    loc2.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+    loc2.disabled = true;
+    loc3.disabled = true;
+    loc2Hint.textContent = '';
+    loc3Hint.textContent = '';
+    if (loc1.value) {
+      fillLocationSelect(loc2, loc2Hint, loc1.value);
+    }
+  });
+  loc2.addEventListener('change', function() {
+    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+    loc3.disabled = true;
+    loc3Hint.textContent = '';
+    if (loc2.value) {
+      fillLocationSelect(loc3, loc3Hint, loc2.value);
+    }
+  });
+
   function showStep(n) {
     steps.forEach(function(step) {
       step.style.display = (parseInt(step.dataset.step, 10) === n) ? 'block' : 'none';
@@ -609,7 +708,13 @@ function renderAddOwnedSetWizardModal(int $setId): string
   function resetWizard() {
     createdOwnedSetId = null;
     totalSteps = 4;
-    document.getElementById('owned-set-wizard-location').value = '';
+    loc1.value = '';
+    loc2.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+    loc2.disabled = true;
+    loc3.disabled = true;
+    loc2Hint.textContent = '';
+    loc3Hint.textContent = '';
     document.getElementById('owned-set-wizard-step1-error').textContent = '';
     document.getElementById('owned-set-wizard-step3-error').textContent = '';
     document.getElementById('owned-set-wizard-step4-error').textContent = '';
@@ -618,12 +723,16 @@ function renderAddOwnedSetWizardModal(int $setId): string
     ['instructions', 'box', 'box-complete'].forEach(function(key) {
       var checkbox = document.getElementById('owned-set-wizard-has-' + (key === 'box-complete' ? 'box-complete' : key));
       var notes = document.getElementById('owned-set-wizard-' + key + '-notes');
-      if (checkbox) { checkbox.checked = false; }
+      if (checkbox) { checkbox.checked = false; checkbox.disabled = false; }
       if (notes) { notes.value = ''; notes.style.display = 'none'; }
     });
     var usedRadio = modal.querySelector('input[name="owned-set-wizard-condition"][value="used"]');
     if (usedRadio) { usedRadio.checked = true; }
+    inventoryGroups = [];
+    inventoryState = {};
+    inventoryGroupIndex = 0;
     document.getElementById('owned-set-wizard-parts-list').innerHTML = '';
+    document.getElementById('owned-set-wizard-inventory-progress').textContent = '';
     showStep(1);
   }
 
@@ -658,7 +767,7 @@ function renderAddOwnedSetWizardModal(int $setId): string
     btn.addEventListener('click', function() {
       var next = parseInt(btn.dataset.next, 10);
       if (next === 2) {
-        var location = document.getElementById('owned-set-wizard-location').value;
+        var location = getSelectedLocationId();
         var errorEl = document.getElementById('owned-set-wizard-step1-error');
         if (!location) {
           errorEl.textContent = texts.locationRequired;
@@ -686,7 +795,13 @@ function renderAddOwnedSetWizardModal(int $setId): string
     });
   });
 
-  [['instructions', 'owned-set-wizard-has-instructions'], ['box', 'owned-set-wizard-has-box'], ['box-complete', 'owned-set-wizard-has-box-complete']].forEach(function(pair) {
+  var detailPairs = [
+    ['instructions', 'owned-set-wizard-has-instructions'],
+    ['box', 'owned-set-wizard-has-box'],
+    ['box-complete', 'owned-set-wizard-has-box-complete']
+  ];
+
+  detailPairs.forEach(function(pair) {
     var checkbox = document.getElementById(pair[1]);
     var notes = document.getElementById('owned-set-wizard-' + pair[0] + '-notes');
     if (checkbox && notes) {
@@ -696,11 +811,34 @@ function renderAddOwnedSetWizardModal(int $setId): string
     }
   });
 
+  // A still-sealed ("new") set trivially has its instructions, box, and a
+  // complete box — nothing can be missing from something nobody has opened
+  // yet. So those 3 checkboxes get force-checked and locked while "Neu" is
+  // selected; only their notes stay editable. Picking "Gebraucht" just
+  // unlocks them again (their current checked state is left as-is).
+  modal.querySelectorAll('input[name="owned-set-wizard-condition"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      if (!radio.checked) {
+        return;
+      }
+      var isNew = radio.value === 'new';
+      detailPairs.forEach(function(pair) {
+        var checkbox = document.getElementById(pair[1]);
+        var notes = document.getElementById('owned-set-wizard-' + pair[0] + '-notes');
+        checkbox.disabled = isNew;
+        if (isNew) {
+          checkbox.checked = true;
+          notes.style.display = 'block';
+        }
+      });
+    });
+  });
+
   function submitAddOwnedSet() {
     var formData = new FormData();
     formData.set('action', 'add_owned_set');
     formData.set('set_id', String(setId));
-    formData.set('parent_location_id', document.getElementById('owned-set-wizard-location').value);
+    formData.set('parent_location_id', getSelectedLocationId());
     var conditionRadio = modal.querySelector('input[name="owned-set-wizard-condition"]:checked');
     formData.set('condition_type', conditionRadio ? conditionRadio.value : 'used');
     formData.set('has_instructions', document.getElementById('owned-set-wizard-has-instructions').checked ? '1' : '');
@@ -744,7 +882,7 @@ function renderAddOwnedSetWizardModal(int $setId): string
       return fetch('?action=owned_set_missing_parts&owned_set_id=' + createdOwnedSetId, { credentials: 'same-origin' })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-          buildPartsList(data.parts || []);
+          initInventoryTiles(data.parts || []);
           totalSteps = 5;
           showStep(5);
         });
@@ -753,55 +891,144 @@ function renderAddOwnedSetWizardModal(int $setId): string
     });
   });
 
-  function buildPartsList(parts) {
-    var list = document.getElementById('owned-set-wizard-parts-list');
-    list.innerHTML = '';
+  // Groups by part_num — one part number's color variants shown per page
+  // (a long flat list of every part+color combo doesn't fit on screen for
+  // sets with many distinct parts). inventoryState survives page changes
+  // (and is what Speichern submits, not just the currently-visible page),
+  // so paging back and forth never loses an already-entered value.
+  var inventoryGroups = [];
+  var inventoryState = {};
+  var inventoryGroupIndex = 0;
+  var invList = document.getElementById('owned-set-wizard-parts-list');
+  var invProgress = document.getElementById('owned-set-wizard-inventory-progress');
+  var invBackBtn = document.getElementById('owned-set-wizard-inventory-back');
+  var invNextBtn = document.getElementById('owned-set-wizard-inventory-next');
+
+  function initInventoryTiles(parts) {
+    inventoryGroups = [];
+    inventoryState = {};
+    inventoryGroupIndex = 0;
+    var indexByPartNum = {};
     parts.forEach(function(part) {
-      var missing = part.nominal_quantity - part.actual_quantity;
-      var row = document.createElement('div');
-      row.className = 'owned-set-part-row';
+      var key = part.part_id + ':' + part.color_id;
+      inventoryState[key] = { owned: part.actual_quantity, damaged: part.damaged_quantity, nominal: part.nominal_quantity };
+      if (!(part.part_num in indexByPartNum)) {
+        indexByPartNum[part.part_num] = inventoryGroups.length;
+        inventoryGroups.push([]);
+      }
+      inventoryGroups[indexByPartNum[part.part_num]].push(part);
+    });
+    renderInventoryGroup();
+  }
+
+  function renderInventoryGroup() {
+    invList.innerHTML = '';
+    if (inventoryGroups.length === 0) {
+      invProgress.textContent = '';
+      invBackBtn.disabled = true;
+      invNextBtn.disabled = true;
+      return;
+    }
+    invProgress.textContent = texts.partProgress.replace('{current}', inventoryGroupIndex + 1).replace('{total}', inventoryGroups.length);
+    invBackBtn.disabled = inventoryGroupIndex === 0;
+    invNextBtn.disabled = inventoryGroupIndex >= inventoryGroups.length - 1;
+
+    inventoryGroups[inventoryGroupIndex].forEach(function(part) {
+      var key = part.part_id + ':' + part.color_id;
+      var s = inventoryState[key];
+
+      var tile = document.createElement('div');
+      tile.className = 'part-card owned-set-inventory-tile';
 
       var img = document.createElement('span');
-      img.className = 'owned-set-part-image';
+      img.className = 'part-card-image';
       if (part.thumbnail) {
         img.innerHTML = '<img src="' + part.thumbnail + '" alt="">';
       }
-      row.appendChild(img);
+      tile.appendChild(img);
 
-      var nameSpan = document.createElement('span');
-      nameSpan.className = 'owned-set-part-name';
-      nameSpan.textContent = part.name;
-      var metaSpan = document.createElement('span');
-      metaSpan.className = 'owned-set-part-meta';
-      metaSpan.textContent = (part.color_name || '') + ' \\u00b7 ' + texts.nominalOf.replace('{count}', part.nominal_quantity);
-      nameSpan.appendChild(document.createElement('br'));
-      nameSpan.appendChild(metaSpan);
-      row.appendChild(nameSpan);
+      var num = document.createElement('span');
+      num.className = 'part-card-num';
+      num.textContent = part.part_num;
+      tile.appendChild(num);
 
-      var label = document.createElement('label');
-      label.className = 'owned-set-missing-input';
-      label.appendChild(document.createTextNode(texts.missingLabel));
-      var input = document.createElement('input');
-      input.type = 'number';
-      input.min = '0';
-      input.max = String(part.nominal_quantity);
-      input.value = String(missing);
-      input.dataset.key = part.part_id + ':' + part.color_id;
-      label.appendChild(input);
-      row.appendChild(label);
+      var name = document.createElement('span');
+      name.className = 'part-card-name';
+      name.textContent = part.name + (part.color_name ? ' \\u00b7 ' + part.color_name : '');
+      tile.appendChild(name);
 
-      list.appendChild(row);
+      var inputsWrap = document.createElement('div');
+      inputsWrap.className = 'owned-set-inventory-tile-inputs';
+
+      var ownedLabel = document.createElement('label');
+      ownedLabel.appendChild(document.createTextNode(texts.ownedLabel));
+      var ownedInput = document.createElement('input');
+      ownedInput.type = 'number';
+      ownedInput.min = '0';
+      ownedInput.max = String(part.nominal_quantity);
+      ownedInput.value = String(s.owned);
+      ownedLabel.appendChild(ownedInput);
+      inputsWrap.appendChild(ownedLabel);
+
+      var damagedLabel = document.createElement('label');
+      damagedLabel.appendChild(document.createTextNode(texts.damagedLabel));
+      var damagedInput = document.createElement('input');
+      damagedInput.type = 'number';
+      damagedInput.min = '0';
+      damagedInput.max = String(s.owned);
+      damagedInput.value = String(s.damaged);
+      damagedLabel.appendChild(damagedInput);
+      inputsWrap.appendChild(damagedLabel);
+
+      tile.appendChild(inputsWrap);
+
+      var summary = document.createElement('p');
+      summary.className = 'owned-set-inventory-summary';
+      tile.appendChild(summary);
+
+      function updateSummary() {
+        var owned = Math.max(0, Math.min(parseInt(ownedInput.value, 10) || 0, part.nominal_quantity));
+        damagedInput.max = String(owned);
+        var damaged = Math.max(0, Math.min(parseInt(damagedInput.value, 10) || 0, owned));
+        var intact = owned - damaged;
+        var missing = part.nominal_quantity - owned;
+        summary.textContent = texts.inventorySummary
+          .replace('{intact}', intact)
+          .replace('{damaged}', damaged)
+          .replace('{missing}', missing);
+        inventoryState[key].owned = owned;
+        inventoryState[key].damaged = damaged;
+      }
+      ownedInput.addEventListener('input', updateSummary);
+      damagedInput.addEventListener('input', updateSummary);
+      updateSummary();
+
+      invList.appendChild(tile);
     });
   }
+
+  invBackBtn.addEventListener('click', function() {
+    if (inventoryGroupIndex > 0) {
+      inventoryGroupIndex--;
+      renderInventoryGroup();
+    }
+  });
+  invNextBtn.addEventListener('click', function() {
+    if (inventoryGroupIndex < inventoryGroups.length - 1) {
+      inventoryGroupIndex++;
+      renderInventoryGroup();
+    }
+  });
 
   document.getElementById('owned-set-wizard-finish').addEventListener('click', function() {
     var errorEl = document.getElementById('owned-set-wizard-step5-error');
     errorEl.textContent = '';
     var formData = new FormData();
-    formData.set('action', 'save_owned_set_missing_parts_wizard');
+    formData.set('action', 'save_owned_set_inventory');
     formData.set('owned_set_id', String(createdOwnedSetId));
-    modal.querySelectorAll('#owned-set-wizard-parts-list input[data-key]').forEach(function(input) {
-      formData.set('missing[' + input.dataset.key + ']', input.value);
+    Object.keys(inventoryState).forEach(function(key) {
+      formData.set('owned[' + key + ']', String(inventoryState[key].owned));
+      formData.set('damaged[' + key + ']', String(inventoryState[key].damaged));
     });
     fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
@@ -821,6 +1048,206 @@ function renderAddOwnedSetWizardModal(int $setId): string
     e.preventDefault();
     window.location.href = '?page=owned_set_detail&id=' + createdOwnedSetId;
   });
+})();
+</script>
+SCRIPT;
+
+    return $html;
+}
+
+/**
+ * owned_set_detail's persistent inventory editor — same grouped/paginated
+ * tile design as the add-to-collection wizard's step 5 (see
+ * renderAddOwnedSetWizardModal()'s doc comment for why the list is
+ * paginated one part number at a time), just with the parts data already
+ * known server-side (embedded as JSON) instead of fetched, and saving
+ * reloads the page instead of redirecting, so the completeness/location
+ * table further up the page reflects the new numbers immediately.
+ *
+ * The two implementations are deliberately independent (not a shared JS
+ * function) — same convention as every other self-contained overlay in
+ * this codebase (renderLdrawRenderOverlay(), renderPartDetailModal(), the
+ * wizard itself), since these two contexts never render on the same page.
+ */
+function renderOwnedSetInventorySection(array $ownedSet, array $parts): string
+{
+    $html = '<h2>' . htmlspecialchars(t('owned_set_missing_parts_heading')) . '</h2>';
+
+    if (empty($parts)) {
+        $html .= '<section class="card"><p>' . htmlspecialchars(t('set_detail_inventory_empty')) . '</p></section>';
+        return $html;
+    }
+
+    $html .= '<p class="owned-set-inventory-progress" id="owned-set-inventory-progress"></p>';
+    $html .= '<div class="owned-set-inventory-tiles" id="owned-set-inventory-tiles"></div>';
+    $html .= '<div class="owned-set-inventory-nav">';
+    $html .= '<button type="button" id="owned-set-inventory-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button>';
+    $html .= '<button type="button" id="owned-set-inventory-next">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button>';
+    $html .= '<button type="button" id="owned-set-inventory-save">' . htmlspecialchars(t('owned_set_save_button')) . '</button>';
+    $html .= '</div>';
+    $html .= '<p class="owned-set-message" id="owned-set-inventory-message"></p>';
+
+    $partsJson = json_encode($parts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
+    $labelsJson = json_encode([
+        'errorRetry' => t('import_error_retry'),
+        'ownedLabel' => t('owned_set_inventory_owned_label'),
+        'damagedLabel' => t('owned_set_inventory_damaged_label'),
+        'inventorySummary' => t('owned_set_inventory_summary'),
+        'partProgress' => t('owned_set_inventory_part_progress'),
+        'saved' => t('owned_set_updated_message'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $labelsJson;
+  var ownedSetId = {$ownedSet['id']};
+  var parts = $partsJson;
+
+  var list = document.getElementById('owned-set-inventory-tiles');
+  var progress = document.getElementById('owned-set-inventory-progress');
+  var backBtn = document.getElementById('owned-set-inventory-back');
+  var nextBtn = document.getElementById('owned-set-inventory-next');
+  var saveBtn = document.getElementById('owned-set-inventory-save');
+  var messageEl = document.getElementById('owned-set-inventory-message');
+  if (!list || !progress || !backBtn || !nextBtn || !saveBtn || !messageEl) {
+    return;
+  }
+
+  var groups = [];
+  var state = {};
+  var groupIndex = 0;
+  var indexByPartNum = {};
+  parts.forEach(function(part) {
+    var key = part.part_id + ':' + part.color_id;
+    state[key] = { owned: part.actual_quantity, damaged: part.damaged_quantity, nominal: part.nominal_quantity };
+    if (!(part.part_num in indexByPartNum)) {
+      indexByPartNum[part.part_num] = groups.length;
+      groups.push([]);
+    }
+    groups[indexByPartNum[part.part_num]].push(part);
+  });
+
+  function renderGroup() {
+    list.innerHTML = '';
+    if (groups.length === 0) {
+      return;
+    }
+    progress.textContent = texts.partProgress.replace('{current}', groupIndex + 1).replace('{total}', groups.length);
+    backBtn.disabled = groupIndex === 0;
+    nextBtn.disabled = groupIndex >= groups.length - 1;
+
+    groups[groupIndex].forEach(function(part) {
+      var key = part.part_id + ':' + part.color_id;
+      var s = state[key];
+
+      var tile = document.createElement('div');
+      tile.className = 'part-card owned-set-inventory-tile';
+
+      var img = document.createElement('span');
+      img.className = 'part-card-image';
+      if (part.thumbnail) {
+        img.innerHTML = '<img src="' + part.thumbnail + '" alt="">';
+      }
+      tile.appendChild(img);
+
+      var num = document.createElement('span');
+      num.className = 'part-card-num';
+      num.textContent = part.part_num;
+      tile.appendChild(num);
+
+      var name = document.createElement('span');
+      name.className = 'part-card-name';
+      name.textContent = part.name + (part.color_name ? ' \\u00b7 ' + part.color_name : '');
+      tile.appendChild(name);
+
+      var inputsWrap = document.createElement('div');
+      inputsWrap.className = 'owned-set-inventory-tile-inputs';
+
+      var ownedLabel = document.createElement('label');
+      ownedLabel.appendChild(document.createTextNode(texts.ownedLabel));
+      var ownedInput = document.createElement('input');
+      ownedInput.type = 'number';
+      ownedInput.min = '0';
+      ownedInput.max = String(part.nominal_quantity);
+      ownedInput.value = String(s.owned);
+      ownedLabel.appendChild(ownedInput);
+      inputsWrap.appendChild(ownedLabel);
+
+      var damagedLabel = document.createElement('label');
+      damagedLabel.appendChild(document.createTextNode(texts.damagedLabel));
+      var damagedInput = document.createElement('input');
+      damagedInput.type = 'number';
+      damagedInput.min = '0';
+      damagedInput.max = String(s.owned);
+      damagedInput.value = String(s.damaged);
+      damagedLabel.appendChild(damagedInput);
+      inputsWrap.appendChild(damagedLabel);
+
+      tile.appendChild(inputsWrap);
+
+      var summary = document.createElement('p');
+      summary.className = 'owned-set-inventory-summary';
+      tile.appendChild(summary);
+
+      function updateSummary() {
+        var owned = Math.max(0, Math.min(parseInt(ownedInput.value, 10) || 0, part.nominal_quantity));
+        damagedInput.max = String(owned);
+        var damaged = Math.max(0, Math.min(parseInt(damagedInput.value, 10) || 0, owned));
+        var intact = owned - damaged;
+        var missing = part.nominal_quantity - owned;
+        summary.textContent = texts.inventorySummary
+          .replace('{intact}', intact)
+          .replace('{damaged}', damaged)
+          .replace('{missing}', missing);
+        state[key].owned = owned;
+        state[key].damaged = damaged;
+      }
+      ownedInput.addEventListener('input', updateSummary);
+      damagedInput.addEventListener('input', updateSummary);
+      updateSummary();
+
+      list.appendChild(tile);
+    });
+  }
+
+  backBtn.addEventListener('click', function() {
+    if (groupIndex > 0) {
+      groupIndex--;
+      renderGroup();
+    }
+  });
+  nextBtn.addEventListener('click', function() {
+    if (groupIndex < groups.length - 1) {
+      groupIndex++;
+      renderGroup();
+    }
+  });
+
+  saveBtn.addEventListener('click', function() {
+    messageEl.textContent = '';
+    var formData = new FormData();
+    formData.set('action', 'save_owned_set_inventory');
+    formData.set('owned_set_id', String(ownedSetId));
+    Object.keys(state).forEach(function(key) {
+      formData.set('owned[' + key + ']', String(state[key].owned));
+      formData.set('damaged[' + key + ']', String(state[key].damaged));
+    });
+    fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          window.location.reload();
+        } else {
+          messageEl.textContent = res.message || texts.errorRetry;
+        }
+      })
+      .catch(function() {
+        messageEl.textContent = texts.errorRetry;
+      });
+  });
+
+  renderGroup();
 })();
 </script>
 SCRIPT;

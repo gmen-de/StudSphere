@@ -242,7 +242,7 @@ function addStorageStock(int $locationId, int $partId, int $colorId, string $con
  * leaves the row in place rather than deleting it (getLocationStock() and
  * getPartStock() already filter zero-quantity rows out of their results).
  */
-function setStorageItemQuantity(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $userId): void
+function setStorageItemQuantity(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $userId, ?int $damagedQuantity = null): void
 {
     $pdo = getPDO();
     $pdo->beginTransaction();
@@ -256,9 +256,14 @@ function setStorageItemQuantity(int $locationId, int $partId, int $colorId, stri
 
         if ($current === false) {
             $insertStmt = $pdo->prepare(
-                'INSERT INTO storage_items (location_id, part_id, color_id, condition_type, quantity) VALUES (?, ?, ?, ?, ?)'
+                'INSERT INTO storage_items (location_id, part_id, color_id, condition_type, quantity, damaged_quantity) VALUES (?, ?, ?, ?, ?, ?)'
             );
-            $insertStmt->execute([$locationId, $partId, $colorId, $conditionType, $newQuantity]);
+            $insertStmt->execute([$locationId, $partId, $colorId, $conditionType, $newQuantity, $damagedQuantity ?? 0]);
+        } elseif ($damagedQuantity !== null) {
+            $updateStmt = $pdo->prepare(
+                'UPDATE storage_items SET quantity = ?, damaged_quantity = ? WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+            );
+            $updateStmt->execute([$newQuantity, $damagedQuantity, $locationId, $partId, $colorId, $conditionType]);
         } else {
             $updateStmt = $pdo->prepare(
                 'UPDATE storage_items SET quantity = ? WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'

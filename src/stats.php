@@ -22,6 +22,10 @@ require_once __DIR__ . '/settings.php';
  * - "Minifiguren": summed live from owned sets' own Rebrickable inventories
  *   (inventory_minifigs) — there's no separate "owned minifigs" storage
  *   table, minifig ownership is entirely derived from which sets are owned.
+ * - "Beschädigte Teile": SUM(damaged_quantity) across all of storage_items.
+ *   Damaged pieces are still physically present (a subset of "Bausteine
+ *   gesamt"/quantity, not subtracted from it) — see
+ *   setOwnedSetPartInventory() in src/owned_sets.php.
  *
  * Cached rather than computed live because these queries (especially the
  * minifig one, which joins through every owned set's inventory) can get
@@ -34,6 +38,7 @@ const APP_STATS_CACHE_KEYS = [
     'bricks_distinct' => 'cached_stat_bricks_distinct',
     'sets' => 'cached_stat_sets',
     'minifigs' => 'cached_stat_minifigs',
+    'bricks_damaged' => 'cached_stat_bricks_damaged',
 ];
 
 function computeAppStats(PDO $pdo): array
@@ -70,6 +75,7 @@ function refreshAppStatsCache(PDO $pdo): array
                  AND ri.version = (SELECT MAX(version) FROM rebrickable_inventories WHERE set_num = s.rebrickable_set_num)
              INNER JOIN inventory_minifigs im ON im.inventory_id = ri.inventory_id"
         )->fetchColumn(),
+        'bricks_damaged' => (int) $pdo->query('SELECT COALESCE(SUM(damaged_quantity), 0) FROM storage_items')->fetchColumn(),
     ];
     foreach (APP_STATS_CACHE_KEYS as $key => $settingKey) {
         setAppSetting($settingKey, (string) $stats[$key]);

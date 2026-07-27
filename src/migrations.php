@@ -211,6 +211,12 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'owned_sets', 'box_notes', 'TEXT DEFAULT NULL');
             addColumnIfMissing($pdo, 'owned_sets', 'box_complete_notes', 'TEXT DEFAULT NULL');
         },
+        15 => function (PDO $pdo): void {
+            // Damaged-but-present tracking for set inventory: a subset of
+            // `quantity` (still "owned", not "missing") — see setOwnedSetPartInventory()
+            // in src/owned_sets.php.
+            addColumnIfMissing($pdo, 'storage_items', 'damaged_quantity', 'INT NOT NULL DEFAULT 0');
+        },
     ];
 }
 
@@ -273,7 +279,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 14;
+const CURRENT_SCHEMA_VERSION = 15;
 
 function getInstalledSchemaVersion(): int
 {

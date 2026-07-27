@@ -2351,6 +2351,15 @@ footer {
   max-width: 34rem;
 }
 
+.owned-set-wizard-step .location-level {
+  margin-bottom: 0.75rem;
+}
+
+.owned-set-wizard-step .location-level select {
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
 .owned-set-wizard-progress {
   margin: -0.5rem 0 1rem;
   font-size: 0.8rem;
@@ -2415,6 +2424,73 @@ footer {
   margin-right: auto;
   font-size: 0.85rem;
   color: #64748b;
+}
+
+.owned-set-inventory-progress {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.owned-set-inventory-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 3px;
+  margin-bottom: 1rem;
+}
+
+/* Same look as the catalog .part-card grid (owned_set_inventory_owned_label
+   etc. reuse .part-card/-image/-num/-name), but these tiles hold inputs
+   instead of opening the part-detail modal, so the hover/pointer affordance
+   from .part-card is dropped. */
+.owned-set-inventory-tile {
+  cursor: default;
+}
+
+.owned-set-inventory-tile-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+.owned-set-inventory-tile-inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.owned-set-inventory-tile-inputs input {
+  width: 100%;
+  margin-top: 0;
+}
+
+.owned-set-inventory-summary {
+  margin: 0.4rem 0 0;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.owned-set-inventory-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.owned-set-inventory-nav button {
+  width: auto;
+  padding: 0.6rem 1.1rem;
+}
+
+#owned-set-inventory-save {
+  margin-left: auto;
 }
 
 .owned-set-photo-grid {
