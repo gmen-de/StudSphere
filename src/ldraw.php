@@ -34,6 +34,11 @@ const LDRAW_RENDER_IMAGE_SIZE = 256;
 // 4 ("LDraw raised rounded") was picked by comparing renders of all eight.
 const LDRAW_STUD_STYLE = 4;
 
+// Without any anti-aliasing the stud circles and the logo embossing look
+// visibly jagged — 8 samples smooths that out at no noticeable cost for
+// parts this simple (chosen by comparing 1/4/8 side by side).
+const LDRAW_AA_SAMPLES = 8;
+
 // Rebrickable's API enforces its own rate limit (confirmed via a real 429
 // during testing — hundreds of not-yet-cached parts in one batch blew
 // through it almost immediately). Only the first lookup per part ever hits
@@ -239,12 +244,13 @@ function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outp
     }
 
     $cmd = sprintf(
-        'xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --viewpoint home %s 2>&1',
+        'xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --aa-samples %d --viewpoint home %s 2>&1',
         escapeshellarg(getLdrawLibraryRootDir()),
         escapeshellarg($outputPath),
         LDRAW_RENDER_IMAGE_SIZE,
         LDRAW_RENDER_IMAGE_SIZE,
         LDRAW_STUD_STYLE,
+        LDRAW_AA_SAMPLES,
         escapeshellarg($snippetPath)
     );
     exec($cmd, $outputLines, $exitCode);

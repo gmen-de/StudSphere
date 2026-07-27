@@ -88,7 +88,7 @@ function render(string $title, string $content): void
     echo '<!DOCTYPE html><html lang="' . htmlspecialchars(getLocale()) . '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">';
     echo '<title>' . htmlspecialchars($title) . '</title>';
     echo '<link rel="icon" type="image/svg+xml" href="favicon.svg">';
-    echo '<link rel="stylesheet" href="style.css">';
+    echo '<link rel="stylesheet" href="style.css?v=' . htmlspecialchars(getCurrentVersion()) . '">';
     echo '</head><body>';
     echo '<div class="container">';
     echo '<header><div class="brand"><span class="brand-mark">' . file_get_contents(__DIR__ . '/logo.svg') . '</span><div><h1>' . htmlspecialchars(t('app_title')) . '</h1><small>' . htmlspecialchars(t('app_tagline')) . '</small></div></div></header>';
@@ -202,7 +202,7 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '<!DOCTYPE html><html lang="' . htmlspecialchars($locale) . '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">';
     echo '<title>' . htmlspecialchars($title) . '</title>';
     echo '<link rel="icon" type="image/svg+xml" href="favicon.svg">';
-    echo '<link rel="stylesheet" href="style.css">';
+    echo '<link rel="stylesheet" href="style.css?v=' . htmlspecialchars(getCurrentVersion()) . '">';
     echo '</head><body>';
 
     echo '<div class="status-bar-wrap"><div class="status-bar">';
