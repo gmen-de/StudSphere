@@ -17,6 +17,7 @@ require_once __DIR__ . '/src/part_modal.php';
 require_once __DIR__ . '/src/part_images.php';
 require_once __DIR__ . '/src/sets.php';
 require_once __DIR__ . '/src/instructions.php';
+require_once __DIR__ . '/src/ldraw.php';
 require_once __DIR__ . '/src/minifigs.php';
 require_once __DIR__ . '/src/stats.php';
 
@@ -328,6 +329,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     $importMessage = t('settings_rebrickable_saved');
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_ldraw_settings') {
+    setAppSetting('ldraw_rendering_enabled', ($_POST['ldraw_enabled'] ?? '') === '1' ? '1' : '0');
+}
+
 if (isset($_GET['action']) && $_GET['action'] === 'logout') {
     session_destroy();
     header('Location: ' . $_SERVER['PHP_SELF']);
@@ -375,6 +380,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'image
             'message' => t('import_error', ['message' => $e->getMessage()]),
             'tables' => [],
         ], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw_library_tick') {
+    header('Content-Type: application/json');
+    try {
+        $toolsCheck = ldrawToolsAvailable();
+        if (!$toolsCheck['available']) {
+            throw new RuntimeException(t('ldraw_tools_unavailable', ['missing' => implode(', ', $toolsCheck['missing'])]));
+        }
+
+        $state = $_SESSION['ldraw_library_state'] ?? null;
+        if (!is_array($state)) {
+            $state = initLdrawLibraryState();
+        }
+
+        $result = stepLdrawLibraryDownload($state);
+        $_SESSION['ldraw_library_state'] = $state;
+
+        if ($result['done']) {
+            unset($_SESSION['ldraw_library_state']);
+            echo json_encode(['status' => 'done', 'percent' => 100, 'message' => t('ldraw_library_ready')], JSON_UNESCAPED_UNICODE);
+        } else {
+            $downloadFraction = ($state['zipTotalBytes'] ?? 0) > 0 ? min(1.0, $state['zipBytes'] / $state['zipTotalBytes']) : 0.0;
+            $extractFraction = $state['extractTotal'] > 0 ? min(1.0, $state['extractIndex'] / $state['extractTotal']) : 0.0;
+            $fraction = in_array($state['stage'], ['extract', 'done'], true) ? 0.8 + $extractFraction * 0.2 : $downloadFraction * 0.8;
+            $stageMessageKey = [
+                'probe' => 'ldraw_stage_probe',
+                'download' => 'ldraw_stage_download',
+                'extract' => 'ldraw_stage_extract',
+            ][$state['stage']] ?? 'ldraw_stage_probe';
+            echo json_encode([
+                'status' => 'running',
+                'percent' => (int) round($fraction * 100),
+                'message' => t($stageMessageKey),
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    } catch (Throwable $e) {
+        unset($_SESSION['ldraw_library_state']);
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'percent' => 0, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw_set_render_tick') {
+    header('Content-Type: application/json');
+    try {
+        if (!ldrawContextualRenderingReady()) {
+            throw new RuntimeException(t('ldraw_tools_unavailable', ['missing' => 'leocad, xvfb']));
+        }
+
+        $inventoryId = (int) ($_POST['inventory_id'] ?? 0);
+        if ($inventoryId <= 0) {
+            throw new RuntimeException(t('ldraw_invalid_inventory'));
+        }
+
+        $sessionKey = 'ldraw_set_render_state_' . $inventoryId;
+        $state = $_SESSION[$sessionKey] ?? null;
+        if (!is_array($state)) {
+            $items = getSetPartsList($pdo, $inventoryId, false, getLocale());
+            $pairs = getMissingLdrawRenderPairs($pdo, $items);
+            $state = initLdrawSetRenderState($pairs);
+        }
+
+        $result = stepLdrawSetRenderBatch($state);
+        $_SESSION[$sessionKey] = $state;
+
+        $payload = buildLdrawSetRenderProgressPayload($state, $result['done']);
+
+        if ($result['done']) {
+            unset($_SESSION[$sessionKey]);
+        }
+
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'percent' => 0, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
@@ -955,6 +1039,100 @@ if (isset($_GET['page']) && $_GET['page'] === 'settings') {
 })();
 </script>
 SCRIPT;
+
+    $content .= '<h2>' . htmlspecialchars(t('ldraw_title')) . '</h2>';
+    $content .= '<p>' . htmlspecialchars(t('ldraw_help')) . '</p>';
+    $ldrawTools = ldrawToolsAvailable();
+    if (!$ldrawTools['available']) {
+        $content .= '<section class="card alert"><p>' . htmlspecialchars(t('ldraw_tools_unavailable', ['missing' => implode(', ', $ldrawTools['missing'])])) . '</p></section>';
+    } else {
+        $ldrawEnabled = isLdrawRenderingEnabled();
+        $ldrawLibraryReady = isLdrawLibraryReady();
+
+        $content .= '<form method="post" id="ldraw-form">';
+        $content .= '<input type="hidden" name="action" value="update_ldraw_settings">';
+        $content .= '<label class="checkbox-label"><input type="checkbox" id="ldraw-enabled-input" name="ldraw_enabled" value="1"' . ($ldrawEnabled ? ' checked' : '') . '> ' . htmlspecialchars(t('ldraw_enable_label')) . '</label>';
+        $content .= '<p class="hint">' . htmlspecialchars(t('ldraw_enable_help')) . '</p>';
+        $content .= '<button type="submit">' . htmlspecialchars(t('settings_rebrickable_save_button')) . '</button>';
+        $content .= '</form>';
+
+        $content .= '<div class="import-status" id="ldrawLibraryStatus" style="' . ($ldrawEnabled && !$ldrawLibraryReady ? '' : 'display:none;') . '">';
+        $content .= '<div class="progress-message idle" id="ldrawLibraryMessage">' . htmlspecialchars(t('import_not_started')) . '</div>';
+        $content .= '<div class="progress-track" id="ldrawLibraryProgress"><div class="progress-fill"></div></div>';
+        $content .= '</div>';
+        $content .= '<p class="hint" id="ldrawLibraryReadyNotice" style="' . ($ldrawEnabled && $ldrawLibraryReady ? '' : 'display:none;') . '">' . htmlspecialchars(t('ldraw_library_ready')) . '</p>';
+
+        $ldrawLabelsJson = json_encode([
+            'errorRetry' => t('import_error_retry'),
+            'stagePrefix' => '',
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $ldrawAutoStart = $ldrawEnabled && !$ldrawLibraryReady ? 'true' : 'false';
+        $content .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $ldrawLabelsJson;
+  var statusWrap = document.getElementById("ldrawLibraryStatus");
+  var readyNotice = document.getElementById("ldrawLibraryReadyNotice");
+  var track = document.getElementById("ldrawLibraryProgress");
+  var fill = track ? track.querySelector(".progress-fill") : null;
+  var msg = document.getElementById("ldrawLibraryMessage");
+  if (!statusWrap || !track || !fill || !msg) {
+    return;
+  }
+
+  var consecutiveFailures = 0;
+  var maxAutoRetries = 4;
+
+  async function tick() {
+    var formData = new FormData();
+    formData.set('action', 'ldraw_library_tick');
+    var response = await fetch('?page=settings', {
+      method: 'POST',
+      body: formData,
+      credentials: 'same-origin'
+    });
+    if (!response.ok && response.status !== 500) {
+      throw new Error('tick failed with status ' + response.status);
+    }
+    return await response.json();
+  }
+
+  function loop() {
+    tick().then(function(data) {
+      consecutiveFailures = 0;
+      msg.classList.remove("idle");
+      msg.textContent = data.message || '';
+      fill.style.width = (data.percent || 0) + "%";
+      if (data.status === 'done') {
+        statusWrap.style.display = 'none';
+        if (readyNotice) {
+          readyNotice.style.display = '';
+        }
+        return;
+      }
+      if (data.status === 'error') {
+        msg.textContent = data.message || texts.errorRetry;
+        return;
+      }
+      setTimeout(loop, 50);
+    }).catch(function() {
+      consecutiveFailures++;
+      if (consecutiveFailures <= maxAutoRetries) {
+        setTimeout(loop, 1000 * consecutiveFailures);
+        return;
+      }
+      msg.textContent = texts.errorRetry;
+    });
+  }
+
+  if ($ldrawAutoStart) {
+    statusWrap.style.display = '';
+    loop();
+  }
+})();
+</script>
+SCRIPT;
+    }
 
     $content .= '<h2>' . htmlspecialchars(t('update_title')) . '</h2>';
     $content .= '<p>' . htmlspecialchars(t('update_current_version', ['version' => getCurrentVersion()])) . '</p>';
@@ -1920,6 +2098,13 @@ SCRIPT;
         $content .= empty($items)
             ? '<section class="card"><p>' . htmlspecialchars(t('set_detail_inventory_empty')) . '</p></section>'
             : $renderSetPartsGrid($items, true, $targetInventoryId);
+
+        if ($targetInventoryId !== null && ldrawContextualRenderingReady()) {
+            $missingLdrawPairs = getMissingLdrawRenderPairs($pdo, $items);
+            if (!empty($missingLdrawPairs)) {
+                $content .= renderLdrawRenderOverlay($targetInventoryId);
+            }
+        }
     } elseif ($activeTab === 'compare') {
         $comparisonRows = getSetInventoryComparison($pdo, $inventoryVersions, getLocale());
         if (empty($comparisonRows)) {

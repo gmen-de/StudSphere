@@ -2151,3 +2151,77 @@ footer {
   color: #dc2626;
   font-weight: 600;
 }
+
+.ldraw-render-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 200;
+}
+
+.ldraw-render-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  text-align: center;
+  color: #ffffff;
+  max-width: 22rem;
+}
+
+.ldraw-render-ring-wrap {
+  position: relative;
+  width: 8rem;
+  height: 8rem;
+}
+
+.ldraw-render-ring {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.ldraw-render-ring-bg {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 8;
+}
+
+.ldraw-render-ring-fg {
+  fill: none;
+  stroke: #60a5fa;
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s ease;
+}
+
+.ldraw-render-percent {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.ldraw-render-message {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 0.9rem;
+}
+
+.ldraw-render-skip {
+  width: auto;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.ldraw-render-skip:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
