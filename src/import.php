@@ -322,10 +322,15 @@ function importThemesCsv(array $rows): array
         if ($themeId === null) {
             continue;
         }
+        // An empty CSV cell for a top-level theme's parent_id arrives here as
+        // '' (a string), not PHP null — "!== null" alone doesn't catch that,
+        // and (int) '' silently becomes 0, which then gets stored as if 0
+        // were a real theme_id. Trim first and check for '' explicitly.
+        $parentIdRaw = trim((string) ($row['parent_id'] ?? ''));
         $stmt->execute([
             $themeId,
             trim((string) ($row['name'] ?? '')),
-            $row['parent_id'] !== null ? (int) $row['parent_id'] : null,
+            $parentIdRaw !== '' ? (int) $parentIdRaw : null,
         ]);
         $count++;
     }

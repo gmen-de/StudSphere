@@ -112,16 +112,24 @@ function getSetMinifigsList(PDO $pdo, int $inventoryId): array
  */
 function searchMinifigs(PDO $pdo, string $query, array $selectedThemes, int $page, int $perPage): array
 {
-    $joins = '';
     $where = [];
     $params = [];
 
+    // A theme filter is an existence check (not a join used for the main
+    // SELECT) — the main query separately LEFT JOINs to sets to compute
+    // each minifig's earliest appearance year, and an INNER/EXISTS join
+    // there would wrongly drop minifigs whose only set appearances don't
+    // match the theme filter... except there are none once EXISTS confirms
+    // at least one does. Keeping the two joins independent avoids coupling
+    // "does this minifig match the filter" with "what year do we show".
     if (!empty($selectedThemes)) {
-        $joins = 'INNER JOIN inventory_minifigs im ON im.minifig_id = m.id
-                  INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
-                  INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num';
         $placeholders = implode(',', array_fill(0, count($selectedThemes), '?'));
-        $where[] = "s.theme IN ($placeholders)";
+        $where[] = "EXISTS (
+            SELECT 1 FROM inventory_minifigs im2
+            INNER JOIN rebrickable_inventories ri2 ON ri2.inventory_id = im2.inventory_id
+            INNER JOIN sets s2 ON s2.rebrickable_set_num = ri2.set_num
+            WHERE im2.minifig_id = m.id AND s2.theme IN ($placeholders)
+        )";
         foreach ($selectedThemes as $themeId) {
             $params[] = $themeId;
         }
@@ -135,24 +143,35 @@ function searchMinifigs(PDO $pdo, string $query, array $selectedThemes, int $pag
 
     $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
 
-    $countStmt = $pdo->prepare("SELECT COUNT(DISTINCT m.id) FROM minifigs m $joins $whereSql");
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM minifigs m $whereSql");
     $countStmt->execute($params);
     $total = (int) $countStmt->fetchColumn();
 
     $perPage = max(1, $perPage);
     $offset = (max(1, $page) - 1) * $perPage;
+    // Minifigs have no year field of their own (see getMinifigThemes()'s
+    // doc comment) — the earliest year among sets they appear in stands in
+    // for it, same derivation, just MIN(year) instead of theme names.
     $stmt = $pdo->prepare(
-        "SELECT DISTINCT m.id, m.fig_num, m.name, m.local_image_path AS thumbnail
+        "SELECT m.id, m.fig_num, m.name, m.local_image_path AS thumbnail, MIN(s.year) AS year
          FROM minifigs m
-         $joins
+         LEFT JOIN inventory_minifigs im ON im.minifig_id = m.id
+         LEFT JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
+         LEFT JOIN sets s ON s.rebrickable_set_num = ri.set_num
          $whereSql
-         ORDER BY m.name ASC
+         GROUP BY m.id, m.fig_num, m.name, m.local_image_path
+         ORDER BY year ASC, m.fig_num ASC
          LIMIT $perPage OFFSET $offset"
     );
     $stmt->execute($params);
+    $items = $stmt->fetchAll();
+    foreach ($items as &$item) {
+        $item['year'] = $item['year'] !== null ? (int) $item['year'] : null;
+    }
+    unset($item);
 
     return [
-        'items' => $stmt->fetchAll(),
+        'items' => $items,
         'total' => $total,
         'page' => $page,
         'perPage' => $perPage,

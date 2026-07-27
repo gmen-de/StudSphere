@@ -409,6 +409,34 @@ main {
   margin-top: 1.5rem;
 }
 
+.breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.breadcrumbs a {
+  color: #64748b;
+}
+
+.breadcrumbs a:hover {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.breadcrumbs [aria-current='page'] {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.breadcrumb-sep {
+  margin: 0 0.4rem;
+  color: #cbd5e1;
+}
+
 nav.nav-list {
   margin-top: 0;
 }
@@ -888,6 +916,29 @@ footer {
   grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
 }
 
+.group-header {
+  grid-column: 1 / -1;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.group-header:first-child {
+  margin-top: 0;
+}
+
+.group-header-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.group-header-rule {
+  margin: 0;
+  border: none;
+  border-top: 1px solid #cbd5e1;
+}
+
 .category-tile-grid {
   grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
 }
@@ -1087,6 +1138,27 @@ footer {
 }
 
 .minifig-theme-tile-label {
+  font-size: 0.9rem;
+}
+
+/* Sets theme-overview tiles matched to .set-card-image's 3x scale
+   (4.5rem -> 13.5rem) and .sets-grid's column width, so browsing
+   categories and browsing search results feel like the same grid. */
+.sets-theme-grid {
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+}
+
+.sets-theme-tile-image {
+  width: 13.5rem;
+  height: 13.5rem;
+}
+
+.sets-theme-tile-image svg {
+  width: 6.75rem;
+  height: 6.75rem;
+}
+
+.sets-theme-tile-label {
   font-size: 0.9rem;
 }
 
@@ -1501,6 +1573,7 @@ footer {
   justify-content: center;
   width: 40rem;
   height: 40rem;
+  padding: 2rem;
   background: #f8fafc;
   border-radius: 0.75rem;
   color: #94a3b8;
@@ -1517,19 +1590,74 @@ footer {
   height: 16rem;
 }
 
-.set-detail-info h1 {
-  margin: 0 0 0.4rem;
-  font-size: 1.6rem;
+.set-detail-info {
+  flex: 1 1 20rem;
+  min-width: 20rem;
 }
 
-.set-detail-meta {
-  margin: 0;
+.set-detail-panel {
+  max-width: 28rem;
+  margin-left: auto;
+}
+
+.set-detail-title {
+  margin: 0 0 0.6rem;
+  font-size: 1.8rem;
+  text-align: center;
+}
+
+.set-detail-setnav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+.set-detail-table-wrap {
+  margin-bottom: 1rem;
+  padding: 1rem 1.25rem;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.85rem;
+}
+
+.set-detail-table-wrap:last-child {
+  margin-bottom: 0;
+}
+
+.set-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.set-detail-table th,
+.set-detail-table td {
+  font-size: 0.9rem;
+}
+
+.set-detail-table th {
+  text-align: left;
+  padding: 0.4rem 0.75rem 0.4rem 0;
   color: #64748b;
-  font-size: 1.05rem;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.set-detail-table td {
+  padding: 0.4rem 0;
+  width: 100%;
+}
+
+.set-detail-table-heading {
+  display: block;
+  margin: 0 0 0.5rem;
+  font-weight: 700;
+  color: #334155;
 }
 
 .set-detail-retired-year {
-  margin: 0.5rem 0 0;
   font-size: 0.85rem;
 }
 
@@ -1589,6 +1717,74 @@ footer {
 .set-detail-tabs a.active {
   color: #2563eb;
   border-bottom-color: #2563eb;
+}
+
+.instruction-upload-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.instruction-upload-form input[type='text'] {
+  flex: 1 1 16rem;
+  margin-top: 0;
+}
+
+.instruction-upload-form input[type='file'] {
+  flex: 1 1 16rem;
+  margin-top: 0;
+}
+
+.instruction-upload-form button {
+  width: auto;
+  padding: 0.6rem 1.1rem;
+}
+
+.instruction-upload-message {
+  font-size: 0.85rem;
+  color: #dc2626;
+}
+
+.instructions-empty {
+  color: #64748b;
+}
+
+.instructions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.instruction-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.85rem;
+  background: #ffffff;
+}
+
+.instruction-item a {
+  font-weight: 600;
+}
+
+.instruction-meta {
+  flex: 1 1 auto;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.instruction-delete-btn {
+  width: auto;
+  padding: 0.4rem 0.8rem;
+  background: #f1f5f9;
+  color: #475569;
 }
 
 .table-scroll {

@@ -16,6 +16,7 @@ require_once __DIR__ . '/src/parts.php';
 require_once __DIR__ . '/src/part_modal.php';
 require_once __DIR__ . '/src/part_images.php';
 require_once __DIR__ . '/src/sets.php';
+require_once __DIR__ . '/src/instructions.php';
 require_once __DIR__ . '/src/minifigs.php';
 require_once __DIR__ . '/src/stats.php';
 
@@ -134,7 +135,65 @@ function getSearchScopes(): array
     ];
 }
 
-function renderApp(string $title, string $content, array $user, array $stats): void
+/**
+ * @param array<int, array{label:string, url:?string}> $items Ordered trail,
+ *        Dashboard first, current page last (its url must be null — not a
+ *        link). Renders nothing for a trail of 0 or 1 items: a lone
+ *        "Dashboard" crumb on the dashboard itself isn't worth showing.
+ */
+function renderBreadcrumbs(array $items): string
+{
+    if (count($items) < 2) {
+        return '';
+    }
+    $parts = [];
+    foreach ($items as $item) {
+        $parts[] = $item['url'] !== null
+            ? '<a href="' . htmlspecialchars($item['url']) . '">' . htmlspecialchars($item['label']) . '</a>'
+            : '<span aria-current="page">' . htmlspecialchars($item['label']) . '</span>';
+    }
+    return '<nav class="breadcrumbs" aria-label="' . htmlspecialchars(t('breadcrumbs_label')) . '">' . implode('<span class="breadcrumb-sep">»</span>', $parts) . '</nav>';
+}
+
+/**
+ * The Dashboard crumb every trail starts with.
+ */
+function homeBreadcrumb(): array
+{
+    return ['label' => t('dashboard_title'), 'url' => $_SERVER['PHP_SELF']];
+}
+
+/**
+ * Renders already year-sorted items (each with a ?int 'year' key) as cards
+ * grouped under a full-width year heading, inserted whenever the year
+ * changes from the previous item — used by sets_search and minifigs_search,
+ * both sorted oldest-first then by number. $startYear/$startYearKnown carry
+ * the open group across a paginated/AJAX-continued batch (the initial page
+ * passes $startYearKnown = false; a continuation passes back the previous
+ * batch's returned lastYear/lastYearKnown) so the heading isn't repeated
+ * mid-group just because a page boundary happened to fall there.
+ *
+ * @return array{html: string, lastYear: ?int, lastYearKnown: bool}
+ */
+function renderYearGroupedCards(array $items, ?int $startYear, bool $startYearKnown, callable $cardRenderer): array
+{
+    $html = '';
+    $currentYear = $startYear;
+    $currentYearKnown = $startYearKnown;
+    foreach ($items as $item) {
+        $year = $item['year'] ?? null;
+        if (!$currentYearKnown || $year !== $currentYear) {
+            $yearLabel = $year !== null ? (string) $year : t('year_unknown');
+            $html .= '<div class="group-header"><span class="group-header-label">' . htmlspecialchars($yearLabel) . '</span><hr class="group-header-rule"></div>';
+            $currentYear = $year;
+            $currentYearKnown = true;
+        }
+        $html .= $cardRenderer($item);
+    }
+    return ['html' => $html, 'lastYear' => $currentYear, 'lastYearKnown' => $currentYearKnown];
+}
+
+function renderApp(string $title, string $content, array $user, array $stats, array $breadcrumbs = []): void
 {
     $locale = getLocale();
     $currentPage = (string) ($_GET['page'] ?? '');
@@ -198,7 +257,7 @@ function renderApp(string $title, string $content, array $user, array $stats): v
     echo '</header></div>';
 
     echo '<div class="container">';
-    echo '<main>' . $content . '</main>';
+    echo '<main>' . renderBreadcrumbs($breadcrumbs) . $content . '</main>';
     echo '<footer>' . htmlspecialchars(t('app_footer', ['year' => date('Y')])) . '</footer>';
     echo '</div>';
     echo '</body></html>';
@@ -511,6 +570,92 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         }
         updateSetRetiredYear($pdo, $setId, $year);
         echo json_encode(['success' => true, 'yearRetired' => $year], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'upload_set_instruction') {
+    header('Content-Type: application/json');
+    try {
+        $setId = (int) ($_POST['set_id'] ?? 0);
+        if ($setId <= 0 || getSetById($pdo, $setId) === null) {
+            throw new RuntimeException(t('set_detail_instructions_invalid_set'));
+        }
+
+        $label = trim((string) ($_POST['label'] ?? ''));
+        if (mb_strlen($label) > INSTRUCTION_MAX_LABEL_LENGTH) {
+            $label = mb_substr($label, 0, INSTRUCTION_MAX_LABEL_LENGTH);
+        }
+        $label = $label !== '' ? $label : null;
+
+        if (!isset($_FILES['instruction_file'])) {
+            throw new RuntimeException(t('set_detail_instructions_upload_failed'));
+        }
+        $file = $_FILES['instruction_file'];
+        if ($file['error'] === UPLOAD_ERR_INI_SIZE || $file['error'] === UPLOAD_ERR_FORM_SIZE) {
+            throw new RuntimeException(t('set_detail_instructions_too_large', ['max' => (string) ini_get('upload_max_filesize')]));
+        }
+        if ($file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) {
+            throw new RuntimeException(t('set_detail_instructions_upload_failed'));
+        }
+
+        // Extension is never trusted (the stored filename is always random
+        // + ".pdf", see generateInstructionFilename()) — sniffing the real
+        // MIME type here is purely to reject non-PDF uploads with a clear
+        // error rather than silently storing garbage.
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = $finfo !== false ? finfo_file($finfo, $file['tmp_name']) : false;
+        if ($finfo !== false) {
+            finfo_close($finfo);
+        }
+        if ($mime !== 'application/pdf') {
+            throw new RuntimeException(t('set_detail_instructions_invalid_type'));
+        }
+
+        $originalFilename = basename((string) $file['name']);
+        $filename = generateInstructionFilename();
+        $targetPath = getInstructionsStorageDir($setId) . '/' . $filename;
+        if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
+            throw new RuntimeException(t('set_detail_instructions_upload_failed'));
+        }
+        $fileSize = filesize($targetPath);
+        $relativePath = getInstructionRelativePath($setId, $filename);
+
+        $instruction = addSetInstruction($pdo, $setId, $label, $originalFilename, $relativePath, $fileSize !== false ? $fileSize : (int) $file['size'], (int) $_SESSION['user_id']);
+
+        echo json_encode([
+            'success' => true,
+            'instruction' => [
+                'id' => $instruction['id'],
+                'label' => $instruction['label'],
+                'originalFilename' => $instruction['original_filename'],
+                'url' => $instruction['stored_path'],
+                'fileSize' => formatFileSize($instruction['file_size']),
+            ],
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_set_instruction') {
+    header('Content-Type: application/json');
+    try {
+        $instructionId = (int) ($_POST['instruction_id'] ?? 0);
+        $instruction = $instructionId > 0 ? deleteSetInstruction($pdo, $instructionId) : null;
+        if ($instruction === null) {
+            throw new RuntimeException(t('set_detail_instructions_delete_failed'));
+        }
+        $absolutePath = __DIR__ . '/' . $instruction['stored_path'];
+        if (is_file($absolutePath)) {
+            @unlink($absolutePath);
+        }
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
@@ -968,7 +1113,7 @@ SCRIPT;
 </script>
 SCRIPT;
 
-    renderApp(t('settings_title'), $content, $user, computeAppStats($pdo));
+    renderApp(t('settings_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('settings_title'), 'url' => null]]);
     exit;
 }
 
@@ -1087,7 +1232,7 @@ SCRIPT;
     }
     $content .= '</section>';
 
-    renderApp(t('locations_title'), $content, $user, computeAppStats($pdo));
+    renderApp(t('locations_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('locations_title'), 'url' => null]]);
     exit;
 }
 
@@ -1098,8 +1243,18 @@ if (isset($_GET['page']) && $_GET['page'] === 'location_detail') {
     if ($location === null) {
         $content = '<h1>' . htmlspecialchars(t('location_detail_not_found_title')) . '</h1>';
         $content .= '<section class="card alert"><p>' . htmlspecialchars(t('location_detail_not_found')) . '</p></section>';
-        renderApp(t('location_detail_not_found_title'), $content, $user, computeAppStats($pdo));
+        renderApp(t('location_detail_not_found_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('locations_title'), 'url' => '?page=locations']]);
         exit;
+    }
+
+    $locationBreadcrumbs = [homeBreadcrumb(), ['label' => t('locations_title'), 'url' => '?page=locations']];
+    $ancestors = getStorageLocationAncestors($locationId);
+    foreach ($ancestors as $i => $ancestor) {
+        $isLast = $i === count($ancestors) - 1;
+        $locationBreadcrumbs[] = [
+            'label' => $ancestor['name'],
+            'url' => $isLast ? null : '?page=location_detail&id=' . $ancestor['id'],
+        ];
     }
 
     $content = '<h1>' . htmlspecialchars($location['name']) . '</h1>';
@@ -1126,91 +1281,37 @@ if (isset($_GET['page']) && $_GET['page'] === 'location_detail') {
         $content .= '</div>';
     }
 
-    renderApp($location['name'], $content, $user, computeAppStats($pdo));
+    renderApp($location['name'], $content, $user, computeAppStats($pdo), $locationBreadcrumbs);
     exit;
 }
 
 if (isset($_GET['page']) && $_GET['page'] === 'sets_search') {
     $searchQuery = trim((string) ($_GET['q'] ?? ''));
-    $selectedThemes = array_values(array_filter(array_map('strval', (array) ($_GET['theme'] ?? []))));
+    $themeParam = isset($_GET['theme']) && $_GET['theme'] !== '' ? (int) $_GET['theme'] : null;
     $pageNum = max(1, (int) ($_GET['p'] ?? 1));
     $perPage = SETS_SEARCH_PAGE_SIZE;
-    $isBrowsing = $searchQuery === '' && empty($selectedThemes);
+    $isTextSearch = $searchQuery !== '';
+    // A text search ignores the theme hierarchy entirely (search across the
+    // whole catalog); otherwise, browsing into a theme (any theme, leaf or
+    // not) shows its own + every subtheme's sets combined — see
+    // getThemeAndDescendantIds()'s doc comment for why "recursive" was
+    // chosen over "exact theme only".
+    $hasResultsGrid = $isTextSearch || $themeParam !== null;
 
-
-    // Infinite-scroll continuation request: return just the next batch of
-    // cards as JSON instead of a full page render (mirrors bricks_search).
-    if (!$isBrowsing && ($_GET['ajax'] ?? '') === '1') {
-        header('Content-Type: application/json');
-        $results = searchSets($pdo, $searchQuery, $selectedThemes, $pageNum, $perPage);
-        $html = '';
-        foreach ($results['items'] as $set) {
-            $html .= renderSetCard($set);
-        }
-        $hasMore = ($pageNum * $perPage) < $results['total'];
-        echo json_encode(['html' => $html, 'hasMore' => $hasMore], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-
-    $content = '<h1>' . htmlspecialchars(t('nav_sets_search')) . '</h1>';
-    $content .= '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-search-form">';
-    $content .= '<input type="hidden" name="page" value="sets_search">';
-    $content .= '<input type="text" name="q" value="' . htmlspecialchars($searchQuery) . '" placeholder="' . htmlspecialchars(t('sets_search_placeholder')) . '">';
-    $content .= '<button type="submit">' . htmlspecialchars(t('search_button')) . '</button>';
-    $content .= '</form>';
-
-    if ($isBrowsing) {
-        $themes = getSetThemes($pdo);
-        if (empty($themes)) {
-            $content .= '<section class="card"><p>' . htmlspecialchars(t('sets_categories_empty')) . '</p></section>';
-        } else {
-            $tileImages = getThemeTileImages($pdo, array_map(function ($theme) {
-                return $theme['theme_id'];
-            }, $themes));
-            $content .= '<div class="category-tile-grid">';
-            foreach ($themes as $theme) {
-                $img = $tileImages[(string) $theme['theme_id']] ?? null;
-                $content .= '<a class="category-tile" href="?page=sets_search&theme%5B%5D=' . urlencode((string) $theme['theme_id']) . '">';
-                $content .= '<span class="category-tile-image">' . ($img !== null ? '<img src="' . htmlspecialchars($img) . '" alt="">' : getNavIcon('sets')) . '</span>';
-                $content .= '<span class="category-tile-label">' . htmlspecialchars($theme['name']) . '</span>';
-                $content .= '</a>';
-            }
-            $content .= '</div>';
-        }
-    } else {
-        $results = searchSets($pdo, $searchQuery, $selectedThemes, $pageNum, $perPage);
-
-        $sidebar = '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-filter-sidebar">';
-        $sidebar .= '<input type="hidden" name="page" value="sets_search">';
-        if ($searchQuery !== '') {
-            $sidebar .= '<input type="hidden" name="q" value="' . htmlspecialchars($searchQuery) . '">';
-        }
-        $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('filter_theme_title')) . '</h3><div class="filter-options">';
-        foreach (getSetThemes($pdo) as $theme) {
-            $themeIdStr = (string) $theme['theme_id'];
-            $checked = in_array($themeIdStr, $selectedThemes, true) ? ' checked' : '';
-            $sidebar .= '<label class="filter-checkbox"><input type="checkbox" name="theme[]" value="' . htmlspecialchars($themeIdStr) . '"' . $checked . '> ' . htmlspecialchars($theme['name']) . ' <span class="filter-count">(' . (int) $theme['cnt'] . ')</span></label>';
-        }
-        $sidebar .= '</div></div>';
-        $sidebar .= '<button type="submit" class="filter-apply-button">' . htmlspecialchars(t('filter_apply_button')) . '</button>';
-        $sidebar .= '</form>';
-
-        $main = '<p><a href="?page=sets_search">&larr; ' . htmlspecialchars(t('back_to_categories')) . '</a></p>';
-        $main .= '<span class="results-summary">' . htmlspecialchars(t('sets_found_count', ['count' => number_format($results['total'])])) . '</span>';
-
+    $renderSetsResultsGrid = function (array $results, int $pageNum, int $perPage): string {
+        $html = '<span class="results-summary">' . htmlspecialchars(t('sets_found_count', ['count' => number_format($results['total'])])) . '</span>';
         if (empty($results['items'])) {
-            $main .= '<section class="card"><p>' . htmlspecialchars(t('sets_categories_empty')) . '</p></section>';
-        } else {
-            $hasMore = $perPage < $results['total'];
-            $main .= '<div class="sets-grid" id="sets-grid">';
-            foreach ($results['items'] as $set) {
-                $main .= renderSetCard($set);
-            }
-            $main .= '</div>';
-            $main .= '<div id="sets-load-sentinel" class="parts-load-sentinel" data-has-more="' . ($hasMore ? '1' : '0') . '" data-next-page="2">';
-            $main .= '<span class="parts-load-status" data-loading-text="' . htmlspecialchars(t('parts_loading_more')) . '" data-end-text="' . htmlspecialchars(t('parts_no_more')) . '">' . ($hasMore ? '' : htmlspecialchars(t('parts_no_more'))) . '</span>';
-            $main .= '</div>';
-            $main .= <<<SCRIPT
+            $html .= '<section class="card"><p>' . htmlspecialchars(t('sets_categories_empty')) . '</p></section>';
+            return $html;
+        }
+        $hasMore = $perPage < $results['total'];
+        $grouped = renderYearGroupedCards($results['items'], null, false, 'renderSetCard');
+        $lastYearAttr = $grouped['lastYearKnown'] ? ($grouped['lastYear'] ?? 'unknown') : 'unknown';
+        $html .= '<div class="sets-grid" id="sets-grid">' . $grouped['html'] . '</div>';
+        $html .= '<div id="sets-load-sentinel" class="parts-load-sentinel" data-has-more="' . ($hasMore ? '1' : '0') . '" data-next-page="2" data-last-year="' . htmlspecialchars((string) $lastYearAttr) . '">';
+        $html .= '<span class="parts-load-status" data-loading-text="' . htmlspecialchars(t('parts_loading_more')) . '" data-end-text="' . htmlspecialchars(t('parts_no_more')) . '">' . ($hasMore ? '' : htmlspecialchars(t('parts_no_more'))) . '</span>';
+        $html .= '</div>';
+        $html .= <<<SCRIPT
 <script>
 (function(){
   var sentinel = document.getElementById('sets-load-sentinel');
@@ -1231,6 +1332,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'sets_search') {
     var params = new URLSearchParams(window.location.search);
     params.set('ajax', '1');
     params.set('p', sentinel.dataset.nextPage);
+    params.set('lastYear', sentinel.dataset.lastYear);
 
     fetch('?' + params.toString(), { credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
@@ -1238,6 +1340,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'sets_search') {
         grid.insertAdjacentHTML('beforeend', data.html);
         sentinel.dataset.hasMore = data.hasMore ? '1' : '0';
         sentinel.dataset.nextPage = String(parseInt(sentinel.dataset.nextPage, 10) + 1);
+        if (data.lastYear !== null) {
+          sentinel.dataset.lastYear = data.lastYear;
+        }
         status.textContent = data.hasMore ? '' : status.dataset.endText;
         loading = false;
         if (data.hasMore) {
@@ -1272,12 +1377,88 @@ if (isset($_GET['page']) && $_GET['page'] === 'sets_search') {
 })();
 </script>
 SCRIPT;
-        }
+        return $html;
+    };
 
-        $content .= '<div class="parts-search-layout">' . $sidebar . '<div class="parts-search-main">' . $main . '</div></div>';
+    // Infinite-scroll continuation request: return just the next batch of
+    // cards as JSON instead of a full page render (mirrors bricks_search).
+    if ($hasResultsGrid && ($_GET['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        if ($isTextSearch) {
+            $selectedThemeIds = [];
+        } else {
+            $tree = getSetThemeTree($pdo);
+            $selectedThemeIds = array_map('strval', getThemeAndDescendantIds($tree, $themeParam));
+        }
+        $results = searchSets($pdo, $searchQuery, $selectedThemeIds, $pageNum, $perPage);
+        $lastYearParam = $_GET['lastYear'] ?? null;
+        $startYearKnown = $lastYearParam !== null;
+        $startYear = ($lastYearParam !== null && $lastYearParam !== 'unknown') ? (int) $lastYearParam : null;
+        $grouped = renderYearGroupedCards($results['items'], $startYear, $startYearKnown, 'renderSetCard');
+        $hasMore = ($pageNum * $perPage) < $results['total'];
+        echo json_encode([
+            'html' => $grouped['html'],
+            'hasMore' => $hasMore,
+            'lastYear' => $grouped['lastYearKnown'] ? ($grouped['lastYear'] ?? 'unknown') : null,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
     }
 
-    renderApp(t('nav_sets_search'), $content, $user, computeAppStats($pdo));
+    $content = '<h1>' . htmlspecialchars(t('nav_sets_search')) . '</h1>';
+    $content .= '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-search-form">';
+    $content .= '<input type="hidden" name="page" value="sets_search">';
+    $content .= '<input type="text" name="q" value="' . htmlspecialchars($searchQuery) . '" placeholder="' . htmlspecialchars(t('sets_search_placeholder')) . '">';
+    $content .= '<button type="submit">' . htmlspecialchars(t('search_button')) . '</button>';
+    $content .= '</form>';
+
+    $setsBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_sets_search'), 'url' => $hasResultsGrid ? '?page=sets_search' : null]];
+
+    if ($isTextSearch) {
+        $setsBreadcrumbs[] = ['label' => t('search_results_for', ['query' => $searchQuery]), 'url' => null];
+        $results = searchSets($pdo, $searchQuery, [], $pageNum, $perPage);
+        $content .= $renderSetsResultsGrid($results, $pageNum, $perPage);
+    } else {
+        $tree = getSetThemeTree($pdo);
+
+        if ($themeParam !== null) {
+            $ancestors = getThemeAncestors($tree, $themeParam);
+            foreach ($ancestors as $i => $ancestor) {
+                $isLast = $i === count($ancestors) - 1;
+                $setsBreadcrumbs[] = [
+                    'label' => $ancestor['name'],
+                    'url' => $isLast ? null : '?page=sets_search&theme=' . $ancestor['theme_id'],
+                ];
+            }
+        }
+
+        $children = getSetThemeChildren($tree, $themeParam);
+        if (!empty($children)) {
+            $tileImageGroups = [];
+            foreach ($children as $child) {
+                $tileImageGroups[$child['theme_id']] = getThemeAndDescendantIds($tree, $child['theme_id']);
+            }
+            $tileImages = getThemeTileImages($pdo, $tileImageGroups);
+            $content .= '<div class="category-tile-grid sets-theme-grid">';
+            foreach ($children as $child) {
+                $img = $tileImages[(string) $child['theme_id']] ?? null;
+                $content .= '<a class="category-tile sets-theme-tile" href="?page=sets_search&theme=' . $child['theme_id'] . '">';
+                $content .= '<span class="category-tile-image sets-theme-tile-image">' . ($img !== null ? '<img src="' . htmlspecialchars($img) . '" alt="">' : getNavIcon('sets')) . '</span>';
+                $content .= '<span class="category-tile-label sets-theme-tile-label">' . htmlspecialchars($child['name']) . ' (' . $child['recursive_count'] . ')</span>';
+                $content .= '</a>';
+            }
+            $content .= '</div>';
+        } elseif ($themeParam === null) {
+            $content .= '<section class="card"><p>' . htmlspecialchars(t('sets_categories_empty')) . '</p></section>';
+        }
+
+        if ($themeParam !== null) {
+            $selectedThemeIds = array_map('strval', getThemeAndDescendantIds($tree, $themeParam));
+            $results = searchSets($pdo, '', $selectedThemeIds, $pageNum, $perPage);
+            $content .= $renderSetsResultsGrid($results, $pageNum, $perPage);
+        }
+    }
+
+    renderApp(t('nav_sets_search'), $content, $user, computeAppStats($pdo), $setsBreadcrumbs);
     exit;
 }
 
@@ -1293,12 +1474,16 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
     if (!$isBrowsing && ($_GET['ajax'] ?? '') === '1') {
         header('Content-Type: application/json');
         $results = searchMinifigs($pdo, $searchQuery, $selectedThemes, $pageNum, $perPage);
-        $html = '';
-        foreach ($results['items'] as $fig) {
-            $html .= renderMinifigCard($fig);
-        }
+        $lastYearParam = $_GET['lastYear'] ?? null;
+        $startYearKnown = $lastYearParam !== null;
+        $startYear = ($lastYearParam !== null && $lastYearParam !== 'unknown') ? (int) $lastYearParam : null;
+        $grouped = renderYearGroupedCards($results['items'], $startYear, $startYearKnown, 'renderMinifigCard');
         $hasMore = ($pageNum * $perPage) < $results['total'];
-        echo json_encode(['html' => $html, 'hasMore' => $hasMore], JSON_UNESCAPED_UNICODE);
+        echo json_encode([
+            'html' => $grouped['html'],
+            'hasMore' => $hasMore,
+            'lastYear' => $grouped['lastYearKnown'] ? ($grouped['lastYear'] ?? 'unknown') : null,
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -1308,6 +1493,8 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
     $content .= '<input type="text" name="q" value="' . htmlspecialchars($searchQuery) . '" placeholder="' . htmlspecialchars(t('minifigs_search_placeholder')) . '">';
     $content .= '<button type="submit">' . htmlspecialchars(t('search_button')) . '</button>';
     $content .= '</form>';
+
+    $minifigsBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_minifigs_search'), 'url' => $isBrowsing ? null : '?page=minifigs_search']];
 
     if ($isBrowsing) {
         $themes = getMinifigThemes($pdo);
@@ -1329,6 +1516,18 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
         }
     } else {
         $results = searchMinifigs($pdo, $searchQuery, $selectedThemes, $pageNum, $perPage);
+        $allThemes = getMinifigThemes($pdo);
+
+        if ($searchQuery !== '') {
+            $minifigsBreadcrumbs[] = ['label' => t('search_results_for', ['query' => $searchQuery]), 'url' => null];
+        } elseif (count($selectedThemes) === 1) {
+            foreach ($allThemes as $theme) {
+                if ((string) $theme['theme_id'] === $selectedThemes[0]) {
+                    $minifigsBreadcrumbs[] = ['label' => $theme['name'], 'url' => null];
+                    break;
+                }
+            }
+        }
 
         $sidebar = '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-filter-sidebar">';
         $sidebar .= '<input type="hidden" name="page" value="minifigs_search">';
@@ -1336,7 +1535,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
             $sidebar .= '<input type="hidden" name="q" value="' . htmlspecialchars($searchQuery) . '">';
         }
         $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('filter_theme_title')) . '</h3><div class="filter-options">';
-        foreach (getMinifigThemes($pdo) as $theme) {
+        foreach ($allThemes as $theme) {
             $themeIdStr = (string) $theme['theme_id'];
             $checked = in_array($themeIdStr, $selectedThemes, true) ? ' checked' : '';
             $sidebar .= '<label class="filter-checkbox"><input type="checkbox" name="theme[]" value="' . htmlspecialchars($themeIdStr) . '"' . $checked . '> ' . htmlspecialchars($theme['name']) . ' <span class="filter-count">(' . (int) $theme['cnt'] . ')</span></label>';
@@ -1352,12 +1551,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
             $main .= '<section class="card"><p>' . htmlspecialchars(t('minifigs_categories_empty')) . '</p></section>';
         } else {
             $hasMore = $perPage < $results['total'];
-            $main .= '<div class="minifigs-grid" id="minifigs-grid">';
-            foreach ($results['items'] as $fig) {
-                $main .= renderMinifigCard($fig);
-            }
-            $main .= '</div>';
-            $main .= '<div id="minifigs-load-sentinel" class="parts-load-sentinel" data-has-more="' . ($hasMore ? '1' : '0') . '" data-next-page="2">';
+            $grouped = renderYearGroupedCards($results['items'], null, false, 'renderMinifigCard');
+            $lastYearAttr = $grouped['lastYearKnown'] ? ($grouped['lastYear'] ?? 'unknown') : 'unknown';
+            $main .= '<div class="minifigs-grid" id="minifigs-grid">' . $grouped['html'] . '</div>';
+            $main .= '<div id="minifigs-load-sentinel" class="parts-load-sentinel" data-has-more="' . ($hasMore ? '1' : '0') . '" data-next-page="2" data-last-year="' . htmlspecialchars((string) $lastYearAttr) . '">';
             $main .= '<span class="parts-load-status" data-loading-text="' . htmlspecialchars(t('parts_loading_more')) . '" data-end-text="' . htmlspecialchars(t('parts_no_more')) . '">' . ($hasMore ? '' : htmlspecialchars(t('parts_no_more'))) . '</span>';
             $main .= '</div>';
             $main .= <<<SCRIPT
@@ -1381,6 +1578,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
     var params = new URLSearchParams(window.location.search);
     params.set('ajax', '1');
     params.set('p', sentinel.dataset.nextPage);
+    params.set('lastYear', sentinel.dataset.lastYear);
 
     fetch('?' + params.toString(), { credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
@@ -1388,6 +1586,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
         grid.insertAdjacentHTML('beforeend', data.html);
         sentinel.dataset.hasMore = data.hasMore ? '1' : '0';
         sentinel.dataset.nextPage = String(parseInt(sentinel.dataset.nextPage, 10) + 1);
+        if (data.lastYear !== null) {
+          sentinel.dataset.lastYear = data.lastYear;
+        }
         status.textContent = data.hasMore ? '' : status.dataset.endText;
         loading = false;
         if (data.hasMore) {
@@ -1427,7 +1628,7 @@ SCRIPT;
         $content .= '<div class="parts-search-layout">' . $sidebar . '<div class="parts-search-main">' . $main . '</div></div>';
     }
 
-    renderApp(t('nav_minifigs_search'), $content, $user, computeAppStats($pdo));
+    renderApp(t('nav_minifigs_search'), $content, $user, computeAppStats($pdo), $minifigsBreadcrumbs);
     exit;
 }
 
@@ -1438,7 +1639,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
     if ($set === null) {
         $content = '<h1>' . htmlspecialchars(t('set_detail_not_found_title')) . '</h1>';
         $content .= '<section class="card alert"><p>' . htmlspecialchars(t('set_detail_not_found')) . '</p></section>';
-        renderApp(t('set_detail_not_found_title'), $content, $user, computeAppStats($pdo));
+        renderApp(t('set_detail_not_found_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('nav_sets_search'), 'url' => '?page=sets_search']]);
         exit;
     }
 
@@ -1471,37 +1672,80 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
         $activeTab = array_key_first($setTabs);
     }
 
+    $setDetailBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_sets_search'), 'url' => '?page=sets_search']];
+    if ($set['theme_id'] !== null) {
+        $themeTree = getSetThemeTree($pdo);
+        foreach (getThemeAncestors($themeTree, $set['theme_id']) as $ancestor) {
+            $setDetailBreadcrumbs[] = ['label' => $ancestor['name'], 'url' => '?page=sets_search&theme=' . $ancestor['theme_id']];
+        }
+    }
+    $setDetailBreadcrumbs[] = ['label' => $set['name'], 'url' => '?page=set_detail&id=' . $setId];
+    $setDetailBreadcrumbs[] = ['label' => $setTabs[$activeTab], 'url' => null];
+
+    // Spares and minifigs aren't split per revision — only the regular
+    // inventory differs meaningfully enough between versions to be worth
+    // the extra tabs, so those two always show the latest revision. The
+    // header's Inventar summary (below) always reflects this latest
+    // revision too, regardless of which tab is active.
+    $latestInventoryId = getSetInventoryId($pdo, $set['rebrickable_set_num']);
+
+    $adjacentSets = getAdjacentSets($pdo, $set['rebrickable_set_num']);
+    $inventorySummary = $latestInventoryId !== null
+        ? getSetInventorySummary($pdo, $latestInventoryId, getLocale())
+        : ['exclusive' => 0, 'rare' => 0, 'stickers' => 0];
+
     $content = '<div class="set-detail-header">';
     $content .= '<span class="set-detail-image">' . ($set['thumbnail'] !== null ? '<img src="' . htmlspecialchars($set['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
-    $content .= '<div class="set-detail-info"><h1>' . htmlspecialchars($set['name']) . '</h1>';
+    $content .= '<div class="set-detail-info">';
+    $content .= '<div class="set-detail-panel">';
 
-    $setMeta = [htmlspecialchars($set['rebrickable_set_num'])];
-    $yearDisplay = $set['year'] !== null ? (string) $set['year'] : '';
-    if ($set['year_retired'] !== null) {
-        $yearDisplay = ($yearDisplay !== '' ? $yearDisplay : '?') . '–' . $set['year_retired'];
-    }
-    if ($yearDisplay !== '') {
-        $setMeta[] = '<span id="set-detail-year-text">' . htmlspecialchars($yearDisplay) . '</span>';
-    }
-    if ($set['theme_name'] !== null) {
-        $setMeta[] = htmlspecialchars($set['theme_name']);
-    }
-    if ($set['num_parts'] !== null) {
-        $setMeta[] = htmlspecialchars(t('set_detail_num_parts', ['count' => number_format((int) $set['num_parts'])]));
-    }
-    $content .= '<p class="set-detail-meta">' . implode(' · ', $setMeta) . '</p>';
+    $content .= '<h1 class="set-detail-title">' . htmlspecialchars($set['rebrickable_set_num']) . '</h1>';
 
-    $content .= '<p class="set-detail-retired-year">';
-    $content .= '<a href="#" id="set-retired-year-toggle">' . htmlspecialchars($set['year_retired'] !== null ? t('set_detail_edit_retired_year_button') : t('set_detail_add_retired_year_button')) . '</a>';
+    $content .= '<div class="set-detail-setnav">';
+    $content .= $adjacentSets['prev'] !== null
+        ? '<a href="?page=set_detail&id=' . $adjacentSets['prev']['id'] . '">&lsaquo; ' . htmlspecialchars($adjacentSets['prev']['rebrickable_set_num']) . '</a>'
+        : '<span></span>';
+    $content .= $adjacentSets['next'] !== null
+        ? '<a href="?page=set_detail&id=' . $adjacentSets['next']['id'] . '">' . htmlspecialchars($adjacentSets['next']['rebrickable_set_num']) . ' &rsaquo;</a>'
+        : '<span></span>';
+    $content .= '</div>';
+
+    $content .= '<div class="set-detail-table-wrap">';
+    $content .= '<table class="set-detail-table">';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_name')) . '</th><td>' . htmlspecialchars($set['name']) . '</td></tr>';
+    if ($set['year'] !== null) {
+        $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_released')) . '</th><td id="set-detail-year-text">' . htmlspecialchars((string) $set['year']) . '</td></tr>';
+    }
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_eol')) . '</th><td class="set-detail-retired-year">';
+    $content .= '<a href="#" id="set-retired-year-toggle">' . htmlspecialchars($set['year_retired'] !== null ? (string) $set['year_retired'] . ' · ' . t('set_detail_edit_retired_year_button') : t('set_detail_add_retired_year_button')) . '</a>';
     $content .= '<form id="set-retired-year-form" class="set-retired-year-form" style="display:none;">';
     $content .= '<input type="number" id="set-retired-year-input" min="1900" max="2100" placeholder="' . htmlspecialchars(t('set_detail_retired_year_placeholder')) . '" value="' . ($set['year_retired'] !== null ? (int) $set['year_retired'] : '') . '">';
     $content .= '<button type="submit">' . htmlspecialchars(t('set_detail_retired_year_save_button')) . '</button>';
     $content .= '<button type="button" id="set-retired-year-cancel">' . htmlspecialchars(t('set_detail_retired_year_cancel_button')) . '</button>';
     $content .= '<span class="set-retired-year-message" id="set-retired-year-message"></span>';
     $content .= '</form>';
-    $content .= '</p>';
+    $content .= '</td></tr>';
+    if ($set['theme_id'] !== null) {
+        $themeTree = getSetThemeTree($pdo);
+        $themePath = implode(' » ', array_column(getThemeAncestors($themeTree, $set['theme_id']), 'name'));
+        $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_theme')) . '</th><td>' . htmlspecialchars($themePath) . '</td></tr>';
+    }
+    $content .= '</table>';
+    $content .= '</div>';
 
-    $content .= '</div></div>';
+    $content .= '<div class="set-detail-table-wrap">';
+    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
+    $content .= '<table class="set-detail-table">';
+    if ($set['num_parts'] !== null) {
+        $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_total')) . '</th><td>' . htmlspecialchars(t('set_detail_num_parts', ['count' => number_format((int) $set['num_parts'])])) . '</td></tr>';
+    }
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_exclusive')) . '</th><td>' . (int) $inventorySummary['exclusive'] . '</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_rare')) . '</th><td>' . (int) $inventorySummary['rare'] . '</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_stickers')) . '</th><td>' . (int) $inventorySummary['stickers'] . '</td></tr>';
+    $content .= '</table>';
+    $content .= '</div>';
+
+    $content .= '</div></div></div>';
 
     $retiredYearLabelsJson = json_encode([
         'addButton' => t('set_detail_add_retired_year_button'),
@@ -1518,7 +1762,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
   var input = document.getElementById('set-retired-year-input');
   var cancelBtn = document.getElementById('set-retired-year-cancel');
   var msg = document.getElementById('set-retired-year-message');
-  var yearText = document.getElementById('set-detail-year-text');
   if (!toggle || !form || !input || !cancelBtn || !msg) {
     return;
   }
@@ -1549,11 +1792,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
         if (res.success) {
           form.style.display = 'none';
           toggle.style.display = 'inline-block';
-          toggle.textContent = res.yearRetired ? texts.editButton : texts.addButton;
-          if (yearText && res.yearRetired) {
-            var current = yearText.textContent.split(String.fromCharCode(8211))[0];
-            yearText.textContent = current + String.fromCharCode(8211) + res.yearRetired;
-          }
+          toggle.textContent = res.yearRetired ? (res.yearRetired + ' · ' + texts.editButton) : texts.addButton;
         } else {
           msg.textContent = res.message;
         }
@@ -1573,15 +1812,18 @@ SCRIPT;
     }
     $content .= '</nav>';
 
-    // Spares and minifigs aren't split per revision — only the regular
-    // inventory differs meaningfully enough between versions to be worth
-    // the extra tabs, so those two always show the latest revision.
-    $latestInventoryId = getSetInventoryId($pdo, $set['rebrickable_set_num']);
-
-    $renderSetPartsGrid = function (array $items): string {
-        $cardsHtml = '';
+    // $groupByRarity splits the inventory into "Exklusive" (this is the
+    // only set the part+color appears in), "Seltene" (2-3 sets total) and
+    // "Normale" (everything else) — exclusive/rare status is scoped to the
+    // exact part+color, not just the part, per user request ("beachte auch
+    // Farbe und Print"): a part_id already implies "print" (a printed
+    // variant is its own part_num/part_id, e.g. "3001pr0001" vs "3001"), so
+    // scoping getPartSetCounts() by (part_id, color_id) covers both. Only
+    // meaningful for the regular inventory tab, not spares — callers pass
+    // false there.
+    $renderSetPartsGrid = function (array $items, bool $groupByRarity = false, ?int $inventoryId = null) use ($pdo): string {
         $missingCount = 0;
-        foreach ($items as $item) {
+        $renderCard = function (array $item) use (&$missingCount): string {
             $part = [
                 'id' => $item['part_id'],
                 'part_num' => $item['part_num'],
@@ -1600,8 +1842,60 @@ SCRIPT;
             if ($fetchColorId !== null) {
                 $missingCount++;
             }
-            $cardsHtml .= renderPartCard($part, $meta, $fetchColorId);
+            return renderPartCard($part, $meta, $fetchColorId);
+        };
+
+        $cardsHtml = '';
+        if ($groupByRarity) {
+            $stickerPartIds = $inventoryId !== null ? getStickerPartIds($pdo, $inventoryId) : [];
+
+            $pairs = [];
+            foreach ($items as $item) {
+                if ($item['rebrickable_color_id'] !== null && !isset($stickerPartIds[$item['part_id']])) {
+                    $pairs[] = ['part_id' => $item['part_id'], 'color_id' => $item['rebrickable_color_id']];
+                }
+            }
+            $setCounts = getPartSetCounts($pdo, $pairs);
+
+            $buckets = ['exclusive' => [], 'rare' => [], 'normal' => [], 'stickers' => []];
+            foreach ($items as $item) {
+                if (isset($stickerPartIds[$item['part_id']])) {
+                    $buckets['stickers'][] = $item;
+                    continue;
+                }
+                $count = $item['rebrickable_color_id'] !== null
+                    ? ($setCounts[$item['part_id'] . ':' . $item['rebrickable_color_id']] ?? 0)
+                    : 0;
+                if ($count === 1) {
+                    $buckets['exclusive'][] = $item;
+                } elseif ($count >= 2 && $count <= 3) {
+                    $buckets['rare'][] = $item;
+                } else {
+                    $buckets['normal'][] = $item;
+                }
+            }
+
+            $groupLabels = [
+                'exclusive' => t('set_detail_group_exclusive'),
+                'rare' => t('set_detail_group_rare'),
+                'normal' => t('set_detail_group_normal'),
+                'stickers' => t('set_detail_group_stickers'),
+            ];
+            foreach ($groupLabels as $bucketKey => $label) {
+                if (empty($buckets[$bucketKey])) {
+                    continue;
+                }
+                $cardsHtml .= '<div class="group-header"><span class="group-header-label">' . htmlspecialchars($label) . '</span><hr class="group-header-rule"></div>';
+                foreach ($buckets[$bucketKey] as $item) {
+                    $cardsHtml .= $renderCard($item);
+                }
+            }
+        } else {
+            foreach ($items as $item) {
+                $cardsHtml .= $renderCard($item);
+            }
         }
+
         $html = renderPartDetailModal();
         $html .= renderFetchMissingImagesButton('set-parts-grid', $missingCount);
         $html .= '<div class="parts-grid" id="set-parts-grid">' . $cardsHtml . '</div>';
@@ -1622,12 +1916,12 @@ SCRIPT;
                 }
             }
         }
-        $items = $targetInventoryId !== null ? getSetPartsList($pdo, $targetInventoryId, false) : [];
+        $items = $targetInventoryId !== null ? getSetPartsList($pdo, $targetInventoryId, false, getLocale()) : [];
         $content .= empty($items)
             ? '<section class="card"><p>' . htmlspecialchars(t('set_detail_inventory_empty')) . '</p></section>'
-            : $renderSetPartsGrid($items);
+            : $renderSetPartsGrid($items, true, $targetInventoryId);
     } elseif ($activeTab === 'compare') {
-        $comparisonRows = getSetInventoryComparison($pdo, $inventoryVersions);
+        $comparisonRows = getSetInventoryComparison($pdo, $inventoryVersions, getLocale());
         if (empty($comparisonRows)) {
             $content .= '<section class="card"><p>' . htmlspecialchars(t('set_detail_compare_empty')) . '</p></section>';
         } else {
@@ -1668,7 +1962,7 @@ SCRIPT;
             $content .= renderFetchMissingImagesScript();
         }
     } elseif ($activeTab === 'spares') {
-        $items = $latestInventoryId !== null ? getSetPartsList($pdo, $latestInventoryId, true) : [];
+        $items = $latestInventoryId !== null ? getSetPartsList($pdo, $latestInventoryId, true, getLocale()) : [];
         $content .= empty($items)
             ? '<section class="card"><p>' . htmlspecialchars(t('set_detail_spares_empty')) . '</p></section>'
             : $renderSetPartsGrid($items);
@@ -1683,11 +1977,101 @@ SCRIPT;
             }
             $content .= '</div>';
         }
+    } elseif ($activeTab === 'instructions') {
+        $instructions = getSetInstructions($pdo, $setId);
+
+        $content .= '<form id="instruction-upload-form" class="instruction-upload-form">';
+        $content .= '<input type="text" id="instruction-label-input" placeholder="' . htmlspecialchars(t('set_detail_instructions_label_placeholder')) . '" maxlength="255">';
+        $content .= '<input type="file" id="instruction-file-input" accept="application/pdf">';
+        $content .= '<button type="submit">' . htmlspecialchars(t('set_detail_instructions_upload_button')) . '</button>';
+        $content .= '<span class="instruction-upload-message" id="instruction-upload-message"></span>';
+        $content .= '</form>';
+
+        if (empty($instructions)) {
+            $content .= '<p class="instructions-empty">' . htmlspecialchars(t('set_detail_instructions_empty')) . '</p>';
+        } else {
+            $content .= '<ul class="instructions-list">';
+            foreach ($instructions as $instruction) {
+                $uploadedAt = date('d.m.Y', strtotime($instruction['uploaded_at']));
+                $label = $instruction['label'] !== null ? $instruction['label'] : $instruction['original_filename'];
+                $content .= '<li class="instruction-item" data-id="' . $instruction['id'] . '">';
+                $content .= '<a href="' . htmlspecialchars($instruction['stored_path']) . '" target="_blank" rel="noopener">' . htmlspecialchars($label) . '</a>';
+                $content .= '<span class="instruction-meta">' . htmlspecialchars(formatFileSize($instruction['file_size'])) . ' · ' . htmlspecialchars($uploadedAt) . '</span>';
+                $content .= '<button type="button" class="instruction-delete-btn" data-id="' . $instruction['id'] . '">' . htmlspecialchars(t('set_detail_instructions_delete_button')) . '</button>';
+                $content .= '</li>';
+            }
+            $content .= '</ul>';
+        }
+
+        $instructionLabelsJson = json_encode([
+            'uploading' => t('set_detail_instructions_uploading'),
+            'deleteConfirm' => t('set_detail_instructions_delete_confirm'),
+            'errorRetry' => t('import_error_retry'),
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+        $content .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $instructionLabelsJson;
+  var form = document.getElementById('instruction-upload-form');
+  var labelInput = document.getElementById('instruction-label-input');
+  var fileInput = document.getElementById('instruction-file-input');
+  var msg = document.getElementById('instruction-upload-message');
+  if (form) {
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      if (!fileInput.files || !fileInput.files[0]) {
+        return;
+      }
+      msg.textContent = texts.uploading;
+      var formData = new FormData();
+      formData.set('action', 'upload_set_instruction');
+      formData.set('set_id', '$setId');
+      formData.set('label', labelInput.value);
+      formData.set('instruction_file', fileInput.files[0]);
+
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            window.location.reload();
+          } else {
+            msg.textContent = res.message;
+          }
+        })
+        .catch(function() {
+          msg.textContent = texts.errorRetry;
+        });
+    });
+  }
+
+  document.querySelectorAll('.instruction-delete-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (!window.confirm(texts.deleteConfirm)) {
+        return;
+      }
+      var formData = new FormData();
+      formData.set('action', 'delete_set_instruction');
+      formData.set('instruction_id', btn.dataset.id);
+
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            window.location.reload();
+          }
+        });
+    });
+  });
+})();
+</script>
+SCRIPT;
     } else {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('part_purchase_placeholder')) . '</p></section>';
     }
 
-    renderApp($set['name'], $content, $user, computeAppStats($pdo));
+    $setPageTitle = t('set_detail_page_title', ['set_num' => $set['rebrickable_set_num'], 'name' => $set['name']]);
+    renderApp($setPageTitle, $content, $user, computeAppStats($pdo), $setDetailBreadcrumbs);
     exit;
 }
 
@@ -1742,6 +2126,18 @@ if (isset($_GET['page']) && $_GET['page'] === 'bricks_search') {
         }
         return $html;
     };
+
+    $bricksBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_bricks_search'), 'url' => $isBrowsing ? null : '?page=bricks_search']];
+    if (!$isBrowsing) {
+        if ($searchQuery !== '') {
+            $bricksBreadcrumbs[] = ['label' => t('search_results_for', ['query' => $searchQuery]), 'url' => null];
+        } elseif (count($selectedCategories) === 1) {
+            $categoryName = getPartCategoryName($pdo, $selectedCategories[0]);
+            if ($categoryName !== null) {
+                $bricksBreadcrumbs[] = ['label' => $categoryName, 'url' => null];
+            }
+        }
+    }
 
     $content = '<h1>' . htmlspecialchars(t('nav_bricks_search')) . '</h1>';
 
@@ -1909,7 +2305,7 @@ SCRIPT;
         $content .= '<div class="parts-search-layout">' . $sidebar . '<div class="parts-search-main">' . $main . '</div></div>';
     }
 
-    renderApp(t('nav_bricks_search'), $content, $user, computeAppStats($pdo));
+    renderApp(t('nav_bricks_search'), $content, $user, computeAppStats($pdo), $bricksBreadcrumbs);
     exit;
 }
 
@@ -1936,7 +2332,7 @@ if ($requestedPage !== '' && isset($stubPages[$requestedPage])) {
         $content .= '<p>' . htmlspecialchars(t('search_results_for', ['query' => $searchQuery])) . '</p>';
     }
     $content .= '<section class="card"><p>' . htmlspecialchars(t('feature_not_implemented')) . '</p></section>';
-    renderApp($stubTitle, $content, $user, computeAppStats($pdo));
+    renderApp($stubTitle, $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => $stubTitle, 'url' => null]]);
     exit;
 }
 

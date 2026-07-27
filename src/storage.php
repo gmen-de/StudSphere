@@ -125,6 +125,33 @@ function getStorageLocationPath(int $id): string
 }
 
 /**
+ * Same walk as getStorageLocationPath(), but returns each ancestor's id
+ * alongside its name (root first, the location itself last) — for building
+ * clickable breadcrumb links to each ancestor's own location_detail page,
+ * where the plain concatenated-string path isn't enough.
+ *
+ * @return array<int, array{id:int, name:string}>
+ */
+function getStorageLocationAncestors(int $id): array
+{
+    $pdo = getPDO();
+    $stmt = $pdo->prepare('SELECT id, name, parent_id FROM storage_locations WHERE id = ?');
+    $ancestors = [];
+    $current = $id;
+    $guard = 0;
+    while ($current !== null && $guard++ < 50) {
+        $stmt->execute([$current]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            break;
+        }
+        array_unshift($ancestors, ['id' => (int) $row['id'], 'name' => $row['name']]);
+        $current = $row['parent_id'] !== null ? (int) $row['parent_id'] : null;
+    }
+    return $ancestors;
+}
+
+/**
  * @return array<int, array{id:int, parent_id:?int, name:string, location_type:?string, children: array}>
  */
 function getStorageLocationTree(): array

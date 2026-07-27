@@ -219,6 +219,28 @@ function installDatabase(): void
             UNIQUE KEY part_color_image_unique (part_id, color_id),
             CONSTRAINT fk_partcolorimage_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS part_set_counts (
+            part_id INT NOT NULL,
+            color_id INT NOT NULL,
+            set_count INT NOT NULL,
+            computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (part_id, color_id),
+            CONSTRAINT fk_partsetcount_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS set_instructions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            set_id INT NOT NULL,
+            label VARCHAR(255) DEFAULT NULL,
+            original_filename VARCHAR(255) NOT NULL,
+            stored_path VARCHAR(512) NOT NULL,
+            file_size INT NOT NULL,
+            uploaded_by INT DEFAULT NULL,
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_setinstructions_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE,
+            CONSTRAINT fk_setinstructions_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
     ];
 
     foreach ($queries as $query) {

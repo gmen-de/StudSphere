@@ -103,6 +103,60 @@ function getSchemaMigrations(): array
             // parts), NULL means "not looked up yet".
             addColumnIfMissing($pdo, 'parts', 'ldraw_id', 'VARCHAR(50) DEFAULT NULL');
         },
+        10 => function (PDO $pdo): void {
+            // "How many sets does this part+color appear in" (for the
+            // inventory tab's exclusive/rare/normal grouping) is expensive
+            // to compute live — COUNT(DISTINCT set_num) over inventory_parts
+            // measured 3.6s for one 538-part set's worth of pairs. Cached
+            // lazily per part+color instead (see sets.php's
+            // getPartSetCounts()) and cleared on a full Rebrickable resync
+            // (src/download.php), since new sets can change the counts.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS part_set_counts (
+                    part_id INT NOT NULL,
+                    color_id INT NOT NULL,
+                    set_count INT NOT NULL,
+                    computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (part_id, color_id),
+                    CONSTRAINT fk_partsetcount_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
+        11 => function (PDO $pdo): void {
+            // importThemesCsv() used to store a top-level theme's blank
+            // parent_id CSV cell (an empty string, not PHP null) as 0
+            // instead of NULL — theme_id 0 was never a real theme, so every
+            // top-level theme silently looked like a child of a
+            // nonexistent parent, and the sets_search/minifigs_search theme
+            // browser (which needs "parent_theme_id IS NULL" to find
+            // top-level themes) showed nothing hierarchical at all, just
+            // one flat list of all ~500 themes. The import is fixed
+            // separately (src/import.php) for future syncs; this repairs
+            // whatever's already stored.
+            $pdo->exec('UPDATE themes SET parent_theme_id = NULL WHERE parent_theme_id = 0');
+        },
+        12 => function (PDO $pdo): void {
+            // Lets users upload building-instruction PDFs per set (multiple
+            // per set — e.g. one per booklet, or alternate-model instructions).
+            // Files live under public/instructions/{set_id}/ with a random
+            // on-disk filename (see src/instructions.php) — stored_path is
+            // the root-relative path used both as the DB record and as the
+            // <a href> target, matching the public/images/ convention.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS set_instructions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    set_id INT NOT NULL,
+                    label VARCHAR(255) DEFAULT NULL,
+                    original_filename VARCHAR(255) NOT NULL,
+                    stored_path VARCHAR(512) NOT NULL,
+                    file_size INT NOT NULL,
+                    uploaded_by INT DEFAULT NULL,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_setinstructions_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_setinstructions_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -165,7 +219,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 12;
 
 function getInstalledSchemaVersion(): int
 {

@@ -574,5 +574,17 @@ function downloadAndImportRebrickableData(?callable $progressCallback = null): a
         }
     }
 
+    // part_set_counts (sets.php's getPartSetCounts()) is a lazily-computed
+    // cache of "how many sets does this part+color appear in" — correct
+    // only as of the data at the time each entry was computed. A full
+    // resync can change those counts (new sets add new appearances), so
+    // clear it here; it repopulates itself on demand, same as before.
+    try {
+        getPDO()->exec('TRUNCATE TABLE part_set_counts');
+    } catch (Throwable $e) {
+        // Table may not exist yet on a pre-migration install — the next
+        // migration run creates it and there's nothing to invalidate anyway.
+    }
+
     return ['summary' => $summary, 'errors' => $errors];
 }

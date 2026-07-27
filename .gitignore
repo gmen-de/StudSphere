@@ -6,6 +6,9 @@
 # Downloaded set/minifig/part images (potentially tens of thousands of files).
 /public/images/
 
+# User-uploaded building-instruction PDFs.
+/public/instructions/
+
 # Local, environment-specific DB credentials — never shipped in git, so a
 # fresh `git pull`/release copy never overwrites the admin's real config.
 # src/config.example.php is the tracked template; setup.php generates the
