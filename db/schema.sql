@@ -251,3 +251,33 @@ CREATE TABLE IF NOT EXISTS set_instructions (
     CONSTRAINT fk_setinstructions_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE,
     CONSTRAINT fk_setinstructions_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS owned_sets (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    set_id INT NOT NULL,
+    location_id INT NOT NULL,
+    condition_type ENUM('new','used') NOT NULL DEFAULT 'used',
+    has_instructions TINYINT(1) NOT NULL DEFAULT 0,
+    has_box TINYINT(1) NOT NULL DEFAULT 0,
+    box_complete TINYINT(1) NOT NULL DEFAULT 0,
+    notes TEXT DEFAULT NULL,
+    added_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_ownedset_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ownedset_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ownedset_user FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS owned_set_photos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    owned_set_id INT NOT NULL,
+    caption VARCHAR(255) DEFAULT NULL,
+    original_filename VARCHAR(255) NOT NULL,
+    stored_path VARCHAR(512) NOT NULL,
+    file_size INT NOT NULL,
+    uploaded_by INT DEFAULT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_ownedsetphoto_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ownedsetphoto_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

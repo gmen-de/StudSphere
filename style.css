@@ -2226,3 +2226,170 @@ footer {
 .ldraw-render-skip:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+/* Owned-set ("my collection") cards: a green border marks a set the
+   household already owns, an "Nx" badge in the corner shows how many
+   copies — layered onto the existing .set-card rather than a separate
+   component, so it stays visually consistent everywhere set cards appear. */
+.set-card {
+  position: relative;
+}
+
+.set-card-owned {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 1px #16a34a;
+}
+
+.set-card-owned-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.set-card-meta {
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.owned-set-message {
+  font-size: 0.85rem;
+  color: #dc2626;
+  margin: 0 0 0.5rem;
+}
+
+.owned-set-form {
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 28rem;
+  margin-top: 0.75rem;
+}
+
+.owned-set-form button[type='submit'] {
+  width: auto;
+  padding: 0.6rem 1.1rem;
+}
+
+#add-to-collection-cancel {
+  width: auto;
+  padding: 0.6rem 1.1rem;
+  background: #f1f5f9;
+  color: #475569;
+  margin-left: 0.5rem;
+}
+
+.owned-set-remove-button {
+  width: auto;
+  padding: 0.6rem 1.1rem;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.owned-set-remove-button:hover {
+  background: #fecaca;
+}
+
+.owned-set-parts-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.owned-set-part-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.85rem;
+  background: #ffffff;
+}
+
+.owned-set-part-image {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: #94a3b8;
+}
+
+.owned-set-part-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.owned-set-part-image svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.owned-set-part-name {
+  flex: 1 1 auto;
+  font-size: 0.9rem;
+}
+
+.owned-set-part-meta {
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.owned-set-missing-input {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.owned-set-missing-input input {
+  width: 4.5rem;
+  margin-top: 0;
+}
+
+.owned-set-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.85rem;
+  margin: 1rem 0;
+}
+
+.owned-set-photo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.owned-set-photo img {
+  width: 100%;
+  height: 10rem;
+  object-fit: cover;
+}
+
+.owned-set-photo-caption {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.owned-set-photo-delete {
+  width: auto;
+  margin: 0.5rem 0.75rem 0.75rem;
+  align-self: flex-start;
+  padding: 0.35rem 0.7rem;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.8rem;
+}

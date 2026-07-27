@@ -235,6 +235,51 @@ function addStorageStock(int $locationId, int $partId, int $colorId, string $con
 }
 
 /**
+ * Sets the exact quantity for one part+color+condition at a location
+ * (unlike addStorageStock(), which is additive) — used for corrections,
+ * e.g. recording that some of a part is missing from an owned set.
+ * Inserts the row if it doesn't exist yet; a resulting quantity of 0 still
+ * leaves the row in place rather than deleting it (getLocationStock() and
+ * getPartStock() already filter zero-quantity rows out of their results).
+ */
+function setStorageItemQuantity(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $userId): void
+{
+    $pdo = getPDO();
+    $pdo->beginTransaction();
+    try {
+        $currentStmt = $pdo->prepare(
+            'SELECT quantity FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        );
+        $currentStmt->execute([$locationId, $partId, $colorId, $conditionType]);
+        $current = $currentStmt->fetchColumn();
+        $currentQuantity = $current !== false ? (int) $current : 0;
+
+        if ($current === false) {
+            $insertStmt = $pdo->prepare(
+                'INSERT INTO storage_items (location_id, part_id, color_id, condition_type, quantity) VALUES (?, ?, ?, ?, ?)'
+            );
+            $insertStmt->execute([$locationId, $partId, $colorId, $conditionType, $newQuantity]);
+        } else {
+            $updateStmt = $pdo->prepare(
+                'UPDATE storage_items SET quantity = ? WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+            );
+            $updateStmt->execute([$newQuantity, $locationId, $partId, $colorId, $conditionType]);
+        }
+
+        $moveStmt = $pdo->prepare(
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity)
+             VALUES (?, ?, ?, ?, ?, \'correction\', ?, ?)'
+        );
+        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $newQuantity - $currentQuantity, $newQuantity]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/**
  * Current stock of one part across all storage locations, for the part
  * detail modal's "Lager" tab — one row per location/color/condition combo
  * that actually holds stock.

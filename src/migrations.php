@@ -152,8 +152,54 @@ function getSchemaMigrations(): array
                     file_size INT NOT NULL,
                     uploaded_by INT DEFAULT NULL,
                     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT fk_setinstructions_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE,
+                        CONSTRAINT fk_setinstructions_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE,
                     CONSTRAINT fk_setinstructions_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
+        13 => function (PDO $pdo): void {
+            // Owned set instances ("my collection") — one row per physical
+            // copy. Each instance gets its own storage_locations node
+            // (location_type 'owned_set', never offered in the manual "add
+            // location" UI — see getLocationTypes()) so its parts show up as
+            // real storage_items stock through the exact same location/part
+            // lookup machinery already used for loose parts, instead of a
+            // parallel "virtual location" concept. No separate
+            // missing-parts table: the set's nominal quantities come from
+            // its Rebrickable inventory (queried fresh), the actually-owned
+            // quantities are just storage_items.quantity at the instance's
+            // location — "missing" is nominal minus that, computed, never
+            // stored twice.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS owned_sets (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    set_id INT NOT NULL,
+                    location_id INT NOT NULL,
+                    condition_type ENUM(\'new\',\'used\') NOT NULL DEFAULT \'used\',
+                    has_instructions TINYINT(1) NOT NULL DEFAULT 0,
+                    has_box TINYINT(1) NOT NULL DEFAULT 0,
+                    box_complete TINYINT(1) NOT NULL DEFAULT 0,
+                    notes TEXT DEFAULT NULL,
+                    added_by INT DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_ownedset_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_ownedset_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_ownedset_user FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS owned_set_photos (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    owned_set_id INT NOT NULL,
+                    caption VARCHAR(255) DEFAULT NULL,
+                    original_filename VARCHAR(255) NOT NULL,
+                    stored_path VARCHAR(512) NOT NULL,
+                    file_size INT NOT NULL,
+                    uploaded_by INT DEFAULT NULL,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_ownedsetphoto_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_ownedsetphoto_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
@@ -219,7 +265,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 12;
+const CURRENT_SCHEMA_VERSION = 13;
 
 function getInstalledSchemaVersion(): int
 {

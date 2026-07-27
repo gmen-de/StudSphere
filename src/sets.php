@@ -13,14 +13,46 @@ const SETS_SEARCH_PAGE_SIZE = 100;
  * itself — results are grouped under a year heading (see
  * renderYearGroupedCards() in index.php), so it'd be redundant here.
  */
+/**
+ * $set['owned_count'] is optional — callers that want the "already in my
+ * collection" green border + Nx badge attach it themselves (batched via
+ * getOwnedSetCountsForSets(), not a per-card query) before rendering;
+ * callers that never touch ownership (most of them) just omit it and get
+ * the plain card exactly as before.
+ */
 function renderSetCard(array $set): string
 {
-    $html = '<a class="set-card" href="?page=set_detail&id=' . (int) $set['id'] . '">';
+    $ownedCount = $set['owned_count'] ?? 0;
+    $html = '<a class="set-card' . ($ownedCount > 0 ? ' set-card-owned' : '') . '" href="?page=set_detail&id=' . (int) $set['id'] . '">';
     $html .= '<span class="set-card-image">' . ($set['thumbnail'] !== null ? '<img src="' . htmlspecialchars($set['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
+    if ($ownedCount > 1) {
+        $html .= '<span class="set-card-owned-badge">' . (int) $ownedCount . 'x</span>';
+    }
     $html .= '<span class="set-card-num">' . htmlspecialchars($set['rebrickable_set_num']) . '</span>';
     $html .= '<span class="set-card-name" title="' . htmlspecialchars($set['name']) . '">' . htmlspecialchars($set['name']) . '</span>';
     $html .= '</a>';
     return $html;
+}
+
+/**
+ * Attaches 'owned_count' to each $items row in place (matched by 'id',
+ * batched in one query via getOwnedSetCountsForSets()) so renderSetCard()
+ * can show the ownership badge — call before rendering, not per-card.
+ *
+ * @param array<int, array<string, mixed>> $items rows with an 'id' key (sets.id)
+ * @return array<int, array<string, mixed>>
+ */
+function attachOwnedCounts(PDO $pdo, array $items): array
+{
+    if (empty($items)) {
+        return $items;
+    }
+    $counts = getOwnedSetCountsForSets($pdo, array_column($items, 'id'));
+    foreach ($items as &$item) {
+        $item['owned_count'] = $counts[(int) $item['id']] ?? 0;
+    }
+    unset($item);
+    return $items;
 }
 
 /**
@@ -50,7 +82,35 @@ function getSetThemeTree(PDO $pdo): array
          LEFT JOIN sets s ON s.theme = th.theme_id
          GROUP BY th.theme_id, th.name, th.parent_theme_id'
     )->fetchAll();
+    return buildThemeTree($rows);
+}
 
+/**
+ * Same tree shape as getSetThemeTree(), but counting owned_sets instead of
+ * the catalog-wide sets table — powers "themes I own sets from" (my_sets_themes).
+ */
+function getOwnedSetThemeTree(PDO $pdo): array
+{
+    $rows = $pdo->query(
+        'SELECT th.theme_id, th.name, th.parent_theme_id, COUNT(os.id) AS direct_count
+         FROM themes th
+         LEFT JOIN sets s ON s.theme = th.theme_id
+         LEFT JOIN owned_sets os ON os.set_id = s.id
+         GROUP BY th.theme_id, th.name, th.parent_theme_id'
+    )->fetchAll();
+    return buildThemeTree($rows);
+}
+
+/**
+ * The hierarchy-building/count-bubbling logic shared by getSetThemeTree()
+ * and getOwnedSetThemeTree() — which theme is a child of which never
+ * changes, only what's being counted per theme does.
+ *
+ * @param array<int, array{theme_id:mixed, name:string, parent_theme_id:mixed, direct_count:mixed}> $rows every theme, regardless of whether direct_count is 0
+ * @return array{byId: array<int, array{theme_id:int, name:string, parent_theme_id:?int, direct_count:int, recursive_count:int, children: array}>, roots: array}
+ */
+function buildThemeTree(array $rows): array
+{
     $byId = [];
     foreach ($rows as $row) {
         $themeId = (int) $row['theme_id'];
