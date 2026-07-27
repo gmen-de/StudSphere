@@ -2275,14 +2275,6 @@ footer {
   padding: 0.6rem 1.1rem;
 }
 
-#add-to-collection-cancel {
-  width: auto;
-  padding: 0.6rem 1.1rem;
-  background: #f1f5f9;
-  color: #475569;
-  margin-left: 0.5rem;
-}
-
 .owned-set-remove-button {
   width: auto;
   padding: 0.6rem 1.1rem;
@@ -2353,6 +2345,76 @@ footer {
 .owned-set-missing-input input {
   width: 4.5rem;
   margin-top: 0;
+}
+
+.owned-set-wizard-box {
+  max-width: 34rem;
+}
+
+.owned-set-wizard-progress {
+  margin: -0.5rem 0 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.owned-set-wizard-step h3 {
+  margin: 0 0 0.75rem;
+}
+
+.owned-set-wizard-step > label,
+.owned-set-wizard-step > .checkbox-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+}
+
+.owned-set-wizard-step .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+}
+
+.owned-set-wizard-detail-group {
+  margin-bottom: 0.85rem;
+}
+
+.owned-set-wizard-subnote {
+  margin-top: 0.4rem;
+  width: 100%;
+}
+
+.owned-set-wizard-error {
+  font-size: 0.85rem;
+  color: #dc2626;
+  margin: 0 0 0.5rem;
+  min-height: 1.1em;
+}
+
+.owned-set-wizard-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.owned-set-wizard-nav button {
+  width: auto;
+  padding: 0.6rem 1.1rem;
+}
+
+.owned-set-wizard-nav .owned-set-wizard-back {
+  background: #f1f5f9;
+  color: #475569;
+  margin-right: auto;
+}
+
+#owned-set-wizard-skip {
+  margin-right: auto;
+  font-size: 0.85rem;
+  color: #64748b;
 }
 
 .owned-set-photo-grid {

@@ -546,8 +546,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_l
     }
 }
 
-$ownedSetMessage = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_owned_set') {
+    header('Content-Type: application/json');
     $ownedSetSetId = (int) ($_POST['set_id'] ?? 0);
     $parentLocationRaw = trim((string) ($_POST['parent_location_id'] ?? ''));
     $parentLocationId = $parentLocationRaw !== '' ? (int) $parentLocationRaw : null;
@@ -557,18 +557,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
     $boxComplete = ($_POST['box_complete'] ?? '') === '1';
     $ownedSetNotes = trim((string) ($_POST['notes'] ?? ''));
     $ownedSetNotes = $ownedSetNotes !== '' ? $ownedSetNotes : null;
+    $instructionsNotes = trim((string) ($_POST['instructions_notes'] ?? ''));
+    $instructionsNotes = $instructionsNotes !== '' ? $instructionsNotes : null;
+    $boxNotes = trim((string) ($_POST['box_notes'] ?? ''));
+    $boxNotes = $boxNotes !== '' ? $boxNotes : null;
+    $boxCompleteNotes = trim((string) ($_POST['box_complete_notes'] ?? ''));
+    $boxCompleteNotes = $boxCompleteNotes !== '' ? $boxCompleteNotes : null;
 
     try {
         if ($ownedSetSetId <= 0 || getSetById($pdo, $ownedSetSetId) === null) {
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
-        $newOwnedSetId = addOwnedSet($pdo, $ownedSetSetId, $parentLocationId, $conditionType, $hasInstructions, $hasBox, $boxComplete, $ownedSetNotes, (int) $_SESSION['user_id']);
+        if ($parentLocationId === null) {
+            throw new RuntimeException(t('owned_set_wizard_location_required'));
+        }
+        $newOwnedSetId = addOwnedSet(
+            $pdo,
+            $ownedSetSetId,
+            $parentLocationId,
+            $conditionType,
+            $hasInstructions,
+            $hasBox,
+            $boxComplete,
+            $ownedSetNotes,
+            (int) $_SESSION['user_id'],
+            $instructionsNotes,
+            $boxNotes,
+            $boxCompleteNotes
+        );
         refreshAppStatsCache($pdo);
-        header('Location: ?page=owned_set_detail&id=' . $newOwnedSetId);
-        exit;
+        echo json_encode(['success' => true, 'ownedSetId' => $newOwnedSetId], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
-        $ownedSetMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rename_location') {
@@ -851,18 +874,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 $ownedSetDetailMessage = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_owned_set') {
     $updateOwnedSetId = (int) ($_POST['owned_set_id'] ?? 0);
-    $conditionType = ($_POST['condition_type'] ?? 'used') === 'new' ? 'new' : 'used';
     $hasInstructions = ($_POST['has_instructions'] ?? '') === '1';
     $hasBox = ($_POST['has_box'] ?? '') === '1';
     $boxComplete = ($_POST['box_complete'] ?? '') === '1';
     $notes = trim((string) ($_POST['notes'] ?? ''));
     $notes = $notes !== '' ? $notes : null;
+    $instructionsNotes = trim((string) ($_POST['instructions_notes'] ?? ''));
+    $instructionsNotes = $instructionsNotes !== '' ? $instructionsNotes : null;
+    $boxNotes = trim((string) ($_POST['box_notes'] ?? ''));
+    $boxNotes = $boxNotes !== '' ? $boxNotes : null;
+    $boxCompleteNotes = trim((string) ($_POST['box_complete_notes'] ?? ''));
+    $boxCompleteNotes = $boxCompleteNotes !== '' ? $boxCompleteNotes : null;
 
     try {
         if (getOwnedSetById($pdo, $updateOwnedSetId) === null) {
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
-        updateOwnedSet($pdo, $updateOwnedSetId, $conditionType, $hasInstructions, $hasBox, $boxComplete, $notes);
+        updateOwnedSet($pdo, $updateOwnedSetId, $hasInstructions, $hasBox, $boxComplete, $notes, $instructionsNotes, $boxNotes, $boxCompleteNotes);
         $ownedSetDetailMessage = t('owned_set_updated_message');
     } catch (Throwable $e) {
         $ownedSetDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
@@ -876,24 +904,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         if ($ownedSet === null) {
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
-        $nominalByKey = [];
-        foreach (getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale()) as $part) {
-            $nominalByKey[$part['part_id'] . ':' . $part['color_id']] = $part['nominal_quantity'];
-        }
-        $missingInput = (array) ($_POST['missing'] ?? []);
-        foreach ($missingInput as $key => $rawMissing) {
-            if (!isset($nominalByKey[$key])) {
-                continue;
-            }
-            [$partId, $colorId] = array_map('intval', explode(':', (string) $key, 2));
-            $missingQuantity = max(0, (int) $rawMissing);
-            setOwnedSetPartMissing($pdo, $ownedSet, $partId, $colorId, $nominalByKey[$key], $missingQuantity, (int) $_SESSION['user_id']);
-        }
+        applyOwnedSetMissingParts($pdo, $ownedSet, (array) ($_POST['missing'] ?? []), (int) $_SESSION['user_id']);
         refreshAppStatsCache($pdo);
         $ownedSetDetailMessage = t('owned_set_updated_message');
     } catch (Throwable $e) {
         $ownedSetDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
     }
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'owned_set_missing_parts') {
+    header('Content-Type: application/json');
+    $wizardOwnedSetId = (int) ($_GET['owned_set_id'] ?? 0);
+    $wizardOwnedSet = getOwnedSetById($pdo, $wizardOwnedSetId);
+    if ($wizardOwnedSet === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode(['success' => true, 'parts' => getOwnedSetPartsWithStatus($pdo, $wizardOwnedSet, getLocale())], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_owned_set_missing_parts_wizard') {
+    header('Content-Type: application/json');
+    try {
+        $wizardOwnedSetId = (int) ($_POST['owned_set_id'] ?? 0);
+        $wizardOwnedSet = getOwnedSetById($pdo, $wizardOwnedSetId);
+        if ($wizardOwnedSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        applyOwnedSetMissingParts($pdo, $wizardOwnedSet, (array) ($_POST['missing'] ?? []), (int) $_SESSION['user_id']);
+        refreshAppStatsCache($pdo);
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'open_owned_set') {
+    header('Content-Type: application/json');
+    try {
+        $openOwnedSetId = (int) ($_POST['owned_set_id'] ?? 0);
+        $openOwnedSet = getOwnedSetById($pdo, $openOwnedSetId);
+        if ($openOwnedSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        openOwnedSet($pdo, $openOwnedSet);
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remove_owned_set') {
@@ -2103,52 +2167,8 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
         $content .= '</table>';
     }
 
-    if ($ownedSetMessage !== '') {
-        $content .= '<p class="owned-set-message">' . htmlspecialchars($ownedSetMessage) . '</p>';
-    }
-
-    $reopenForm = $ownedSetMessage !== '';
-    $content .= '<a href="#" id="add-to-collection-toggle" style="' . ($reopenForm ? 'display:none;' : '') . '">' . htmlspecialchars(t('set_detail_add_to_collection_button')) . '</a>';
-    $content .= '<form method="post" id="add-to-collection-form" class="owned-set-form" style="' . ($reopenForm ? 'display:flex;' : 'display:none;') . '">';
-    $content .= '<input type="hidden" name="action" value="add_owned_set">';
-    $content .= '<input type="hidden" name="set_id" value="' . $setId . '">';
-    $content .= '<label>' . htmlspecialchars(t('owned_set_location_label')) . '<select name="parent_location_id">';
-    $content .= '<option value="">' . htmlspecialchars(t('location_parent_none')) . '</option>';
-    foreach (getStorageLocationOptions() as $optId => $optLabel) {
-        $content .= '<option value="' . $optId . '">' . htmlspecialchars($optLabel) . '</option>';
-    }
-    $content .= '</select></label>';
-    $content .= '<label class="checkbox-label"><input type="radio" name="condition_type" value="new"> ' . htmlspecialchars(t('owned_set_condition_new')) . '</label>';
-    $content .= '<label class="checkbox-label"><input type="radio" name="condition_type" value="used" checked> ' . htmlspecialchars(t('owned_set_condition_used')) . '</label>';
-    $content .= '<label class="checkbox-label"><input type="checkbox" name="has_instructions" value="1"> ' . htmlspecialchars(t('owned_set_has_instructions')) . '</label>';
-    $content .= '<label class="checkbox-label"><input type="checkbox" name="has_box" value="1"> ' . htmlspecialchars(t('owned_set_has_box')) . '</label>';
-    $content .= '<label class="checkbox-label"><input type="checkbox" name="box_complete" value="1"> ' . htmlspecialchars(t('owned_set_box_complete')) . '</label>';
-    $content .= '<label>' . htmlspecialchars(t('owned_set_notes_label')) . '<textarea name="notes" rows="3"></textarea></label>';
-    $content .= '<button type="submit">' . htmlspecialchars(t('owned_set_save_button')) . '</button>';
-    $content .= '<button type="button" id="add-to-collection-cancel">' . htmlspecialchars(t('set_detail_retired_year_cancel_button')) . '</button>';
-    $content .= '</form>';
-
-    $content .= <<<SCRIPT
-<script>
-(function(){
-  var toggle = document.getElementById("add-to-collection-toggle");
-  var form = document.getElementById("add-to-collection-form");
-  var cancelBtn = document.getElementById("add-to-collection-cancel");
-  if (!toggle || !form || !cancelBtn) {
-    return;
-  }
-  toggle.addEventListener("click", function(e) {
-    e.preventDefault();
-    toggle.style.display = "none";
-    form.style.display = "flex";
-  });
-  cancelBtn.addEventListener("click", function() {
-    form.style.display = "none";
-    toggle.style.display = "inline-block";
-  });
-})();
-</script>
-SCRIPT;
+    $content .= '<a href="#" id="add-owned-set-open">' . htmlspecialchars(t('set_detail_add_to_collection_button')) . '</a>';
+    $content .= renderAddOwnedSetWizardModal($setId);
 
     $content .= '</div>';
 
@@ -2521,6 +2541,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
 
     $content .= '<div class="set-detail-table-wrap">';
     $content .= '<table class="set-detail-table">';
+    $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th><td>' . htmlspecialchars($ownedSet['condition_type'] === 'new' ? t('owned_set_condition_new') : t('owned_set_condition_used')) . '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_completeness')) . '</th><td>' . htmlspecialchars(t('owned_set_completeness_value', ['percent' => (string) $completeness['percent'], 'actual' => number_format($completeness['actual']), 'nominal' => number_format($completeness['nominal'])])) . '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_location')) . '</th><td>';
     $locationLinks = [];
@@ -2537,11 +2558,12 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= '<form method="post" class="owned-set-form">';
     $content .= '<input type="hidden" name="action" value="update_owned_set">';
     $content .= '<input type="hidden" name="owned_set_id" value="' . $ownedSet['id'] . '">';
-    $content .= '<label class="checkbox-label"><input type="radio" name="condition_type" value="new"' . ($ownedSet['condition_type'] === 'new' ? ' checked' : '') . '> ' . htmlspecialchars(t('owned_set_condition_new')) . '</label>';
-    $content .= '<label class="checkbox-label"><input type="radio" name="condition_type" value="used"' . ($ownedSet['condition_type'] === 'used' ? ' checked' : '') . '> ' . htmlspecialchars(t('owned_set_condition_used')) . '</label>';
     $content .= '<label class="checkbox-label"><input type="checkbox" name="has_instructions" value="1"' . ($ownedSet['has_instructions'] ? ' checked' : '') . '> ' . htmlspecialchars(t('owned_set_has_instructions')) . '</label>';
+    $content .= '<label>' . htmlspecialchars(t('owned_set_instructions_notes_label')) . '<textarea name="instructions_notes" rows="2">' . htmlspecialchars((string) $ownedSet['instructions_notes']) . '</textarea></label>';
     $content .= '<label class="checkbox-label"><input type="checkbox" name="has_box" value="1"' . ($ownedSet['has_box'] ? ' checked' : '') . '> ' . htmlspecialchars(t('owned_set_has_box')) . '</label>';
+    $content .= '<label>' . htmlspecialchars(t('owned_set_box_notes_label')) . '<textarea name="box_notes" rows="2">' . htmlspecialchars((string) $ownedSet['box_notes']) . '</textarea></label>';
     $content .= '<label class="checkbox-label"><input type="checkbox" name="box_complete" value="1"' . ($ownedSet['box_complete'] ? ' checked' : '') . '> ' . htmlspecialchars(t('owned_set_box_complete')) . '</label>';
+    $content .= '<label>' . htmlspecialchars(t('owned_set_box_complete_notes_label')) . '<textarea name="box_complete_notes" rows="2">' . htmlspecialchars((string) $ownedSet['box_complete_notes']) . '</textarea></label>';
     $content .= '<label>' . htmlspecialchars(t('owned_set_notes_label')) . '<textarea name="notes" rows="3">' . htmlspecialchars((string) $ownedSet['notes']) . '</textarea></label>';
     $content .= '<button type="submit">' . htmlspecialchars(t('owned_set_save_button')) . '</button>';
     $content .= '</form>';
@@ -2574,26 +2596,69 @@ SCRIPT;
     $content .= '</div></div></div>';
 
     $content .= '<h2>' . htmlspecialchars(t('owned_set_missing_parts_heading')) . '</h2>';
-    $parts = getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale());
-    if (empty($parts)) {
-        $content .= '<section class="card"><p>' . htmlspecialchars(t('set_detail_inventory_empty')) . '</p></section>';
-    } else {
-        $content .= '<form method="post">';
-        $content .= '<input type="hidden" name="action" value="update_owned_set_missing_parts">';
-        $content .= '<input type="hidden" name="owned_set_id" value="' . $ownedSet['id'] . '">';
-        $content .= '<div class="owned-set-parts-list">';
-        foreach ($parts as $part) {
-            $missing = $part['nominal_quantity'] - $part['actual_quantity'];
-            $key = $part['part_id'] . ':' . $part['color_id'];
-            $content .= '<div class="owned-set-part-row">';
-            $content .= '<span class="owned-set-part-image">' . ($part['thumbnail'] !== null ? '<img src="' . htmlspecialchars($part['thumbnail']) . '" alt="">' : getNavIcon('bricks')) . '</span>';
-            $content .= '<span class="owned-set-part-name">' . htmlspecialchars($part['name']) . '<br><span class="owned-set-part-meta">' . htmlspecialchars(($part['color_name'] ?? '') . ' · ' . t('owned_set_nominal_of', ['count' => (string) $part['nominal_quantity']])) . '</span></span>';
-            $content .= '<label class="owned-set-missing-input">' . htmlspecialchars(t('owned_set_missing_label')) . '<input type="number" name="missing[' . htmlspecialchars($key) . ']" value="' . $missing . '" min="0" max="' . $part['nominal_quantity'] . '"></label>';
-            $content .= '</div>';
+    if ($ownedSet['condition_type'] === 'new') {
+        // Still sealed: nothing can be verified without opening it, which *is*
+        // the transition to "used" (see openOwnedSet()'s doc comment) — so no
+        // missing-parts editor is offered until that's confirmed.
+        $content .= '<section class="card">';
+        $content .= '<p>' . htmlspecialchars(t('owned_set_sealed_note')) . '</p>';
+        $content .= '<button type="button" id="owned-set-open-button">' . htmlspecialchars(t('owned_set_open_button')) . '</button>';
+        $content .= '<span class="owned-set-message" id="owned-set-open-message"></span>';
+        $content .= '</section>';
+
+        $openConfirmJson = json_encode(t('owned_set_open_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $openErrorJson = json_encode(t('import_error_retry'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $content .= <<<SCRIPT
+<script>
+(function(){
+  var btn = document.getElementById("owned-set-open-button");
+  var msg = document.getElementById("owned-set-open-message");
+  if (!btn || !msg) { return; }
+  btn.addEventListener("click", function() {
+    if (!window.confirm($openConfirmJson)) {
+      return;
+    }
+    var formData = new FormData();
+    formData.set("action", "open_owned_set");
+    formData.set("owned_set_id", "{$ownedSet['id']}");
+    fetch("?", { method: "POST", body: formData, credentials: "same-origin" })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          window.location.reload();
+        } else {
+          msg.textContent = res.message || $openErrorJson;
         }
-        $content .= '</div>';
-        $content .= '<button type="submit">' . htmlspecialchars(t('owned_set_save_button')) . '</button>';
-        $content .= '</form>';
+      })
+      .catch(function() {
+        msg.textContent = $openErrorJson;
+      });
+  });
+})();
+</script>
+SCRIPT;
+    } else {
+        $parts = getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale());
+        if (empty($parts)) {
+            $content .= '<section class="card"><p>' . htmlspecialchars(t('set_detail_inventory_empty')) . '</p></section>';
+        } else {
+            $content .= '<form method="post">';
+            $content .= '<input type="hidden" name="action" value="update_owned_set_missing_parts">';
+            $content .= '<input type="hidden" name="owned_set_id" value="' . $ownedSet['id'] . '">';
+            $content .= '<div class="owned-set-parts-list">';
+            foreach ($parts as $part) {
+                $missing = $part['nominal_quantity'] - $part['actual_quantity'];
+                $key = $part['part_id'] . ':' . $part['color_id'];
+                $content .= '<div class="owned-set-part-row">';
+                $content .= '<span class="owned-set-part-image">' . ($part['thumbnail'] !== null ? '<img src="' . htmlspecialchars($part['thumbnail']) . '" alt="">' : getNavIcon('bricks')) . '</span>';
+                $content .= '<span class="owned-set-part-name">' . htmlspecialchars($part['name']) . '<br><span class="owned-set-part-meta">' . htmlspecialchars(($part['color_name'] ?? '') . ' · ' . t('owned_set_nominal_of', ['count' => (string) $part['nominal_quantity']])) . '</span></span>';
+                $content .= '<label class="owned-set-missing-input">' . htmlspecialchars(t('owned_set_missing_label')) . '<input type="number" name="missing[' . htmlspecialchars($key) . ']" value="' . $missing . '" min="0" max="' . $part['nominal_quantity'] . '"></label>';
+                $content .= '</div>';
+            }
+            $content .= '</div>';
+            $content .= '<button type="submit">' . htmlspecialchars(t('owned_set_save_button')) . '</button>';
+            $content .= '</form>';
+        }
     }
 
     $content .= '<h2>' . htmlspecialchars(t('owned_set_photos_heading')) . '</h2>';

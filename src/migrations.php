@@ -203,6 +203,14 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        14 => function (PDO $pdo): void {
+            // Per-detail notes for the "add to collection" wizard's step 2
+            // (Bauanleitung/OVP/OVP vollständig each get their own note,
+            // separate from the general "notes" field added in migration 13).
+            addColumnIfMissing($pdo, 'owned_sets', 'instructions_notes', 'TEXT DEFAULT NULL');
+            addColumnIfMissing($pdo, 'owned_sets', 'box_notes', 'TEXT DEFAULT NULL');
+            addColumnIfMissing($pdo, 'owned_sets', 'box_complete_notes', 'TEXT DEFAULT NULL');
+        },
     ];
 }
 
@@ -265,7 +273,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 13;
+const CURRENT_SCHEMA_VERSION = 14;
 
 function getInstalledSchemaVersion(): int
 {
