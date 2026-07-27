@@ -563,6 +563,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
         $newOwnedSetId = addOwnedSet($pdo, $ownedSetSetId, $parentLocationId, $conditionType, $hasInstructions, $hasBox, $boxComplete, $ownedSetNotes, (int) $_SESSION['user_id']);
+        refreshAppStatsCache($pdo);
         header('Location: ?page=owned_set_detail&id=' . $newOwnedSetId);
         exit;
     } catch (Throwable $e) {
@@ -888,6 +889,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
             $missingQuantity = max(0, (int) $rawMissing);
             setOwnedSetPartMissing($pdo, $ownedSet, $partId, $colorId, $nominalByKey[$key], $missingQuantity, (int) $_SESSION['user_id']);
         }
+        refreshAppStatsCache($pdo);
         $ownedSetDetailMessage = t('owned_set_updated_message');
     } catch (Throwable $e) {
         $ownedSetDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
@@ -899,6 +901,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remov
     $removeOwnedSetSetId = (int) ($_POST['set_id'] ?? 0);
     try {
         removeOwnedSet($pdo, $removeOwnedSetId);
+        refreshAppStatsCache($pdo);
         header('Location: ?page=set_detail&id=' . $removeOwnedSetSetId);
         exit;
     } catch (Throwable $e) {
