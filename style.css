@@ -357,6 +357,45 @@ header .brand small {
   text-decoration: none;
 }
 
+.nav-dropdown-item {
+  position: relative;
+}
+
+.nav-dropdown-item > a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.nav-dropdown-item > a::after {
+  content: "\25B8";
+  font-size: 0.7rem;
+  opacity: 0.5;
+}
+
+.nav-subdropdown {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  top: 0;
+  left: 100%;
+  min-width: 180px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 0.85rem;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+  padding: 0.4rem;
+  z-index: 31;
+}
+
+.nav-dropdown-item:hover > .nav-subdropdown,
+.nav-dropdown-item:focus-within > .nav-subdropdown {
+  display: flex;
+}
+
 .nav-search {
   display: flex;
   align-items: stretch;

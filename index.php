@@ -100,16 +100,8 @@ function render(string $title, string $content): void
 
 function getNavMenu(PDO $pdo): array
 {
-    $mySetsChildren = [
-        ['labelKey' => 'nav_my_sets_all', 'href' => '?page=my_sets_all'],
-    ];
     $ownedThemeTree = getOwnedSetThemeTree($pdo);
-    foreach (getSetThemeChildren($ownedThemeTree, null) as $theme) {
-        $mySetsChildren[] = [
-            'label' => $theme['name'],
-            'href' => '?page=my_sets_themes&theme=' . $theme['theme_id'],
-        ];
-    }
+    $mySetsChildren = buildOwnedThemeNavItems($ownedThemeTree, getSetThemeChildren($ownedThemeTree, null));
 
     return [
         ['icon' => 'build', 'labelKey' => 'nav_build', 'href' => $_SERVER['PHP_SELF'], 'children' => []],
@@ -132,6 +124,57 @@ function getNavMenu(PDO $pdo): array
         ]],
         ['icon' => 'collection', 'labelKey' => 'nav_my_collection', 'href' => '?page=my_collection', 'children' => []],
     ];
+}
+
+/**
+ * Turns a level of getSetThemeChildren() output into nav-dropdown item
+ * shape, recursing into owned subthemes so the "Meine Sets" menu can flyout
+ * into them (e.g. Train -> 9V) instead of only showing the top level.
+ *
+ * @param array<int, array{theme_id:int, name:string, recursive_count:int}> $themeNodes
+ * @return array<int, array{label:string, href:string, children?:array}>
+ */
+function buildOwnedThemeNavItems(array $tree, array $themeNodes): array
+{
+    $items = [];
+    foreach ($themeNodes as $theme) {
+        $item = [
+            'label' => $theme['name'],
+            'href' => '?page=my_sets_themes&theme=' . $theme['theme_id'],
+        ];
+        $subThemes = getSetThemeChildren($tree, $theme['theme_id']);
+        if (!empty($subThemes)) {
+            $item['children'] = buildOwnedThemeNavItems($tree, $subThemes);
+        }
+        $items[] = $item;
+    }
+    return $items;
+}
+
+/**
+ * Renders one level of nav-dropdown items, recursing into a ".nav-subdropdown"
+ * flyout for any item that carries its own 'children' (see
+ * buildOwnedThemeNavItems()). Items may use either 'label' (already a
+ * display string, e.g. a theme name) or 'labelKey' (translated).
+ *
+ * @param array<int, array{label?:string, labelKey?:string, href:string, children?:array}> $items
+ */
+function renderNavDropdownItems(array $items): string
+{
+    $html = '';
+    foreach ($items as $item) {
+        $label = $item['label'] ?? t($item['labelKey']);
+        $href = htmlspecialchars($item['href']);
+        if (!empty($item['children'])) {
+            $html .= '<div class="nav-dropdown-item">';
+            $html .= '<a href="' . $href . '">' . htmlspecialchars($label) . '</a>';
+            $html .= '<div class="nav-subdropdown">' . renderNavDropdownItems($item['children']) . '</div>';
+            $html .= '</div>';
+        } else {
+            $html .= '<a href="' . $href . '">' . htmlspecialchars($label) . '</a>';
+        }
+    }
+    return $html;
 }
 
 function getSearchScopes(): array
@@ -247,12 +290,7 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
         echo '<div class="nav-item">';
         echo '<a class="nav-link" href="' . htmlspecialchars($item['href']) . '"><span class="nav-icon">' . getNavIcon($item['icon']) . '</span><span class="nav-label">' . htmlspecialchars(t($item['labelKey'])) . '</span></a>';
         if (!empty($item['children'])) {
-            echo '<div class="nav-dropdown">';
-            foreach ($item['children'] as $child) {
-                $childLabel = $child['label'] ?? t($child['labelKey']);
-                echo '<a href="' . htmlspecialchars($child['href']) . '">' . htmlspecialchars($childLabel) . '</a>';
-            }
-            echo '</div>';
+            echo '<div class="nav-dropdown">' . renderNavDropdownItems($item['children']) . '</div>';
         }
         echo '</div>';
     }
