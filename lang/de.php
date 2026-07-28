@@ -260,7 +260,7 @@ return [
     'nav_colors_search' => 'Farben suchen',
     'nav_my_sets' => 'Meine Sets',
     'nav_my_sets_all' => 'Alle Sets',
-    'nav_my_sets_themes' => 'Themes von denen ich Sets habe',
+    'nav_my_sets_themes' => 'Meine Sets',
     'nav_my_bricks' => 'Meine Bausteine',
     'nav_my_bricks_all' => 'Alle Bausteine',
     'nav_my_bricks_by_location' => 'Bausteine nach Lagerort',
