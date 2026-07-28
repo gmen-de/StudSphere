@@ -1805,10 +1805,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'sets_search') {
     $perPage = SETS_SEARCH_PAGE_SIZE;
     $isTextSearch = $searchQuery !== '';
     // A text search ignores the theme hierarchy entirely (search across the
-    // whole catalog); otherwise, browsing into a theme (any theme, leaf or
-    // not) shows its own + every subtheme's sets combined — see
-    // getThemeAndDescendantIds()'s doc comment for why "recursive" was
-    // chosen over "exact theme only".
+    // whole catalog); otherwise, browsing into a theme shows only sets
+    // tagged with that exact theme_id — subthemes are reached by drilling
+    // further into their own tile, not folded into this level's results.
     $hasResultsGrid = $isTextSearch || $themeParam !== null;
 
     $renderSetsResultsGrid = function (array $results, int $pageNum, int $perPage) use ($pdo): string {
@@ -1901,8 +1900,7 @@ SCRIPT;
         if ($isTextSearch) {
             $selectedThemeIds = [];
         } else {
-            $tree = getSetThemeTree($pdo);
-            $selectedThemeIds = array_map('strval', getThemeAndDescendantIds($tree, $themeParam));
+            $selectedThemeIds = [(string) $themeParam];
         }
         $results = searchSets($pdo, $searchQuery, $selectedThemeIds, $pageNum, $perPage);
         $results['items'] = attachOwnedCounts($pdo, $results['items']);
@@ -1967,8 +1965,7 @@ SCRIPT;
         }
 
         if ($themeParam !== null) {
-            $selectedThemeIds = array_map('strval', getThemeAndDescendantIds($tree, $themeParam));
-            $results = searchSets($pdo, '', $selectedThemeIds, $pageNum, $perPage);
+            $results = searchSets($pdo, '', [(string) $themeParam], $pageNum, $perPage);
             $content .= $renderSetsResultsGrid($results, $pageNum, $perPage);
         }
     }
@@ -3108,8 +3105,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_sets_themes') {
     }
 
     if ($themeParam !== null) {
-        $themeIds = getThemeAndDescendantIds($tree, $themeParam);
-        $owned = getOwnedSetsForThemes($pdo, $themeIds);
+        $owned = getOwnedSetsForThemes($pdo, [$themeParam]);
         if (!empty($owned)) {
             $content .= '<div class="sets-grid">';
             foreach ($owned as $inst) {
