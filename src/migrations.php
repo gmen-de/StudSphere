@@ -262,6 +262,15 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        17 => function (PDO $pdo): void {
+            // Public self-registration is gone (see index.php) — creating a
+            // user is now an admin-only action in Settings. Every existing
+            // account predates that distinction and already had full access,
+            // so all of them become admins here; only accounts created after
+            // this point can be plain (non-admin) members.
+            addColumnIfMissing($pdo, 'users', 'is_admin', 'TINYINT(1) NOT NULL DEFAULT 0');
+            $pdo->exec('UPDATE users SET is_admin = 1');
+        },
     ];
 }
 
@@ -324,7 +333,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 16;
+const CURRENT_SCHEMA_VERSION = 17;
 
 function getInstalledSchemaVersion(): int
 {

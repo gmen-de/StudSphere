@@ -758,6 +758,28 @@ button[type='submit'] {
   margin-left: 0.35rem;
 }
 
+.admin-user-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.admin-user-list li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.admin-badge {
+  display: inline-block;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  margin-left: 0.35rem;
+}
+
 .location-delete-form {
   display: inline;
 }

@@ -359,7 +359,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 require_once __DIR__ . '/src/db.php';
                 $pdo = getPDO();
                 $hash = password_hash($adminPass, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare('INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)');
+                $stmt = $pdo->prepare('INSERT INTO users (username, password_hash, email, is_admin) VALUES (?, ?, ?, 1)');
                 $stmt->execute([$adminUser, $hash, $adminEmail]);
                 $_SESSION['setup_admin'] = true;
                 header('Location: setup.php?step=4');
@@ -389,7 +389,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 require_once __DIR__ . '/src/db.php';
                 $pdo = getPDO();
                 $hash = password_hash($userPass, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare('INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)');
+                $stmt = $pdo->prepare('INSERT INTO users (username, password_hash, email, is_admin) VALUES (?, ?, ?, 0)');
                 $stmt->execute([$userName, $hash, $userEmail]);
                 header('Location: setup.php?step=5');
                 exit;

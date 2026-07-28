@@ -266,20 +266,6 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '</body></html>';
 }
 
-if (isset($_POST['action']) && $_POST['action'] === 'register') {
-    $username = trim($_POST['username'] ?? '');
-    $password = $_POST['password'] ?? '';
-    $email = trim($_POST['email'] ?? '');
-
-    if ($username !== '' && $password !== '') {
-        $hash = password_hash($password, PASSWORD_DEFAULT);
-        $stmt = $pdo->prepare('INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)');
-        $stmt->execute([$username, $hash, $email]);
-        render(t('register_success_title'), '<section class="card notice"><h2>' . htmlspecialchars(t('register_success_heading')) . '</h2><p>' . htmlspecialchars(t('register_success_message')) . '</p></section>');
-        exit;
-    }
-}
-
 if (isset($_POST['action']) && $_POST['action'] === 'login') {
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
@@ -350,8 +336,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'set_locale') {
 
 if (!isset($_SESSION['user_id'])) {
     $content = '<section class="card"><h2>' . htmlspecialchars(t('login_title')) . '</h2><form method="post"><input type="hidden" name="action" value="login"><label>' . htmlspecialchars(t('login_username')) . '<input name="username" autocomplete="username"></label><label>' . htmlspecialchars(t('login_password')) . '<input type="password" name="password" autocomplete="current-password"></label><button type="submit">' . htmlspecialchars(t('login_button')) . '</button></form></section>';
-    $content .= '<section class="card"><h2>' . htmlspecialchars(t('register_title')) . '</h2><form method="post"><input type="hidden" name="action" value="register"><label>' . htmlspecialchars(t('register_username')) . '<input name="username" autocomplete="username"></label><label>' . htmlspecialchars(t('register_email')) . '<input type="email" name="email" autocomplete="email"></label><label>' . htmlspecialchars(t('register_password')) . '<input type="password" name="password" autocomplete="new-password"></label><button type="submit">' . htmlspecialchars(t('register_button')) . '</button></form></section>';
-    render(t('login_register_title'), $content);
+    render(t('login_title'), $content);
     exit;
 }
 
@@ -1052,7 +1037,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_s
     exit;
 }
 
-$stmt = $pdo->prepare('SELECT username FROM users WHERE id = ?');
+$stmt = $pdo->prepare('SELECT username, is_admin FROM users WHERE id = ?');
 $stmt->execute([$_SESSION['user_id']]);
 $user = $stmt->fetch();
 
@@ -1060,6 +1045,43 @@ if ($user === false) {
     session_destroy();
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
+}
+$user['is_admin'] = (bool) $user['is_admin'];
+
+$adminUserMessage = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'admin_create_user') {
+    // Re-checked here, not just hidden in the UI — self-registration is
+    // gone specifically so that creating an account is an admin-only
+    // action, and a non-admin could otherwise still POST this directly.
+    if (!$user['is_admin']) {
+        http_response_code(403);
+        exit;
+    }
+    $newUsername = trim((string) ($_POST['username'] ?? ''));
+    $newPassword = (string) ($_POST['password'] ?? '');
+    $newPasswordConfirm = (string) ($_POST['password_confirm'] ?? '');
+    $newEmail = trim((string) ($_POST['email'] ?? ''));
+    $newIsAdmin = ($_POST['is_admin'] ?? '') === '1';
+
+    if ($newUsername === '' || $newPassword === '') {
+        $adminUserMessage = t('admin_user_required');
+    } elseif ($newPassword !== $newPasswordConfirm) {
+        $adminUserMessage = t('admin_user_password_mismatch');
+    } else {
+        try {
+            $existsStmt = $pdo->prepare('SELECT id FROM users WHERE username = ?');
+            $existsStmt->execute([$newUsername]);
+            if ($existsStmt->fetchColumn() !== false) {
+                throw new RuntimeException(t('admin_user_exists'));
+            }
+            $hash = password_hash($newPassword, PASSWORD_DEFAULT);
+            $insertStmt = $pdo->prepare('INSERT INTO users (username, password_hash, email, is_admin) VALUES (?, ?, ?, ?)');
+            $insertStmt->execute([$newUsername, $hash, $newEmail !== '' ? $newEmail : null, $newIsAdmin ? 1 : 0]);
+            $adminUserMessage = t('admin_user_created', ['username' => $newUsername]);
+        } catch (Throwable $e) {
+            $adminUserMessage = t('admin_user_save_failed', ['message' => $e->getMessage()]);
+        }
+    }
 }
 
 if (isset($_GET['page']) && $_GET['page'] === 'settings') {
@@ -1524,6 +1546,38 @@ SCRIPT;
 })();
 </script>
 SCRIPT;
+
+    if ($user['is_admin']) {
+        $content .= '<h2>' . htmlspecialchars(t('admin_users_title')) . '</h2>';
+        if ($adminUserMessage !== '') {
+            $content .= '<p><strong>' . htmlspecialchars($adminUserMessage) . '</strong></p>';
+        }
+
+        $allUsers = $pdo->query('SELECT username, email, is_admin FROM users ORDER BY username ASC')->fetchAll();
+        $content .= '<ul class="admin-user-list">';
+        foreach ($allUsers as $listedUser) {
+            $content .= '<li>' . htmlspecialchars($listedUser['username']);
+            if ($listedUser['email'] !== null && $listedUser['email'] !== '') {
+                $content .= ' (' . htmlspecialchars($listedUser['email']) . ')';
+            }
+            if ((bool) $listedUser['is_admin']) {
+                $content .= ' <span class="admin-badge">' . htmlspecialchars(t('admin_badge')) . '</span>';
+            }
+            $content .= '</li>';
+        }
+        $content .= '</ul>';
+
+        $content .= '<h3>' . htmlspecialchars(t('admin_user_add_heading')) . '</h3>';
+        $content .= '<form method="post">';
+        $content .= '<input type="hidden" name="action" value="admin_create_user">';
+        $content .= '<label>' . htmlspecialchars(t('admin_user_username_label')) . '<input name="username" autocomplete="off" required></label>';
+        $content .= '<label>' . htmlspecialchars(t('admin_user_email_label')) . '<input type="email" name="email" autocomplete="off"></label>';
+        $content .= '<label>' . htmlspecialchars(t('admin_user_password_label')) . '<input type="password" name="password" autocomplete="new-password" required></label>';
+        $content .= '<label>' . htmlspecialchars(t('admin_user_password_confirm_label')) . '<input type="password" name="password_confirm" autocomplete="new-password" required></label>';
+        $content .= '<label class="checkbox-label"><input type="checkbox" name="is_admin" value="1"> ' . htmlspecialchars(t('admin_user_is_admin_label')) . '</label>';
+        $content .= '<button type="submit">' . htmlspecialchars(t('admin_user_add_button')) . '</button>';
+        $content .= '</form>';
+    }
 
     renderApp(t('settings_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('settings_title'), 'url' => null]]);
     exit;
