@@ -90,7 +90,7 @@ function render(string $title, string $content): void
     echo '<title>' . htmlspecialchars($title) . '</title>';
     echo '<link rel="icon" type="image/svg+xml" href="favicon.svg">';
     echo '<link rel="stylesheet" href="style.css?v=' . htmlspecialchars(getCurrentVersion()) . '">';
-    echo '</head><body>';
+    echo '</head><body class="auth-page">';
     echo '<div class="container">';
     echo '<header><div class="brand"><span class="brand-mark">' . file_get_contents(__DIR__ . '/logo.svg') . '</span><div><h1>' . htmlspecialchars(t('app_title')) . '</h1><small>' . htmlspecialchars(t('app_tagline')) . '</small></div></div></header>';
     echo $content;

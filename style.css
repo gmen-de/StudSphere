@@ -39,6 +39,20 @@ a:hover {
   padding: 1rem 1.25rem 2rem;
 }
 
+/* The pre-login screen (render(), not renderApp()) — its own narrower,
+   vertically + horizontally centered layout instead of the wide top-anchored
+   .container used everywhere else in the app. */
+body.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.auth-page .container {
+  width: 100%;
+  max-width: 26rem;
+}
+
 header {
   padding: 1.5rem 0;
 }
