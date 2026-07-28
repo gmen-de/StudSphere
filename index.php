@@ -98,8 +98,19 @@ function render(string $title, string $content): void
     echo '</div></body></html>';
 }
 
-function getNavMenu(): array
+function getNavMenu(PDO $pdo): array
 {
+    $mySetsChildren = [
+        ['labelKey' => 'nav_my_sets_all', 'href' => '?page=my_sets_all'],
+    ];
+    $ownedThemeTree = getOwnedSetThemeTree($pdo);
+    foreach (getSetThemeChildren($ownedThemeTree, null) as $theme) {
+        $mySetsChildren[] = [
+            'label' => $theme['name'],
+            'href' => '?page=my_sets_themes&theme=' . $theme['theme_id'],
+        ];
+    }
+
     return [
         ['icon' => 'build', 'labelKey' => 'nav_build', 'href' => $_SERVER['PHP_SELF'], 'children' => []],
         ['icon' => 'sets', 'labelKey' => 'nav_sets', 'href' => '?page=sets', 'children' => [
@@ -110,10 +121,7 @@ function getNavMenu(): array
             ['labelKey' => 'nav_bricks_search', 'href' => '?page=bricks_search'],
             ['labelKey' => 'nav_colors_search', 'href' => '?page=colors_search'],
         ]],
-        ['icon' => 'my_sets', 'labelKey' => 'nav_my_sets', 'href' => '?page=my_sets', 'children' => [
-            ['labelKey' => 'nav_my_sets_all', 'href' => '?page=my_sets_all'],
-            ['labelKey' => 'nav_my_sets_themes', 'href' => '?page=my_sets_themes'],
-        ]],
+        ['icon' => 'my_sets', 'labelKey' => 'nav_my_sets', 'href' => '?page=my_sets', 'children' => $mySetsChildren],
         ['icon' => 'my_bricks', 'labelKey' => 'nav_my_bricks', 'href' => '?page=my_bricks', 'children' => [
             ['labelKey' => 'nav_my_bricks_all', 'href' => '?page=my_bricks_all'],
             ['labelKey' => 'nav_my_bricks_by_location', 'href' => '?page=my_bricks_by_location'],
@@ -235,13 +243,14 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '<div class="main-nav-wrap"><header class="main-nav">';
     echo '<a class="logo-link" href="' . htmlspecialchars($_SERVER['PHP_SELF']) . '"><span class="logo-mark">' . file_get_contents(__DIR__ . '/logo.svg') . '</span><span class="logo-text">' . htmlspecialchars(t('app_title')) . '</span></a>';
     echo '<nav class="nav-list">';
-    foreach (getNavMenu() as $item) {
+    foreach (getNavMenu(getPDO()) as $item) {
         echo '<div class="nav-item">';
         echo '<a class="nav-link" href="' . htmlspecialchars($item['href']) . '"><span class="nav-icon">' . getNavIcon($item['icon']) . '</span><span class="nav-label">' . htmlspecialchars(t($item['labelKey'])) . '</span></a>';
         if (!empty($item['children'])) {
             echo '<div class="nav-dropdown">';
             foreach ($item['children'] as $child) {
-                echo '<a href="' . htmlspecialchars($child['href']) . '">' . htmlspecialchars(t($child['labelKey'])) . '</a>';
+                $childLabel = $child['label'] ?? t($child['labelKey']);
+                echo '<a href="' . htmlspecialchars($child['href']) . '">' . htmlspecialchars($childLabel) . '</a>';
             }
             echo '</div>';
         }
