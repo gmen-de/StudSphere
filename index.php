@@ -1029,7 +1029,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_s
         }
         // A room (or any non-leaf level) alone isn't a valid storage spot —
         // the cascading picker is only meant to bottom out at an actual leaf.
-        if (locationHasChildren($locationId)) {
+        // Owned-set instance children don't count here (see
+        // locationHasNonOwnedSetChildren()'s doc comment) — a location that
+        // holds a boxed set can still take loose parts alongside it.
+        if (locationHasNonOwnedSetChildren($locationId)) {
             throw new RuntimeException(t('add_stock_location_not_leaf'));
         }
 

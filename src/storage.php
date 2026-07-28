@@ -92,6 +92,27 @@ function locationHasChildren(int $id): bool
     return ((int) $stmt->fetchColumn()) > 0;
 }
 
+/**
+ * Same as locationHasChildren(), but ignores owned-set instance nodes
+ * (location_type 'owned_set', auto-created by addOwnedSet() in
+ * src/owned_sets.php whenever a set is added to the collection under this
+ * location). Those aren't a real organizational sub-area the user created —
+ * a location that happens to have a boxed set sitting in it should still be
+ * usable as a genuine spot to add loose parts alongside that box, so the
+ * "add stock" flow's leaf check uses this instead of locationHasChildren().
+ * locationHasChildren() itself stays as-is for e.g. the "delete location"
+ * guard, where an owned set living there absolutely should block deletion.
+ */
+function locationHasNonOwnedSetChildren(int $id): bool
+{
+    $pdo = getPDO();
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM storage_locations WHERE parent_id = ? AND (location_type IS NULL OR location_type != 'owned_set')"
+    );
+    $stmt->execute([$id]);
+    return ((int) $stmt->fetchColumn()) > 0;
+}
+
 function locationHasStock(int $id): bool
 {
     $pdo = getPDO();
@@ -152,12 +173,18 @@ function getStorageLocationAncestors(int $id): array
 }
 
 /**
+ * Excludes owned-set instance nodes (location_type 'owned_set') — see
+ * getChildLocations()'s doc comment for why: they're not real organizational
+ * locations, so they don't belong in the general "Lagerort-Übersicht" tree
+ * or the "add location" parent picker (getStorageLocationOptions(), built
+ * from this).
+ *
  * @return array<int, array{id:int, parent_id:?int, name:string, location_type:?string, children: array}>
  */
 function getStorageLocationTree(): array
 {
     $pdo = getPDO();
-    $rows = $pdo->query('SELECT id, parent_id, name, location_type FROM storage_locations ORDER BY name')->fetchAll();
+    $rows = $pdo->query("SELECT id, parent_id, name, location_type FROM storage_locations WHERE location_type IS NULL OR location_type != 'owned_set' ORDER BY name")->fetchAll();
 
     $byId = [];
     foreach ($rows as $row) {
@@ -183,15 +210,20 @@ function getStorageLocationTree(): array
  * Immediate children of a location (or the top-level rooms when $parentId is
  * null) — used to populate one level of the "add to inventory" cascading
  * location picker at a time, rather than shipping the whole tree to the
- * client.
+ * client. Owned-set instance nodes (location_type 'owned_set') are excluded:
+ * they're auto-generated bookkeeping for a physically boxed set, not a real
+ * pickable storage spot — showing up here would let someone nest a new
+ * location, or a new owned set, "inside" an existing one, which never made
+ * sense. They're meant to resurface later in a dedicated "what can I build"
+ * view, not in general location browsing/picking.
  */
 function getChildLocations(?int $parentId): array
 {
     $pdo = getPDO();
     if ($parentId === null) {
-        $stmt = $pdo->query('SELECT id, name, location_type FROM storage_locations WHERE parent_id IS NULL ORDER BY name');
+        $stmt = $pdo->query("SELECT id, name, location_type FROM storage_locations WHERE parent_id IS NULL AND (location_type IS NULL OR location_type != 'owned_set') ORDER BY name");
     } else {
-        $stmt = $pdo->prepare('SELECT id, name, location_type FROM storage_locations WHERE parent_id = ? ORDER BY name');
+        $stmt = $pdo->prepare("SELECT id, name, location_type FROM storage_locations WHERE parent_id = ? AND (location_type IS NULL OR location_type != 'owned_set') ORDER BY name");
         $stmt->execute([$parentId]);
     }
     return $stmt->fetchAll();
