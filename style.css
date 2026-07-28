@@ -328,8 +328,6 @@ header .brand small {
   top: 100%;
   left: 0;
   min-width: 200px;
-  max-height: 70vh;
-  overflow-y: auto;
   background: #ffffff;
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 0.85rem;
@@ -381,8 +379,6 @@ header .brand small {
   top: 0;
   left: 100%;
   min-width: 180px;
-  max-height: 70vh;
-  overflow-y: auto;
   background: #ffffff;
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 0.85rem;
