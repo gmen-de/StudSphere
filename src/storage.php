@@ -285,6 +285,43 @@ function setStorageItemQuantity(int $locationId, int $partId, int $colorId, stri
 }
 
 /**
+ * Same shape as setStorageItemQuantity(), but for the spare_quantity/
+ * spare_damaged_quantity columns — a set's spare and regular pool can be
+ * the exact same part+color, so spares get their own pair of columns on
+ * the same row rather than colliding with the regular quantity. Doesn't
+ * write to storage_movements: that log's quantity_change/resulting_quantity
+ * are specifically about the regular-stock dimension, and spares are a
+ * separate one — mixing them in would make the log misleading rather than
+ * more complete.
+ */
+function setStorageItemSpareQuantity(int $locationId, int $partId, int $colorId, string $conditionType, int $newSpareQuantity, ?int $spareDamagedQuantity = null): void
+{
+    $pdo = getPDO();
+    $currentStmt = $pdo->prepare(
+        'SELECT id FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+    );
+    $currentStmt->execute([$locationId, $partId, $colorId, $conditionType]);
+    $exists = $currentStmt->fetchColumn() !== false;
+
+    if (!$exists) {
+        $insertStmt = $pdo->prepare(
+            'INSERT INTO storage_items (location_id, part_id, color_id, condition_type, spare_quantity, spare_damaged_quantity) VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $insertStmt->execute([$locationId, $partId, $colorId, $conditionType, $newSpareQuantity, $spareDamagedQuantity ?? 0]);
+    } elseif ($spareDamagedQuantity !== null) {
+        $updateStmt = $pdo->prepare(
+            'UPDATE storage_items SET spare_quantity = ?, spare_damaged_quantity = ? WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        );
+        $updateStmt->execute([$newSpareQuantity, $spareDamagedQuantity, $locationId, $partId, $colorId, $conditionType]);
+    } else {
+        $updateStmt = $pdo->prepare(
+            'UPDATE storage_items SET spare_quantity = ? WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        );
+        $updateStmt->execute([$newSpareQuantity, $locationId, $partId, $colorId, $conditionType]);
+    }
+}
+
+/**
  * Current stock of one part across all storage locations, for the part
  * detail modal's "Lager" tab — one row per location/color/condition combo
  * that actually holds stock.

@@ -19,9 +19,12 @@ require_once __DIR__ . '/settings.php';
  * - "Sets": how many set instances are in owned_sets (physical copies, so
  *   owning the same set twice counts as 2 — matches "Bausteine gesamt"
  *   being a piece count, not a distinct-item count).
- * - "Minifiguren": summed live from owned sets' own Rebrickable inventories
- *   (inventory_minifigs) — there's no separate "owned minifigs" storage
- *   table, minifig ownership is entirely derived from which sets are owned.
+ * - "Minifiguren": SUM(quantity) across owned_set_minifigs — actually
+ *   tracked per instance (see getOwnedSetMinifigsWithStatus() in
+ *   src/owned_sets.php), not the catalog's nominal inventory_minifigs count,
+ *   so a minifig marked missing during inventory-taking is reflected here
+ *   too (consistent with "Bausteine gesamt"/"Beschädigte Teile" also
+ *   reflecting actually-tracked state, not a catalog assumption).
  * - "Beschädigte Teile": SUM(damaged_quantity) across all of storage_items.
  *   Damaged pieces are still physically present (a subset of "Bausteine
  *   gesamt"/quantity, not subtracted from it) — see
@@ -67,14 +70,7 @@ function refreshAppStatsCache(PDO $pdo): array
              WHERE si.quantity > 0 AND (sl.location_type IS NULL OR sl.location_type != 'owned_set')"
         )->fetchColumn(),
         'sets' => (int) $pdo->query('SELECT COUNT(*) FROM owned_sets')->fetchColumn(),
-        'minifigs' => (int) $pdo->query(
-            "SELECT COALESCE(SUM(im.quantity), 0)
-             FROM owned_sets os
-             INNER JOIN sets s ON s.id = os.set_id
-             INNER JOIN rebrickable_inventories ri ON ri.set_num = s.rebrickable_set_num
-                 AND ri.version = (SELECT MAX(version) FROM rebrickable_inventories WHERE set_num = s.rebrickable_set_num)
-             INNER JOIN inventory_minifigs im ON im.inventory_id = ri.inventory_id"
-        )->fetchColumn(),
+        'minifigs' => (int) $pdo->query('SELECT COALESCE(SUM(quantity), 0) FROM owned_set_minifigs')->fetchColumn(),
         'bricks_damaged' => (int) $pdo->query('SELECT COALESCE(SUM(damaged_quantity), 0) FROM storage_items')->fetchColumn(),
     ];
     foreach (APP_STATS_CACHE_KEYS as $key => $settingKey) {

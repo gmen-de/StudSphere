@@ -217,6 +217,51 @@ function getSchemaMigrations(): array
             // in src/owned_sets.php.
             addColumnIfMissing($pdo, 'storage_items', 'damaged_quantity', 'INT NOT NULL DEFAULT 0');
         },
+        16 => function (PDO $pdo): void {
+            // Spare parts are tracked completely separately from the regular
+            // quantity (a set's spare and regular pool can be the exact same
+            // part+color) and deliberately never feed into completeness —
+            // see setStorageItemSpareQuantity() in src/storage.php.
+            addColumnIfMissing($pdo, 'storage_items', 'spare_quantity', 'INT NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'storage_items', 'spare_damaged_quantity', 'INT NOT NULL DEFAULT 0');
+
+            // Which Rebrickable inventory revision this instance actually is
+            // (a set can have several — see getSetInventoryVersions() in
+            // src/sets.php). Existing rows predate version selection, so
+            // backfill them to whichever revision was implicitly used at the
+            // time (always the newest, via getSetInventoryId()) — same
+            // resolved value, just now stored instead of re-derived.
+            addColumnIfMissing($pdo, 'owned_sets', 'inventory_id', 'INT DEFAULT NULL');
+            $pdo->exec(
+                "UPDATE owned_sets os
+                 INNER JOIN sets s ON s.id = os.set_id
+                 INNER JOIN (
+                     SELECT set_num, MAX(version) AS max_version
+                     FROM rebrickable_inventories
+                     GROUP BY set_num
+                 ) latest ON latest.set_num = s.rebrickable_set_num
+                 INNER JOIN rebrickable_inventories ri
+                     ON ri.set_num = latest.set_num AND ri.version = latest.max_version
+                 SET os.inventory_id = ri.inventory_id
+                 WHERE os.inventory_id IS NULL"
+            );
+
+            // Minifigs aren't a part+color combination, so they don't fit
+            // storage_items — a dedicated table instead, same shape as
+            // owned_set_photos.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS owned_set_minifigs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    owned_set_id INT NOT NULL,
+                    minifig_id INT NOT NULL,
+                    quantity INT NOT NULL DEFAULT 0,
+                    damaged_quantity INT NOT NULL DEFAULT 0,
+                    UNIQUE KEY owned_set_minifig_unique (owned_set_id, minifig_id),
+                    CONSTRAINT fk_ownedsetminifig_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_ownedsetminifig_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -279,7 +324,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 15;
+const CURRENT_SCHEMA_VERSION = 16;
 
 function getInstalledSchemaVersion(): int
 {

@@ -959,7 +959,8 @@ footer {
 .category-tile,
 .part-card,
 .set-card,
-.minifig-card {
+.minifig-card,
+.owned-set-inventory-tile {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2442,20 +2443,21 @@ footer {
   margin-bottom: 1rem;
 }
 
-/* Same look as the catalog .part-card grid (owned_set_inventory_owned_label
-   etc. reuse .part-card/-image/-num/-name), but these tiles hold inputs
-   instead of opening the part-detail modal, so the hover/pointer affordance
-   from .part-card is dropped. */
-.owned-set-inventory-tile {
-  cursor: default;
-}
-
 .owned-set-inventory-tile-inputs {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   width: 100%;
   margin-top: 0.4rem;
+}
+
+/* "Beschädigt/Fehlend" tab tiles — same look as the editable tiles, minus
+   the input fields there's nothing to interact with, so the summary line
+   is the whole point and gets a bit more breathing room. */
+.owned-set-inventory-tile-readonly .owned-set-inventory-summary {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+  color: #475569;
 }
 
 .owned-set-inventory-tile-inputs label {
@@ -2466,9 +2468,44 @@ footer {
   color: #64748b;
 }
 
-.owned-set-inventory-tile-inputs input {
-  width: 100%;
+.owned-set-inventory-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.owned-set-inventory-stepper input {
+  width: 2.6rem;
   margin-top: 0;
+  padding: 0.3rem 0.2rem;
+  text-align: center;
+  /* Hide the native up/down spinners — the +/- buttons replace them. */
+  -moz-appearance: textfield;
+}
+
+.owned-set-inventory-stepper input::-webkit-outer-spin-button,
+.owned-set-inventory-stepper input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.owned-set-inventory-stepper-btn {
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.owned-set-inventory-stepper-btn:hover {
+  background: #e2e8f0;
 }
 
 .owned-set-inventory-summary {

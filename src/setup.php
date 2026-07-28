@@ -166,6 +166,8 @@ function installDatabase(): void
             condition_type ENUM(\'new\',\'used\') NOT NULL DEFAULT \'used\',
             quantity INT NOT NULL DEFAULT 0,
             damaged_quantity INT NOT NULL DEFAULT 0,
+            spare_quantity INT NOT NULL DEFAULT 0,
+            spare_damaged_quantity INT NOT NULL DEFAULT 0,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             CONSTRAINT fk_storageitem_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
             CONSTRAINT fk_storageitem_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
@@ -246,6 +248,7 @@ function installDatabase(): void
         'CREATE TABLE IF NOT EXISTS owned_sets (
             id INT AUTO_INCREMENT PRIMARY KEY,
             set_id INT NOT NULL,
+            inventory_id INT DEFAULT NULL,
             location_id INT NOT NULL,
             condition_type ENUM(\'new\',\'used\') NOT NULL DEFAULT \'used\',
             has_instructions TINYINT(1) NOT NULL DEFAULT 0,
@@ -274,6 +277,17 @@ function installDatabase(): void
             uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_ownedsetphoto_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE CASCADE,
             CONSTRAINT fk_ownedsetphoto_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS owned_set_minifigs (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            owned_set_id INT NOT NULL,
+            minifig_id INT NOT NULL,
+            quantity INT NOT NULL DEFAULT 0,
+            damaged_quantity INT NOT NULL DEFAULT 0,
+            UNIQUE KEY owned_set_minifig_unique (owned_set_id, minifig_id),
+            CONSTRAINT fk_ownedsetminifig_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE CASCADE,
+            CONSTRAINT fk_ownedsetminifig_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
     ];
 

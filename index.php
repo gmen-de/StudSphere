@@ -564,6 +564,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
     $boxNotes = $boxNotes !== '' ? $boxNotes : null;
     $boxCompleteNotes = trim((string) ($_POST['box_complete_notes'] ?? ''));
     $boxCompleteNotes = $boxCompleteNotes !== '' ? $boxCompleteNotes : null;
+    $inventoryIdRaw = trim((string) ($_POST['inventory_id'] ?? ''));
+    $ownedSetInventoryId = $inventoryIdRaw !== '' ? (int) $inventoryIdRaw : null;
 
     try {
         if ($ownedSetSetId <= 0 || getSetById($pdo, $ownedSetSetId) === null) {
@@ -584,7 +586,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
             (int) $_SESSION['user_id'],
             $instructionsNotes,
             $boxNotes,
-            $boxCompleteNotes
+            $boxCompleteNotes,
+            $ownedSetInventoryId
         );
         refreshAppStatsCache($pdo);
         echo json_encode(['success' => true, 'ownedSetId' => $newOwnedSetId], JSON_UNESCAPED_UNICODE);
@@ -913,7 +916,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'owned_set_missing_parts') {
         echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    echo json_encode(['success' => true, 'parts' => getOwnedSetPartsWithStatus($pdo, $wizardOwnedSet, getLocale())], JSON_UNESCAPED_UNICODE);
+    echo json_encode([
+        'success' => true,
+        'parts' => getOwnedSetPartsWithStatus($pdo, $wizardOwnedSet, getLocale()),
+        'spares' => getOwnedSetSparePartsWithStatus($pdo, $wizardOwnedSet, getLocale()),
+        'stickers' => getOwnedSetStickerPartsWithStatus($pdo, $wizardOwnedSet, getLocale()),
+        'minifigs' => getOwnedSetMinifigsWithStatus($pdo, $wizardOwnedSet),
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -925,7 +934,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         if ($inventoryOwnedSet === null) {
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
-        applyOwnedSetInventory($pdo, $inventoryOwnedSet, (array) ($_POST['owned'] ?? []), (array) ($_POST['damaged'] ?? []), (int) $_SESSION['user_id']);
+        $userId = (int) $_SESSION['user_id'];
+        applyOwnedSetInventory($pdo, $inventoryOwnedSet, (array) ($_POST['owned'] ?? []), (array) ($_POST['damaged'] ?? []), $userId);
+        applyOwnedSetSpareInventory($pdo, $inventoryOwnedSet, (array) ($_POST['spare_owned'] ?? []), (array) ($_POST['spare_damaged'] ?? []));
+        applyOwnedSetStickerInventory($pdo, $inventoryOwnedSet, (array) ($_POST['sticker_owned'] ?? []), (array) ($_POST['sticker_damaged'] ?? []), $userId);
+        applyOwnedSetMinifigInventory($pdo, $inventoryOwnedSet, (array) ($_POST['minifig_owned'] ?? []), (array) ($_POST['minifig_damaged'] ?? []));
         refreshAppStatsCache($pdo);
         echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
@@ -2160,7 +2173,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
     }
 
     $content .= '<a href="#" id="add-owned-set-open">' . htmlspecialchars(t('set_detail_add_to_collection_button')) . '</a>';
-    $content .= renderAddOwnedSetWizardModal($setId);
+    $content .= renderAddOwnedSetWizardModal($pdo, $setId);
 
     $content .= '</div>';
 
@@ -2604,7 +2617,7 @@ SCRIPT;
     if ($ownedSet['condition_type'] === 'new') {
         // Still sealed: nothing can be verified without opening it, which *is*
         // the transition to "used" (see openOwnedSet()'s doc comment) — so no
-        // missing-parts editor is offered until that's confirmed.
+        // inventory tabs are offered until that's confirmed.
         $content .= '<h2>' . htmlspecialchars(t('owned_set_missing_parts_heading')) . '</h2>';
         $content .= '<section class="card">';
         $content .= '<p>' . htmlspecialchars(t('owned_set_sealed_note')) . '</p>';
@@ -2643,97 +2656,51 @@ SCRIPT;
 })();
 </script>
 SCRIPT;
+
+        $content .= '<h2>' . htmlspecialchars(t('owned_set_photos_heading')) . '</h2>';
+        $content .= renderOwnedSetPhotoGallery($pdo, $ownedSet);
     } else {
-        $parts = getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale());
-        $content .= renderOwnedSetInventorySection($ownedSet, $parts);
-    }
-
-    $content .= '<h2>' . htmlspecialchars(t('owned_set_photos_heading')) . '</h2>';
-    $photos = getOwnedSetPhotos($pdo, $ownedSet['id']);
-    $content .= '<form id="owned-set-photo-form" class="instruction-upload-form">';
-    $content .= '<input type="text" id="owned-set-photo-caption-input" placeholder="' . htmlspecialchars(t('owned_set_photo_caption_placeholder')) . '" maxlength="255">';
-    $content .= '<input type="file" id="owned-set-photo-file-input" accept="image/*">';
-    $content .= '<button type="submit">' . htmlspecialchars(t('set_detail_instructions_upload_button')) . '</button>';
-    $content .= '<span class="instruction-upload-message" id="owned-set-photo-message"></span>';
-    $content .= '</form>';
-
-    $content .= '<div class="owned-set-photo-grid" id="owned-set-photo-grid">';
-    foreach ($photos as $photo) {
-        $content .= '<div class="owned-set-photo" data-id="' . $photo['id'] . '">';
-        $content .= '<img src="' . htmlspecialchars($photo['stored_path']) . '" alt="' . htmlspecialchars((string) $photo['caption']) . '">';
-        if ($photo['caption'] !== null) {
-            $content .= '<span class="owned-set-photo-caption">' . htmlspecialchars($photo['caption']) . '</span>';
+        // Tabs mirror the catalog set-detail page's own tab bar (.set-detail-tabs,
+        // see page=set_detail) — same visual language for "here's the different
+        // views of this set's contents", just scoped to one owned instance.
+        $ownedSetTabs = [
+            'inventory' => t('owned_set_tab_inventory'),
+            'spares' => t('owned_set_tab_spares'),
+            'stickers' => t('owned_set_tab_stickers'),
+            'minifigs' => t('owned_set_tab_minifigs'),
+            'damaged_missing' => t('owned_set_tab_damaged_missing'),
+            'gallery' => t('owned_set_tab_gallery'),
+        ];
+        $activeOwnedTab = (string) ($_GET['tab'] ?? '');
+        if (!isset($ownedSetTabs[$activeOwnedTab])) {
+            $activeOwnedTab = array_key_first($ownedSetTabs);
         }
-        $content .= '<button type="button" class="owned-set-photo-delete" data-id="' . $photo['id'] . '">' . htmlspecialchars(t('set_detail_instructions_delete_button')) . '</button>';
-        $content .= '</div>';
-    }
-    $content .= '</div>';
 
-    $photoLabelsJson = json_encode([
-        'uploading' => t('set_detail_instructions_uploading'),
-        'deleteConfirm' => t('owned_set_photo_delete_confirm'),
-        'errorRetry' => t('import_error_retry'),
-    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-    $content .= <<<SCRIPT
-<script>
-(function(){
-  var texts = $photoLabelsJson;
-  var form = document.getElementById("owned-set-photo-form");
-  var captionInput = document.getElementById("owned-set-photo-caption-input");
-  var fileInput = document.getElementById("owned-set-photo-file-input");
-  var msg = document.getElementById("owned-set-photo-message");
-  var grid = document.getElementById("owned-set-photo-grid");
-  if (!form || !fileInput || !msg || !grid) {
-    return;
-  }
+        $content .= '<nav class="set-detail-tabs">';
+        foreach ($ownedSetTabs as $tabKey => $tabLabel) {
+            $activeAttr = $tabKey === $activeOwnedTab ? ' class="active"' : '';
+            $content .= '<a' . $activeAttr . ' href="?page=owned_set_detail&id=' . $ownedSetId . '&tab=' . $tabKey . '">' . htmlspecialchars($tabLabel) . '</a>';
+        }
+        $content .= '</nav>';
 
-  function bindDelete(btn) {
-    btn.addEventListener("click", function() {
-      if (!window.confirm(texts.deleteConfirm)) {
-        return;
-      }
-      var formData = new FormData();
-      formData.set("action", "delete_owned_set_photo");
-      formData.set("photo_id", btn.dataset.id);
-      fetch("?", { method: "POST", body: formData, credentials: "same-origin" })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-          if (res.success) {
-            btn.closest(".owned-set-photo").remove();
-          }
-        });
-    });
-  }
-  grid.querySelectorAll(".owned-set-photo-delete").forEach(bindDelete);
-
-  form.addEventListener("submit", function(e) {
-    e.preventDefault();
-    if (!fileInput.files || !fileInput.files[0]) {
-      return;
-    }
-    msg.textContent = texts.uploading;
-    var formData = new FormData();
-    formData.set("action", "upload_owned_set_photo");
-    formData.set("owned_set_id", "$ownedSetId");
-    formData.set("caption", captionInput.value);
-    formData.set("photo_file", fileInput.files[0]);
-
-    fetch("?", { method: "POST", body: formData, credentials: "same-origin" })
-      .then(function(r) { return r.json(); })
-      .then(function(res) {
-        if (res.success) {
-          window.location.reload();
+        if ($activeOwnedTab === 'inventory') {
+            $parts = getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale());
+            $content .= renderOwnedSetInventorySection($ownedSet, $parts, 'owned', 'damaged');
+        } elseif ($activeOwnedTab === 'spares') {
+            $spareParts = getOwnedSetSparePartsWithStatus($pdo, $ownedSet, getLocale());
+            $content .= renderOwnedSetInventorySection($ownedSet, $spareParts, 'spare_owned', 'spare_damaged');
+        } elseif ($activeOwnedTab === 'stickers') {
+            $stickerParts = getOwnedSetStickerPartsWithStatus($pdo, $ownedSet, getLocale());
+            $content .= renderOwnedSetInventorySection($ownedSet, $stickerParts, 'sticker_owned', 'sticker_damaged');
+        } elseif ($activeOwnedTab === 'minifigs') {
+            $ownedFigs = getOwnedSetMinifigsWithStatus($pdo, $ownedSet);
+            $content .= renderOwnedSetMinifigInventorySection($ownedSet, $ownedFigs);
+        } elseif ($activeOwnedTab === 'damaged_missing') {
+            $content .= renderOwnedSetDamagedMissingSection($pdo, $ownedSet);
         } else {
-          msg.textContent = res.message;
+            $content .= renderOwnedSetPhotoGallery($pdo, $ownedSet);
         }
-      })
-      .catch(function() {
-        msg.textContent = texts.errorRetry;
-      });
-  });
-})();
-</script>
-SCRIPT;
+    }
 
     renderApp(t('owned_set_instance_label') . ' – ' . $ownedSet['rebrickable_set_num'], $content, $user, computeAppStats($pdo), $ownedSetBreadcrumbs);
     exit;
