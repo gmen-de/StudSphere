@@ -908,36 +908,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 }
 
 $ownedSetDetailMessage = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_owned_set') {
-    $updateOwnedSetId = (int) ($_POST['owned_set_id'] ?? 0);
-    $hasInstructions = ($_POST['has_instructions'] ?? '') === '1';
-    $hasBox = ($_POST['has_box'] ?? '') === '1';
-    $boxComplete = ($_POST['box_complete'] ?? '') === '1';
-    $notes = trim((string) ($_POST['notes'] ?? ''));
-    $notes = $notes !== '' ? $notes : null;
-    $instructionsNotes = trim((string) ($_POST['instructions_notes'] ?? ''));
-    $instructionsNotes = $instructionsNotes !== '' ? $instructionsNotes : null;
-    $boxNotes = trim((string) ($_POST['box_notes'] ?? ''));
-    $boxNotes = $boxNotes !== '' ? $boxNotes : null;
-    $boxCompleteNotes = trim((string) ($_POST['box_complete_notes'] ?? ''));
-    $boxCompleteNotes = $boxCompleteNotes !== '' ? $boxCompleteNotes : null;
-
-    try {
-        $existingOwnedSet = getOwnedSetById($pdo, $updateOwnedSetId);
-        if ($existingOwnedSet === null) {
-            throw new RuntimeException(t('owned_set_invalid_set'));
-        }
-        if ($existingOwnedSet['condition_type'] === 'new') {
-            $hasInstructions = true;
-            $hasBox = true;
-            $boxComplete = true;
-        }
-        updateOwnedSet($pdo, $updateOwnedSetId, $hasInstructions, $hasBox, $boxComplete, $notes, $instructionsNotes, $boxNotes, $boxCompleteNotes);
-        $ownedSetDetailMessage = t('owned_set_updated_message');
-    } catch (Throwable $e) {
-        $ownedSetDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
-    }
-}
 
 if (isset($_GET['action']) && $_GET['action'] === 'owned_set_missing_parts') {
     header('Content-Type: application/json');
@@ -2659,34 +2629,28 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= '</table>';
     $content .= '</div>';
 
+    // Read-only — matches the catalog set-detail page, which doesn't offer
+    // inline editing here either. A still-sealed ("new") instance trivially
+    // has its instructions, box, and a complete box (see addOwnedSet()'s
+    // doc comment), so the stored value already reflects that; nothing
+    // special to compute here.
     $content .= '<div class="set-detail-table-wrap">';
-    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('owned_set_edit_heading')) . '</span>';
-    $content .= '<form method="post" class="owned-set-form">';
-    $content .= '<input type="hidden" name="action" value="update_owned_set">';
-    $content .= '<input type="hidden" name="owned_set_id" value="' . $ownedSet['id'] . '">';
-
-    // A still-sealed ("new") instance trivially has its instructions, box,
-    // and a complete box — locked checked/disabled here too, matching the
-    // add-to-collection wizard's rule (see addOwnedSet()'s doc comment). A
-    // disabled checkbox is excluded from the POST entirely, so a parallel
-    // hidden input carries the forced "1" instead.
-    $isSealed = $ownedSet['condition_type'] === 'new';
-    $renderLockableCheckbox = function (string $name, string $labelKey) use ($ownedSet, $isSealed): string {
-        if ($isSealed) {
-            return '<label class="checkbox-label"><input type="checkbox" checked disabled> ' . htmlspecialchars(t($labelKey)) . '</label><input type="hidden" name="' . $name . '" value="1">';
+    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('owned_set_box_info_heading')) . '</span>';
+    $content .= '<table class="set-detail-table">';
+    $renderBoxInfoRow = function (string $labelKey, bool $value, ?string $notesLabelKey, ?string $notes) use (&$content): void {
+        $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td>' . htmlspecialchars($value ? t('owned_set_wizard_yes') : t('owned_set_wizard_no'));
+        if ($notes !== null && $notes !== '' && $notesLabelKey !== null) {
+            $content .= '<br><span class="owned-set-box-info-note">' . htmlspecialchars(t($notesLabelKey)) . ': ' . htmlspecialchars($notes) . '</span>';
         }
-        return '<label class="checkbox-label"><input type="checkbox" name="' . $name . '" value="1"' . ($ownedSet[$name] ? ' checked' : '') . '> ' . htmlspecialchars(t($labelKey)) . '</label>';
+        $content .= '</td></tr>';
     };
-
-    $content .= $renderLockableCheckbox('has_instructions', 'owned_set_has_instructions');
-    $content .= '<label>' . htmlspecialchars(t('owned_set_instructions_notes_label')) . '<textarea name="instructions_notes" rows="2">' . htmlspecialchars((string) $ownedSet['instructions_notes']) . '</textarea></label>';
-    $content .= $renderLockableCheckbox('has_box', 'owned_set_has_box');
-    $content .= '<label>' . htmlspecialchars(t('owned_set_box_notes_label')) . '<textarea name="box_notes" rows="2">' . htmlspecialchars((string) $ownedSet['box_notes']) . '</textarea></label>';
-    $content .= $renderLockableCheckbox('box_complete', 'owned_set_box_complete');
-    $content .= '<label>' . htmlspecialchars(t('owned_set_box_complete_notes_label')) . '<textarea name="box_complete_notes" rows="2">' . htmlspecialchars((string) $ownedSet['box_complete_notes']) . '</textarea></label>';
-    $content .= '<label>' . htmlspecialchars(t('owned_set_notes_label')) . '<textarea name="notes" rows="3">' . htmlspecialchars((string) $ownedSet['notes']) . '</textarea></label>';
-    $content .= '<button type="submit">' . htmlspecialchars(t('owned_set_save_button')) . '</button>';
-    $content .= '</form>';
+    $renderBoxInfoRow('owned_set_has_instructions', (bool) $ownedSet['has_instructions'], 'owned_set_instructions_notes_label', $ownedSet['instructions_notes']);
+    $renderBoxInfoRow('owned_set_has_box', (bool) $ownedSet['has_box'], 'owned_set_box_notes_label', $ownedSet['box_notes']);
+    $renderBoxInfoRow('owned_set_box_complete', (bool) $ownedSet['box_complete'], 'owned_set_box_complete_notes_label', $ownedSet['box_complete_notes']);
+    if ($ownedSet['notes'] !== null && $ownedSet['notes'] !== '') {
+        $content .= '<tr><th>' . htmlspecialchars(t('owned_set_notes_label')) . '</th><td>' . htmlspecialchars($ownedSet['notes']) . '</td></tr>';
+    }
+    $content .= '</table>';
     $content .= '</div>';
 
     $content .= '<div class="set-detail-table-wrap">';
@@ -2786,16 +2750,16 @@ SCRIPT;
 
         if ($activeOwnedTab === 'inventory') {
             $parts = getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale());
-            $content .= renderOwnedSetInventorySection($ownedSet, $parts, 'owned', 'damaged');
+            $content .= renderOwnedSetInventoryGrid($ownedSet, $parts, 'owned', 'damaged');
         } elseif ($activeOwnedTab === 'spares') {
             $spareParts = getOwnedSetSparePartsWithStatus($pdo, $ownedSet, getLocale());
-            $content .= renderOwnedSetInventorySection($ownedSet, $spareParts, 'spare_owned', 'spare_damaged');
+            $content .= renderOwnedSetInventoryGrid($ownedSet, $spareParts, 'spare_owned', 'spare_damaged');
         } elseif ($activeOwnedTab === 'stickers') {
             $stickerParts = getOwnedSetStickerPartsWithStatus($pdo, $ownedSet, getLocale());
-            $content .= renderOwnedSetInventorySection($ownedSet, $stickerParts, 'sticker_owned', 'sticker_damaged');
+            $content .= renderOwnedSetInventoryGrid($ownedSet, $stickerParts, 'sticker_owned', 'sticker_damaged');
         } elseif ($activeOwnedTab === 'minifigs') {
             $ownedFigs = getOwnedSetMinifigsWithStatus($pdo, $ownedSet);
-            $content .= renderOwnedSetMinifigInventorySection($ownedSet, $ownedFigs);
+            $content .= renderOwnedSetMinifigInventoryGrid($ownedSet, $ownedFigs);
         } elseif ($activeOwnedTab === 'damaged_missing') {
             $content .= renderOwnedSetDamagedMissingSection($pdo, $ownedSet);
         } else {

@@ -2602,6 +2602,71 @@ footer {
   margin-left: auto;
 }
 
+.owned-set-inventory-grid {
+  margin-bottom: 1rem;
+}
+
+.owned-set-inventory-tile-complete {
+  border-width: 2px;
+  border-color: #16a34a;
+}
+
+.owned-set-inventory-tile-damaged {
+  border-width: 2px;
+  border-color: #d97706;
+}
+
+.owned-set-inventory-tile-missing {
+  border-width: 2px;
+  border-color: #dc2626;
+}
+
+.owned-set-qty-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.owned-set-qty-modal-image {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 5rem;
+  height: 5rem;
+  background: #f8fafc;
+  border-radius: 0.75rem;
+  color: #94a3b8;
+}
+
+.owned-set-qty-modal-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.owned-set-qty-modal-header h3 {
+  margin: 0 0 0.25rem;
+}
+
+.owned-set-qty-modal-header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.owned-set-box-info-note {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+#owned-set-qty-modal-content label {
+  display: block;
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
 .owned-set-photo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));

@@ -360,6 +360,7 @@ return [
     'owned_set_save_failed' => 'Error: {message}',
     'owned_set_updated_message' => 'Saved.',
     'owned_set_edit_heading' => 'Edit',
+    'owned_set_box_info_heading' => 'Box & Instructions',
     'owned_set_field_completeness' => 'Completeness',
     'owned_set_field_location' => 'Storage location',
     'owned_set_completeness_value' => '{percent}% ({actual} of {nominal} parts)',

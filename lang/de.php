@@ -360,6 +360,7 @@ return [
     'owned_set_save_failed' => 'Fehler: {message}',
     'owned_set_updated_message' => 'Gespeichert.',
     'owned_set_edit_heading' => 'Bearbeiten',
+    'owned_set_box_info_heading' => 'OVP & Anleitung',
     'owned_set_field_completeness' => 'Vollständigkeit',
     'owned_set_field_location' => 'Lagerort',
     'owned_set_completeness_value' => '{percent}% ({actual} von {nominal} Teilen)',

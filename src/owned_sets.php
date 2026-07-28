@@ -463,37 +463,6 @@ function addOwnedSet(
 }
 
 /**
- * condition_type is deliberately not editable here — see openOwnedSet()'s
- * doc comment for why it can only ever move new -> used via that dedicated
- * path, never as a free-standing field on this general edit form.
- */
-function updateOwnedSet(
-    PDO $pdo,
-    int $ownedSetId,
-    bool $hasInstructions,
-    bool $hasBox,
-    bool $boxComplete,
-    ?string $notes,
-    ?string $instructionsNotes = null,
-    ?string $boxNotes = null,
-    ?string $boxCompleteNotes = null
-): void {
-    $stmt = $pdo->prepare(
-        'UPDATE owned_sets SET has_instructions = ?, has_box = ?, box_complete = ?, notes = ?, instructions_notes = ?, box_notes = ?, box_complete_notes = ? WHERE id = ?'
-    );
-    $stmt->execute([
-        $hasInstructions ? 1 : 0,
-        $hasBox ? 1 : 0,
-        $boxComplete ? 1 : 0,
-        $notes,
-        $instructionsNotes,
-        $boxNotes,
-        $boxCompleteNotes,
-        $ownedSetId,
-    ]);
-}
-
-/**
  * Shared by the owned_set_detail page's inventory editor and the
  * add-to-collection wizard's inline inventory step — both post the same
  * parallel "owned[part:color]=qty" / "damaged[part:color]=qty" shape, one
@@ -1419,279 +1388,116 @@ SCRIPT;
 }
 
 /**
- * owned_set_detail's persistent inventory editor — one per tab (Inventar/
- * Ersatzteile/Stickerbögen), same grouped/paginated tile design as the
- * add-to-collection wizard's inventory step (see
- * renderAddOwnedSetWizardModal()'s doc comment for why the list is
- * paginated one part number at a time), just with the parts data already
- * known server-side (embedded as JSON) instead of fetched, and saving
- * reloads the page instead of redirecting, so the completeness table
- * further up the page reflects the new numbers immediately. $ownedField/
- * $damagedField select which pair of POST field names (and therefore which
- * storage_items columns, via applyOwnedSetInventory()/
- * applyOwnedSetSpareInventory()/applyOwnedSetStickerInventory() in
- * index.php's save_owned_set_inventory handler) this instance targets.
- *
- * The wizard's inventory step and this section are deliberately independent
- * (not a shared JS function) — same convention as every other
- * self-contained overlay in this codebase (renderLdrawRenderOverlay(),
- * renderPartDetailModal()), since these two contexts never render on the
- * same page.
+ * Border-color status for one owned-set inventory tile, shared by
+ * renderOwnedSetInventoryGrid() and renderOwnedSetMinifigInventoryGrid()
+ * (both use the same nominal/actual/damaged shape). Priority when more than
+ * one condition applies: missing beats damaged beats complete, since
+ * missing is the more severe of the two defects.
  */
-function renderOwnedSetInventorySection(array $ownedSet, array $parts, string $ownedField = 'owned', string $damagedField = 'damaged'): string
+function ownedSetInventoryTileStatusClass(int $nominal, int $actual, int $damaged): string
 {
-    if (empty($parts)) {
-        return '<section class="card"><p>' . htmlspecialchars(t('set_detail_inventory_empty')) . '</p></section>';
+    if ($nominal - $actual > 0) {
+        return 'owned-set-inventory-tile-missing';
     }
-    $html = '';
+    if ($damaged > 0) {
+        return 'owned-set-inventory-tile-damaged';
+    }
+    return 'owned-set-inventory-tile-complete';
+}
 
-    $html .= '<p class="owned-set-inventory-progress" id="owned-set-inventory-progress"></p>';
-    $html .= '<div class="owned-set-inventory-tiles" id="owned-set-inventory-tiles"></div>';
-    $html .= '<div class="owned-set-inventory-nav">';
-    $html .= '<button type="button" id="owned-set-inventory-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button>';
-    $html .= '<button type="button" id="owned-set-inventory-next">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button>';
-    $html .= '<button type="button" id="owned-set-inventory-save">' . htmlspecialchars(t('owned_set_save_button')) . '</button>';
+/**
+ * One tile in an owned-set inventory grid — visually matches renderPartCard()
+ * (image/number/name) plus a status border and a permanently-visible
+ * owned/damaged/missing summary line. Deliberately NOT given the .part-card
+ * class: that class is part_modal.php's document-wide click-delegation hook
+ * for the read-only part-detail overlay, and reusing it here caused the
+ * "Bauteil nicht gefunden" bug earlier in this project (clicking into the
+ * tile bubbled up, matched .part-card, opened the wrong modal with no
+ * part id). The current values are carried as data-* attributes so the
+ * quantity-edit modal (see renderOwnedSetInventoryGrid()'s script) can read
+ * them straight from the clicked element without an extra fetch.
+ */
+function renderOwnedSetInventoryTile(string $key, string $numberLabel, string $name, ?string $thumbnail, int $nominal, int $actual, int $damaged): string
+{
+    $statusClass = ownedSetInventoryTileStatusClass($nominal, $actual, $damaged);
+    $missing = max(0, $nominal - $actual);
+    $intact = $actual - $damaged;
+    $summary = t('owned_set_inventory_summary', [
+        'intact' => (string) $intact,
+        'damaged' => (string) $damaged,
+        'missing' => (string) $missing,
+    ]);
+
+    $html = '<div class="owned-set-inventory-tile ' . $statusClass . '" role="button" tabindex="0"';
+    $html .= ' data-key="' . htmlspecialchars($key) . '"';
+    $html .= ' data-number="' . htmlspecialchars($numberLabel) . '"';
+    $html .= ' data-name="' . htmlspecialchars($name) . '"';
+    $html .= ' data-thumbnail="' . htmlspecialchars((string) $thumbnail) . '"';
+    $html .= ' data-nominal="' . $nominal . '" data-actual="' . $actual . '" data-damaged="' . $damaged . '">';
+    $html .= '<span class="part-card-image">' . ($thumbnail !== null ? '<img src="' . htmlspecialchars($thumbnail) . '" alt="">' : getNavIcon('bricks')) . '</span>';
+    $html .= '<span class="part-card-num">' . htmlspecialchars($numberLabel) . '</span>';
+    $html .= '<span class="part-card-name">' . htmlspecialchars($name) . '</span>';
+    $html .= '<p class="owned-set-inventory-summary">' . htmlspecialchars($summary) . '</p>';
     $html .= '</div>';
-    $html .= '<p class="owned-set-message" id="owned-set-inventory-message"></p>';
-
-    $partsJson = json_encode($parts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
-    $labelsJson = json_encode([
-        'errorRetry' => t('import_error_retry'),
-        'ownedLabel' => t('owned_set_inventory_owned_label'),
-        'damagedLabel' => t('owned_set_inventory_damaged_label'),
-        'inventorySummary' => t('owned_set_inventory_summary'),
-        'partProgress' => t('owned_set_inventory_part_progress'),
-        'saved' => t('owned_set_updated_message'),
-    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-
-    $ownedFieldJson = json_encode($ownedField);
-    $damagedFieldJson = json_encode($damagedField);
-
-    $html .= <<<SCRIPT
-<script>
-(function(){
-  var texts = $labelsJson;
-  var ownedSetId = {$ownedSet['id']};
-  var parts = $partsJson;
-  var ownedField = $ownedFieldJson;
-  var damagedField = $damagedFieldJson;
-
-  var list = document.getElementById('owned-set-inventory-tiles');
-  var progress = document.getElementById('owned-set-inventory-progress');
-  var backBtn = document.getElementById('owned-set-inventory-back');
-  var nextBtn = document.getElementById('owned-set-inventory-next');
-  var saveBtn = document.getElementById('owned-set-inventory-save');
-  var messageEl = document.getElementById('owned-set-inventory-message');
-  if (!list || !progress || !backBtn || !nextBtn || !saveBtn || !messageEl) {
-    return;
-  }
-
-  var groups = [];
-  var state = {};
-  var groupIndex = 0;
-  var indexByPartNum = {};
-  parts.forEach(function(part) {
-    var key = part.part_id + ':' + part.color_id;
-    state[key] = { owned: part.actual_quantity, damaged: part.damaged_quantity, nominal: part.nominal_quantity };
-    if (!(part.part_num in indexByPartNum)) {
-      indexByPartNum[part.part_num] = groups.length;
-      groups.push([]);
-    }
-    groups[indexByPartNum[part.part_num]].push(part);
-  });
-
-  function buildStepper(minVal, maxVal, value) {
-    var wrap = document.createElement('div');
-    wrap.className = 'owned-set-inventory-stepper';
-    var minusBtn = document.createElement('button');
-    minusBtn.type = 'button';
-    minusBtn.className = 'owned-set-inventory-stepper-btn';
-    minusBtn.textContent = '\\u2212';
-    var input = document.createElement('input');
-    input.type = 'number';
-    input.min = String(minVal);
-    input.max = String(maxVal);
-    input.value = String(value);
-    var plusBtn = document.createElement('button');
-    plusBtn.type = 'button';
-    plusBtn.className = 'owned-set-inventory-stepper-btn';
-    plusBtn.textContent = '+';
-
-    function step(delta) {
-      var v = (parseInt(input.value, 10) || 0) + delta;
-      v = Math.max(parseInt(input.min, 10), Math.min(v, parseInt(input.max, 10)));
-      input.value = String(v);
-      input.dispatchEvent(new Event('input'));
-    }
-    minusBtn.addEventListener('click', function() { step(-1); });
-    plusBtn.addEventListener('click', function() { step(1); });
-
-    wrap.appendChild(minusBtn);
-    wrap.appendChild(input);
-    wrap.appendChild(plusBtn);
-    return { wrap: wrap, input: input };
-  }
-
-  function renderGroup() {
-    list.innerHTML = '';
-    if (groups.length === 0) {
-      return;
-    }
-    progress.textContent = texts.partProgress.replace('{current}', groupIndex + 1).replace('{total}', groups.length);
-    backBtn.disabled = groupIndex === 0;
-    nextBtn.disabled = groupIndex >= groups.length - 1;
-
-    groups[groupIndex].forEach(function(part) {
-      var key = part.part_id + ':' + part.color_id;
-      var s = state[key];
-
-      var tile = document.createElement('div');
-      tile.className = 'owned-set-inventory-tile';
-
-      var img = document.createElement('span');
-      img.className = 'part-card-image';
-      if (part.thumbnail) {
-        img.innerHTML = '<img src="' + part.thumbnail + '" alt="">';
-      }
-      tile.appendChild(img);
-
-      var num = document.createElement('span');
-      num.className = 'part-card-num';
-      num.textContent = part.part_num;
-      tile.appendChild(num);
-
-      var name = document.createElement('span');
-      name.className = 'part-card-name';
-      name.textContent = part.name + (part.color_name ? ' \\u00b7 ' + part.color_name : '');
-      tile.appendChild(name);
-
-      var inputsWrap = document.createElement('div');
-      inputsWrap.className = 'owned-set-inventory-tile-inputs';
-
-      var ownedLabel = document.createElement('label');
-      ownedLabel.appendChild(document.createTextNode(texts.ownedLabel));
-      var ownedStepper = buildStepper(0, part.nominal_quantity, s.owned);
-      var ownedInput = ownedStepper.input;
-      ownedLabel.appendChild(ownedStepper.wrap);
-      inputsWrap.appendChild(ownedLabel);
-
-      var damagedLabel = document.createElement('label');
-      damagedLabel.appendChild(document.createTextNode(texts.damagedLabel));
-      var damagedStepper = buildStepper(0, s.owned, s.damaged);
-      var damagedInput = damagedStepper.input;
-      damagedLabel.appendChild(damagedStepper.wrap);
-      inputsWrap.appendChild(damagedLabel);
-
-      tile.appendChild(inputsWrap);
-
-      var summary = document.createElement('p');
-      summary.className = 'owned-set-inventory-summary';
-      tile.appendChild(summary);
-
-      function updateSummary() {
-        var owned = Math.max(0, Math.min(parseInt(ownedInput.value, 10) || 0, part.nominal_quantity));
-        damagedInput.max = String(owned);
-        var damaged = Math.max(0, Math.min(parseInt(damagedInput.value, 10) || 0, owned));
-        var intact = owned - damaged;
-        var missing = part.nominal_quantity - owned;
-        summary.textContent = texts.inventorySummary
-          .replace('{intact}', intact)
-          .replace('{damaged}', damaged)
-          .replace('{missing}', missing);
-        state[key].owned = owned;
-        state[key].damaged = damaged;
-      }
-      ownedInput.addEventListener('input', updateSummary);
-      damagedInput.addEventListener('input', updateSummary);
-      updateSummary();
-
-      list.appendChild(tile);
-    });
-  }
-
-  backBtn.addEventListener('click', function() {
-    if (groupIndex > 0) {
-      groupIndex--;
-      renderGroup();
-    }
-  });
-  nextBtn.addEventListener('click', function() {
-    if (groupIndex < groups.length - 1) {
-      groupIndex++;
-      renderGroup();
-    }
-  });
-
-  saveBtn.addEventListener('click', function() {
-    messageEl.textContent = '';
-    var formData = new FormData();
-    formData.set('action', 'save_owned_set_inventory');
-    formData.set('owned_set_id', String(ownedSetId));
-    Object.keys(state).forEach(function(key) {
-      formData.set(ownedField + '[' + key + ']', String(state[key].owned));
-      formData.set(damagedField + '[' + key + ']', String(state[key].damaged));
-    });
-    fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(res) {
-        if (res.success) {
-          window.location.reload();
-        } else {
-          messageEl.textContent = res.message || texts.errorRetry;
-        }
-      })
-      .catch(function() {
-        messageEl.textContent = texts.errorRetry;
-      });
-  });
-
-  renderGroup();
-})();
-</script>
-SCRIPT;
 
     return $html;
 }
 
 /**
- * owned_set_detail's Minifiguren tab — same owned/damaged tile editing as
- * renderOwnedSetInventorySection(), but minifigs have no color variants to
- * group/paginate by (unlike parts, one minifig type is already as granular
- * as it gets), so this is just one flat grid of tiles, no Zurück/Weiter.
+ * The quantity-edit modal shared (as markup+script, embedded once per grid —
+ * only one of the four category tabs is ever active/rendered per page load,
+ * so no id collisions) by renderOwnedSetInventoryGrid() and
+ * renderOwnedSetMinifigInventoryGrid(). Opens on a tile click, lets the user
+ * correct that one item's owned/damaged counts via the same buildStepper()
+ * control the old inline editor used, and saves via a single-item POST to
+ * the existing save_owned_set_inventory action (it already just iterates
+ * whatever keys are posted, so one key works unchanged) — then updates the
+ * tile in place instead of reloading the page.
  */
-function renderOwnedSetMinifigInventorySection(array $ownedSet, array $minifigs): string
+function renderOwnedSetQuantityModalScript(array $ownedSet, string $ownedField, string $damagedField, string $gridId): string
 {
-    if (empty($minifigs)) {
-        return '<section class="card"><p>' . htmlspecialchars(t('set_detail_minifigs_empty')) . '</p></section>';
-    }
-
-    $html = '<div class="owned-set-inventory-tiles" id="owned-set-minifig-tiles"></div>';
-    $html .= '<div class="owned-set-inventory-nav"><button type="button" id="owned-set-minifig-save">' . htmlspecialchars(t('owned_set_save_button')) . '</button></div>';
-    $html .= '<p class="owned-set-message" id="owned-set-minifig-message"></p>';
-
-    $figsJson = json_encode($minifigs, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
     $labelsJson = json_encode([
         'errorRetry' => t('import_error_retry'),
         'ownedLabel' => t('owned_set_inventory_owned_label'),
         'damagedLabel' => t('owned_set_inventory_damaged_label'),
         'inventorySummary' => t('owned_set_inventory_summary'),
+        'saveButton' => t('owned_set_save_button'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $ownedFieldJson = json_encode($ownedField);
+    $damagedFieldJson = json_encode($damagedField);
+    $gridIdJson = json_encode($gridId);
 
-    $html .= <<<SCRIPT
+    return <<<SCRIPT
 <script>
 (function(){
   var texts = $labelsJson;
   var ownedSetId = {$ownedSet['id']};
-  var figs = $figsJson;
+  var ownedField = $ownedFieldJson;
+  var damagedField = $damagedFieldJson;
 
-  var list = document.getElementById('owned-set-minifig-tiles');
-  var saveBtn = document.getElementById('owned-set-minifig-save');
-  var messageEl = document.getElementById('owned-set-minifig-message');
-  if (!list || !saveBtn || !messageEl) {
+  var grid = document.getElementById($gridIdJson);
+  var modal = document.getElementById('owned-set-qty-modal');
+  var modalContent = document.getElementById('owned-set-qty-modal-content');
+  var closeBtn = document.getElementById('owned-set-qty-modal-close');
+  if (!grid || !modal || !modalContent || !closeBtn) {
     return;
   }
 
-  var state = {};
+  function closeModal() {
+    modal.style.display = 'none';
+    modalContent.innerHTML = '';
+  }
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.style.display !== 'none') {
+      closeModal();
+    }
+  });
 
   function buildStepper(minVal, maxVal, value) {
     var wrap = document.createElement('div');
@@ -1725,98 +1531,209 @@ function renderOwnedSetMinifigInventorySection(array $ownedSet, array $minifigs)
     return { wrap: wrap, input: input };
   }
 
-  figs.forEach(function(fig) {
-    var key = String(fig.minifig_id);
-    state[key] = { owned: fig.actual_quantity, damaged: fig.damaged_quantity };
-
-    var tile = document.createElement('div');
-    tile.className = 'owned-set-inventory-tile';
-
-    var img = document.createElement('span');
-    img.className = 'minifig-card-image';
-    if (fig.thumbnail) {
-      img.innerHTML = '<img src="' + fig.thumbnail + '" alt="">';
+  function updateTile(tile, actual, damaged) {
+    var nominal = parseInt(tile.dataset.nominal, 10);
+    var missing = Math.max(0, nominal - actual);
+    var intact = actual - damaged;
+    tile.dataset.actual = String(actual);
+    tile.dataset.damaged = String(damaged);
+    tile.classList.remove('owned-set-inventory-tile-complete', 'owned-set-inventory-tile-damaged', 'owned-set-inventory-tile-missing');
+    if (missing > 0) {
+      tile.classList.add('owned-set-inventory-tile-missing');
+    } else if (damaged > 0) {
+      tile.classList.add('owned-set-inventory-tile-damaged');
+    } else {
+      tile.classList.add('owned-set-inventory-tile-complete');
     }
-    tile.appendChild(img);
-
-    var num = document.createElement('span');
-    num.className = 'minifig-card-num';
-    num.textContent = fig.fig_num;
-    tile.appendChild(num);
-
-    var name = document.createElement('span');
-    name.className = 'minifig-card-name';
-    name.textContent = fig.name;
-    tile.appendChild(name);
-
-    var inputsWrap = document.createElement('div');
-    inputsWrap.className = 'owned-set-inventory-tile-inputs';
-
-    var ownedLabel = document.createElement('label');
-    ownedLabel.appendChild(document.createTextNode(texts.ownedLabel));
-    var ownedStepper = buildStepper(0, fig.nominal_quantity, state[key].owned);
-    var ownedInput = ownedStepper.input;
-    ownedLabel.appendChild(ownedStepper.wrap);
-    inputsWrap.appendChild(ownedLabel);
-
-    var damagedLabel = document.createElement('label');
-    damagedLabel.appendChild(document.createTextNode(texts.damagedLabel));
-    var damagedStepper = buildStepper(0, state[key].owned, state[key].damaged);
-    var damagedInput = damagedStepper.input;
-    damagedLabel.appendChild(damagedStepper.wrap);
-    inputsWrap.appendChild(damagedLabel);
-
-    tile.appendChild(inputsWrap);
-
-    var summary = document.createElement('p');
-    summary.className = 'owned-set-inventory-summary';
-    tile.appendChild(summary);
-
-    function updateSummary() {
-      var owned = Math.max(0, Math.min(parseInt(ownedInput.value, 10) || 0, fig.nominal_quantity));
-      damagedInput.max = String(owned);
-      var damaged = Math.max(0, Math.min(parseInt(damagedInput.value, 10) || 0, owned));
-      var intact = owned - damaged;
-      var missing = fig.nominal_quantity - owned;
+    var summary = tile.querySelector('.owned-set-inventory-summary');
+    if (summary) {
       summary.textContent = texts.inventorySummary
         .replace('{intact}', intact)
         .replace('{damaged}', damaged)
         .replace('{missing}', missing);
-      state[key].owned = owned;
-      state[key].damaged = damaged;
     }
-    ownedInput.addEventListener('input', updateSummary);
-    damagedInput.addEventListener('input', updateSummary);
-    updateSummary();
+  }
 
-    list.appendChild(tile);
-  });
+  function openModal(tile) {
+    modalContent.innerHTML = '';
+    modal.style.display = 'flex';
 
-  saveBtn.addEventListener('click', function() {
-    messageEl.textContent = '';
-    var formData = new FormData();
-    formData.set('action', 'save_owned_set_inventory');
-    formData.set('owned_set_id', String(ownedSetId));
-    Object.keys(state).forEach(function(key) {
-      formData.set('minifig_owned[' + key + ']', String(state[key].owned));
-      formData.set('minifig_damaged[' + key + ']', String(state[key].damaged));
+    var nominal = parseInt(tile.dataset.nominal, 10);
+    var actual = parseInt(tile.dataset.actual, 10);
+    var damaged = parseInt(tile.dataset.damaged, 10);
+
+    var header = document.createElement('div');
+    header.className = 'owned-set-qty-modal-header';
+    var img = document.createElement('span');
+    img.className = 'owned-set-qty-modal-image';
+    if (tile.dataset.thumbnail) {
+      img.innerHTML = '<img src="' + tile.dataset.thumbnail + '" alt="">';
+    }
+    header.appendChild(img);
+    var info = document.createElement('div');
+    var title = document.createElement('h3');
+    title.textContent = tile.dataset.number;
+    var name = document.createElement('p');
+    name.textContent = tile.dataset.name;
+    info.appendChild(title);
+    info.appendChild(name);
+    header.appendChild(info);
+    modalContent.appendChild(header);
+
+    var ownedLabel = document.createElement('label');
+    ownedLabel.appendChild(document.createTextNode(texts.ownedLabel));
+    var ownedStepper = buildStepper(0, nominal, actual);
+    ownedLabel.appendChild(ownedStepper.wrap);
+    modalContent.appendChild(ownedLabel);
+
+    var damagedLabel = document.createElement('label');
+    damagedLabel.appendChild(document.createTextNode(texts.damagedLabel));
+    var damagedStepper = buildStepper(0, actual, damaged);
+    damagedLabel.appendChild(damagedStepper.wrap);
+    modalContent.appendChild(damagedLabel);
+
+    ownedStepper.input.addEventListener('input', function() {
+      var v = parseInt(ownedStepper.input.value, 10) || 0;
+      damagedStepper.input.max = String(v);
+      if ((parseInt(damagedStepper.input.value, 10) || 0) > v) {
+        damagedStepper.input.value = String(v);
+      }
     });
-    fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(res) {
-        if (res.success) {
-          window.location.reload();
-        } else {
-          messageEl.textContent = res.message || texts.errorRetry;
-        }
-      })
-      .catch(function() {
-        messageEl.textContent = texts.errorRetry;
-      });
+
+    var msg = document.createElement('p');
+    msg.className = 'owned-set-message';
+    modalContent.appendChild(msg);
+
+    var saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = texts.saveButton;
+    saveBtn.addEventListener('click', function() {
+      msg.textContent = '';
+      var newOwned = Math.max(0, Math.min(parseInt(ownedStepper.input.value, 10) || 0, nominal));
+      var newDamaged = Math.max(0, Math.min(parseInt(damagedStepper.input.value, 10) || 0, newOwned));
+
+      var formData = new FormData();
+      formData.set('action', 'save_owned_set_inventory');
+      formData.set('owned_set_id', String(ownedSetId));
+      formData.set(ownedField + '[' + tile.dataset.key + ']', String(newOwned));
+      formData.set(damagedField + '[' + tile.dataset.key + ']', String(newDamaged));
+
+      saveBtn.disabled = true;
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          saveBtn.disabled = false;
+          if (res.success) {
+            updateTile(tile, newOwned, newDamaged);
+            closeModal();
+          } else {
+            msg.textContent = res.message || texts.errorRetry;
+          }
+        })
+        .catch(function() {
+          saveBtn.disabled = false;
+          msg.textContent = texts.errorRetry;
+        });
+    });
+    modalContent.appendChild(saveBtn);
+  }
+
+  grid.addEventListener('click', function(e) {
+    var tile = e.target.closest('.owned-set-inventory-tile');
+    if (tile) {
+      openModal(tile);
+    }
+  });
+  grid.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter' && e.key !== ' ') {
+      return;
+    }
+    var tile = e.target.closest('.owned-set-inventory-tile');
+    if (tile) {
+      e.preventDefault();
+      openModal(tile);
+    }
   });
 })();
 </script>
 SCRIPT;
+}
+
+function renderOwnedSetQuantityModalMarkup(): string
+{
+    $html = '<div class="modal-overlay" id="owned-set-qty-modal" style="display:none;">';
+    $html .= '<div class="modal-box"><button type="button" class="modal-close" id="owned-set-qty-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<div id="owned-set-qty-modal-content"></div>';
+    $html .= '</div></div>';
+    return $html;
+}
+
+/**
+ * owned_set_detail's inventory grid — one per tab (Inventar/Ersatzteile/
+ * Stickerbögen). Unlike the previous grouped/paginated wizard-style editor,
+ * this is a static grid showing every part+color at once (same visual
+ * language as the catalog set-detail page's own parts-grid), with status
+ * visible at a glance via each tile's border color; correcting a quantity
+ * happens through renderOwnedSetQuantityModalScript()'s modal rather than
+ * inline. $ownedField/$damagedField select which pair of POST field names
+ * (and therefore which storage_items columns, via applyOwnedSetInventory()/
+ * applyOwnedSetSpareInventory()/applyOwnedSetStickerInventory() in
+ * index.php's save_owned_set_inventory handler) this instance targets.
+ */
+function renderOwnedSetInventoryGrid(array $ownedSet, array $parts, string $ownedField = 'owned', string $damagedField = 'damaged'): string
+{
+    if (empty($parts)) {
+        return '<section class="card"><p>' . htmlspecialchars(t('set_detail_inventory_empty')) . '</p></section>';
+    }
+
+    $html = '<div class="parts-grid owned-set-inventory-grid" id="owned-set-inventory-grid">';
+    foreach ($parts as $part) {
+        $name = $part['name'] . ($part['color_name'] !== null ? ' · ' . $part['color_name'] : '');
+        $html .= renderOwnedSetInventoryTile(
+            $part['part_id'] . ':' . $part['color_id'],
+            $part['part_num'],
+            $name,
+            $part['thumbnail'],
+            (int) $part['nominal_quantity'],
+            (int) $part['actual_quantity'],
+            (int) $part['damaged_quantity']
+        );
+    }
+    $html .= '</div>';
+
+    $html .= renderOwnedSetQuantityModalMarkup();
+    $html .= renderOwnedSetQuantityModalScript($ownedSet, $ownedField, $damagedField, 'owned-set-inventory-grid');
+
+    return $html;
+}
+
+/**
+ * owned_set_detail's Minifiguren tab — same status-tile/quantity-modal
+ * treatment as renderOwnedSetInventoryGrid(), just keyed by minifig_id
+ * instead of part_id+color_id (minifigs have no color variants).
+ */
+function renderOwnedSetMinifigInventoryGrid(array $ownedSet, array $minifigs): string
+{
+    if (empty($minifigs)) {
+        return '<section class="card"><p>' . htmlspecialchars(t('set_detail_minifigs_empty')) . '</p></section>';
+    }
+
+    $html = '<div class="parts-grid owned-set-inventory-grid" id="owned-set-minifig-grid">';
+    foreach ($minifigs as $fig) {
+        $html .= renderOwnedSetInventoryTile(
+            (string) $fig['minifig_id'],
+            $fig['fig_num'],
+            $fig['name'],
+            $fig['thumbnail'],
+            (int) $fig['nominal_quantity'],
+            (int) $fig['actual_quantity'],
+            (int) $fig['damaged_quantity']
+        );
+    }
+    $html .= '</div>';
+
+    $html .= renderOwnedSetQuantityModalMarkup();
+    $html .= renderOwnedSetQuantityModalScript($ownedSet, 'minifig_owned', 'minifig_damaged', 'owned-set-minifig-grid');
 
     return $html;
 }
