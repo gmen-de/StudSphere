@@ -269,11 +269,11 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
 
     echo '<div class="status-bar-wrap"><div class="status-bar">';
     echo '<div class="status-stats">';
-    echo '<span class="status-stat"><strong>' . number_format($stats['bricks_total']) . '</strong> ' . htmlspecialchars(t('stat_bricks_total')) . '</span>';
-    echo '<span class="status-stat"><strong>' . number_format($stats['bricks_distinct']) . '</strong> ' . htmlspecialchars(t('stat_bricks_distinct')) . '</span>';
-    echo '<span class="status-stat"><strong>' . number_format($stats['sets']) . '</strong> ' . htmlspecialchars(t('stat_sets')) . '</span>';
-    echo '<span class="status-stat"><strong>' . number_format($stats['minifigs']) . '</strong> ' . htmlspecialchars(t('stat_minifigs')) . '</span>';
-    echo '<span class="status-stat"><strong>' . number_format($stats['bricks_damaged']) . '</strong> ' . htmlspecialchars(t('stat_bricks_damaged')) . '</span>';
+    echo '<span class="status-stat" id="status-stat-bricks_total"><strong>' . number_format($stats['bricks_total']) . '</strong> ' . htmlspecialchars(t('stat_bricks_total')) . '</span>';
+    echo '<span class="status-stat" id="status-stat-bricks_distinct"><strong>' . number_format($stats['bricks_distinct']) . '</strong> ' . htmlspecialchars(t('stat_bricks_distinct')) . '</span>';
+    echo '<span class="status-stat" id="status-stat-sets"><strong>' . number_format($stats['sets']) . '</strong> ' . htmlspecialchars(t('stat_sets')) . '</span>';
+    echo '<span class="status-stat" id="status-stat-minifigs"><strong>' . number_format($stats['minifigs']) . '</strong> ' . htmlspecialchars(t('stat_minifigs')) . '</span>';
+    echo '<span class="status-stat" id="status-stat-bricks_damaged"><strong>' . number_format($stats['bricks_damaged']) . '</strong> ' . htmlspecialchars(t('stat_bricks_damaged')) . '</span>';
     echo '</div>';
     echo '<div class="status-user">';
     echo '<a class="status-username" href="?page=settings">' . htmlspecialchars($user['username']) . '</a>';
@@ -952,7 +952,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         applyOwnedSetStickerInventory($pdo, $inventoryOwnedSet, (array) ($_POST['sticker_owned'] ?? []), (array) ($_POST['sticker_damaged'] ?? []), $userId);
         applyOwnedSetMinifigInventory($pdo, $inventoryOwnedSet, (array) ($_POST['minifig_owned'] ?? []), (array) ($_POST['minifig_damaged'] ?? []));
         refreshAppStatsCache($pdo);
-        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+
+        // Lets the modal's save handler patch the sidebar summary table and
+        // the top status bar in place instead of requiring a reload — see
+        // renderOwnedSetQuantityModalScript()'s applySummaryUpdate()/
+        // applyStats().
+        $freshCompleteness = getOwnedSetCompleteness($pdo, $inventoryOwnedSet);
+        $freshSummary = getOwnedSetInventorySummary($pdo, $inventoryOwnedSet, getLocale());
+        echo json_encode([
+            'success' => true,
+            'stats' => computeAppStats($pdo),
+            'summary' => [
+                'total' => ['actual' => $freshCompleteness['actual'], 'nominal' => $freshCompleteness['nominal'], 'percent' => $freshCompleteness['percent']],
+                'exclusive' => $freshSummary['exclusive'],
+                'rare' => $freshSummary['rare'],
+                'stickers' => $freshSummary['stickers'],
+                'minifigs' => $freshSummary['minifigs'],
+            ],
+        ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
@@ -2527,6 +2544,52 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
         exit;
     }
 
+    // Renders one tab's content — shared by the full page render below and
+    // the ajax=1 branch right after it, so a tab switch only ever needs to
+    // run this one tab's queries instead of the whole page's.
+    $renderOwnedTabContent = function (string $tabKey) use ($pdo, $ownedSet): string {
+        if ($tabKey === 'inventory') {
+            $parts = getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale());
+            return renderOwnedSetInventoryGrid($pdo, $ownedSet, $parts, 'owned', 'damaged', true);
+        }
+        if ($tabKey === 'spares') {
+            $spareParts = getOwnedSetSparePartsWithStatus($pdo, $ownedSet, getLocale());
+            return renderOwnedSetInventoryGrid($pdo, $ownedSet, $spareParts, 'spare_owned', 'spare_damaged');
+        }
+        if ($tabKey === 'stickers') {
+            $stickerParts = getOwnedSetStickerPartsWithStatus($pdo, $ownedSet, getLocale());
+            return renderOwnedSetInventoryGrid($pdo, $ownedSet, $stickerParts, 'sticker_owned', 'sticker_damaged');
+        }
+        if ($tabKey === 'minifigs') {
+            $ownedFigs = getOwnedSetMinifigsWithStatus($pdo, $ownedSet);
+            return renderOwnedSetMinifigInventoryGrid($ownedSet, $ownedFigs);
+        }
+        if ($tabKey === 'damaged_missing') {
+            return renderOwnedSetDamagedMissingSection($pdo, $ownedSet);
+        }
+        return renderOwnedSetPhotoGallery($pdo, $ownedSet);
+    };
+    $ownedSetTabKeys = ['inventory', 'spares', 'stickers', 'minifigs', 'damaged_missing', 'gallery'];
+
+    // AJAX tab-content request (see the tab-loading script further down) —
+    // only meaningful once the instance is opened (sealed sets have no
+    // tabs at all). Returns just this one tab's HTML plus fresh app-wide
+    // stats, bypassing the rest of the page (image, sidebar tables, etc.)
+    // entirely, so a tab switch doesn't re-run those unrelated queries.
+    if ($ownedSet['condition_type'] !== 'new' && ($_GET['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        $ajaxTabKey = (string) ($_GET['tab'] ?? '');
+        if (!in_array($ajaxTabKey, $ownedSetTabKeys, true)) {
+            $ajaxTabKey = $ownedSetTabKeys[0];
+        }
+        echo json_encode([
+            'success' => true,
+            'html' => $renderOwnedTabContent($ajaxTabKey),
+            'stats' => computeAppStats($pdo),
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     $ownedSetBreadcrumbs = [
         homeBreadcrumb(),
         ['label' => t('nav_my_sets_all'), 'url' => '?page=my_sets_all'],
@@ -2538,9 +2601,19 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $locationPath = getStorageLocationAncestors($ownedSet['location_id']);
     $adjacentOwnedSets = getAdjacentOwnedSets($pdo, $ownedSet);
 
-    $content = '<div class="set-detail-header">';
+    // Layout: image (+ room for a future set description, not built yet) top
+    // left, the info sidebar spanning the full height to its right, and the
+    // tabs/tab-content below the image — per user sketch, a deliberate
+    // departure from the catalog set-detail page's stacked layout, so this
+    // uses its own class names rather than reusing .set-detail-header/-info/
+    // -panel (those stay untouched for the catalog page).
+    $content = '<div class="owned-set-layout">';
+
+    $content .= '<div class="owned-set-image-row">';
     $content .= '<span class="set-detail-image">' . ($ownedSet['thumbnail'] !== null ? '<img src="' . htmlspecialchars($ownedSet['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
-    $content .= '<div class="set-detail-info"><div class="set-detail-panel">';
+    $content .= '</div>';
+
+    $content .= '<div class="owned-set-sidebar">';
     $content .= '<h1 class="set-detail-title">' . htmlspecialchars($ownedSet['rebrickable_set_num']) . '</h1>';
 
     if ($ownedSetDetailMessage !== '') {
@@ -2568,14 +2641,17 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
         $content .= renderSetGeneralInfoTable($pdo, $catalogSet);
     }
 
-    // One combined "Inventar" table: Lagerort/Zustand (instance placement),
-    // Gesamt/Exklusive/Seltene/Stickerbögen/Minifiguren (all "{actual} /
-    // {nominal}", see getOwnedSetInventorySummary()'s doc comment), then
-    // OVP/Anleitung status — merged per user request instead of two
-    // separate table-wraps.
+    // One combined "Inventar" table: Gesamt as a progress ring right at the
+    // top, then Lagerort/Zustand (instance placement), Exklusive/Seltene/
+    // Stickerbögen/Minifiguren (all "{actual} / {nominal}", see
+    // getOwnedSetInventorySummary()'s doc comment), then OVP/Anleitung
+    // status. Each summary row's value cell gets an id
+    // (owned-set-summary-{key}) so a quantity-modal save can patch just
+    // that text afterwards without a reload (see
+    // renderOwnedSetQuantityModalScript()'s applySummaryUpdate()).
     $ownedInventorySummary = getOwnedSetInventorySummary($pdo, $ownedSet, getLocale());
-    $renderActualNominalRow = function (string $labelKey, array $counts) use (&$content): void {
-        $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td>' . htmlspecialchars(t('owned_set_num_parts_actual', ['actual' => number_format($counts['actual']), 'nominal' => number_format($counts['nominal'])])) . '</td></tr>';
+    $renderActualNominalRow = function (string $labelKey, string $idKey, array $counts) use (&$content): void {
+        $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td id="owned-set-summary-' . $idKey . '">' . htmlspecialchars(t('owned_set_num_parts_actual', ['actual' => number_format($counts['actual']), 'nominal' => number_format($counts['nominal'])])) . '</td></tr>';
     };
     $renderBoxInfoRow = function (string $labelKey, bool $value, ?string $notesLabelKey, ?string $notes) use (&$content): void {
         $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td>' . htmlspecialchars($value ? t('owned_set_wizard_yes') : t('owned_set_wizard_no'));
@@ -2588,6 +2664,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= '<div class="set-detail-table-wrap">';
     $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
     $content .= '<table class="set-detail-table">';
+    $content .= '<tr class="owned-set-total-row"><td colspan="2">' . renderOwnedSetTotalRing($completeness['percent'], $completeness['actual'], $completeness['nominal']) . '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_location')) . '</th><td>';
     $locationLinks = [];
     foreach ($locationPath as $ancestor) {
@@ -2596,11 +2673,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= implode(' » ', $locationLinks);
     $content .= '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th><td>' . htmlspecialchars($ownedSet['condition_type'] === 'new' ? t('owned_set_condition_new') : t('owned_set_condition_used')) . '</td></tr>';
-    $renderActualNominalRow('set_detail_field_total', ['actual' => $completeness['actual'], 'nominal' => $completeness['nominal']]);
-    $renderActualNominalRow('set_detail_field_exclusive', $ownedInventorySummary['exclusive']);
-    $renderActualNominalRow('set_detail_field_rare', $ownedInventorySummary['rare']);
-    $renderActualNominalRow('set_detail_field_stickers', $ownedInventorySummary['stickers']);
-    $renderActualNominalRow('owned_set_tab_minifigs', $ownedInventorySummary['minifigs']);
+    $renderActualNominalRow('set_detail_field_exclusive', 'exclusive', $ownedInventorySummary['exclusive']);
+    $renderActualNominalRow('set_detail_field_rare', 'rare', $ownedInventorySummary['rare']);
+    $renderActualNominalRow('set_detail_field_stickers', 'stickers', $ownedInventorySummary['stickers']);
+    $renderActualNominalRow('owned_set_tab_minifigs', 'minifigs', $ownedInventorySummary['minifigs']);
     $renderBoxInfoRow('owned_set_has_instructions', (bool) $ownedSet['has_instructions'], 'owned_set_instructions_notes_label', $ownedSet['instructions_notes']);
     $renderBoxInfoRow('owned_set_has_box', (bool) $ownedSet['has_box'], 'owned_set_box_notes_label', $ownedSet['box_notes']);
     $renderBoxInfoRow('owned_set_box_complete', (bool) $ownedSet['box_complete'], 'owned_set_box_complete_notes_label', $ownedSet['box_complete_notes']);
@@ -2634,7 +2710,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
 SCRIPT;
     $content .= '</div>';
 
-    $content .= '</div></div></div>';
+    $content .= '</div>'; // .owned-set-sidebar
+
+    $content .= '<div class="owned-set-tabs-row">';
 
     if ($ownedSet['condition_type'] === 'new') {
         // Still sealed: nothing can be verified without opening it, which *is*
@@ -2685,6 +2763,11 @@ SCRIPT;
         // Tabs mirror the catalog set-detail page's own tab bar (.set-detail-tabs,
         // see page=set_detail) — same visual language for "here's the different
         // views of this set's contents", just scoped to one owned instance.
+        // Content itself is never rendered server-side here — the container
+        // starts as a loading spinner and the script below fetches the active
+        // tab's HTML via the ajax=1 branch above (and again on every tab
+        // click), so both the very first paint and every switch go through
+        // the same AJAX path instead of a full page navigation.
         $ownedSetTabs = [
             'inventory' => t('owned_set_tab_inventory'),
             'spares' => t('owned_set_tab_spares'),
@@ -2698,31 +2781,115 @@ SCRIPT;
             $activeOwnedTab = array_key_first($ownedSetTabs);
         }
 
-        $content .= '<nav class="set-detail-tabs">';
+        $content .= '<nav class="set-detail-tabs" id="owned-set-tabs-nav">';
         foreach ($ownedSetTabs as $tabKey => $tabLabel) {
             $activeAttr = $tabKey === $activeOwnedTab ? ' class="active"' : '';
-            $content .= '<a' . $activeAttr . ' href="?page=owned_set_detail&id=' . $ownedSetId . '&tab=' . $tabKey . '">' . htmlspecialchars($tabLabel) . '</a>';
+            $content .= '<a' . $activeAttr . ' data-tab="' . $tabKey . '" href="?page=owned_set_detail&id=' . $ownedSetId . '&tab=' . $tabKey . '">' . htmlspecialchars($tabLabel) . '</a>';
         }
         $content .= '</nav>';
 
-        if ($activeOwnedTab === 'inventory') {
-            $parts = getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale());
-            $content .= renderOwnedSetInventoryGrid($pdo, $ownedSet, $parts, 'owned', 'damaged', true);
-        } elseif ($activeOwnedTab === 'spares') {
-            $spareParts = getOwnedSetSparePartsWithStatus($pdo, $ownedSet, getLocale());
-            $content .= renderOwnedSetInventoryGrid($pdo, $ownedSet, $spareParts, 'spare_owned', 'spare_damaged');
-        } elseif ($activeOwnedTab === 'stickers') {
-            $stickerParts = getOwnedSetStickerPartsWithStatus($pdo, $ownedSet, getLocale());
-            $content .= renderOwnedSetInventoryGrid($pdo, $ownedSet, $stickerParts, 'sticker_owned', 'sticker_damaged');
-        } elseif ($activeOwnedTab === 'minifigs') {
-            $ownedFigs = getOwnedSetMinifigsWithStatus($pdo, $ownedSet);
-            $content .= renderOwnedSetMinifigInventoryGrid($ownedSet, $ownedFigs);
-        } elseif ($activeOwnedTab === 'damaged_missing') {
-            $content .= renderOwnedSetDamagedMissingSection($pdo, $ownedSet);
-        } else {
-            $content .= renderOwnedSetPhotoGallery($pdo, $ownedSet);
-        }
+        $loadingHtml = '<div class="owned-set-tab-loading"><span class="owned-set-tab-spinner"></span><span>' . htmlspecialchars(t('owned_set_tab_loading')) . '</span></div>';
+        $content .= '<div id="owned-set-tab-content" data-owned-set-id="' . $ownedSetId . '" data-active-tab="' . htmlspecialchars($activeOwnedTab) . '">' . $loadingHtml . '</div>';
+
+        $tabLoadingLabelsJson = json_encode([
+            'loading' => t('owned_set_tab_loading'),
+            'errorRetry' => t('import_error_retry'),
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $loadingHtmlJson = json_encode($loadingHtml, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+        $content .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $tabLoadingLabelsJson;
+  var loadingHtml = $loadingHtmlJson;
+  var container = document.getElementById('owned-set-tab-content');
+  var nav = document.getElementById('owned-set-tabs-nav');
+  if (!container || !nav) {
+    return;
+  }
+  var ownedSetId = container.dataset.ownedSetId;
+
+  function runScripts(root) {
+    var scripts = root.querySelectorAll('script');
+    for (var i = 0; i < scripts.length; i++) {
+      var oldScript = scripts[i];
+      var freshScript = document.createElement('script');
+      freshScript.textContent = oldScript.textContent;
+      oldScript.parentNode.replaceChild(freshScript, oldScript);
     }
+  }
+
+  function formatNumber(n) {
+    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+  }
+
+  function applyStats(stats) {
+    if (!stats) {
+      return;
+    }
+    Object.keys(stats).forEach(function(key) {
+      var el = document.getElementById('status-stat-' + key);
+      var strong = el ? el.querySelector('strong') : null;
+      if (strong) {
+        strong.textContent = formatNumber(stats[key]);
+      }
+    });
+  }
+
+  function loadTab(tabKey, pushState) {
+    container.innerHTML = loadingHtml;
+    var params = new URLSearchParams(window.location.search);
+    params.set('page', 'owned_set_detail');
+    params.set('id', ownedSetId);
+    params.set('tab', tabKey);
+    params.set('ajax', '1');
+    fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (!res.success) {
+          container.textContent = res.message || texts.errorRetry;
+          return;
+        }
+        container.innerHTML = res.html;
+        runScripts(container);
+        applyStats(res.stats);
+        var links = nav.querySelectorAll('a');
+        for (var i = 0; i < links.length; i++) {
+          links[i].classList.toggle('active', links[i].dataset.tab === tabKey);
+        }
+        container.dataset.activeTab = tabKey;
+        if (pushState) {
+          var urlParams = new URLSearchParams(window.location.search);
+          urlParams.set('tab', tabKey);
+          history.pushState({ tab: tabKey }, '', '?' + urlParams.toString());
+        }
+      })
+      .catch(function() {
+        container.textContent = texts.errorRetry;
+      });
+  }
+
+  var navLinks = nav.querySelectorAll('a');
+  for (var i = 0; i < navLinks.length; i++) {
+    navLinks[i].addEventListener('click', function(e) {
+      e.preventDefault();
+      loadTab(this.dataset.tab, true);
+    });
+  }
+
+  window.addEventListener('popstate', function() {
+    var params = new URLSearchParams(window.location.search);
+    loadTab(params.get('tab') || container.dataset.activeTab, false);
+  });
+
+  loadTab(container.dataset.activeTab, false);
+})();
+</script>
+SCRIPT;
+    }
+
+    $content .= '</div>'; // .owned-set-tabs-row
+    $content .= '</div>'; // .owned-set-layout
 
     renderApp(t('owned_set_instance_label') . ' – ' . $ownedSet['rebrickable_set_num'], $content, $user, computeAppStats($pdo), $ownedSetBreadcrumbs);
     exit;

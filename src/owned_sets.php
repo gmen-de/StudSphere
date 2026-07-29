@@ -1524,6 +1524,34 @@ function ownedSetInventoryTileStatusClass(int $nominal, int $actual, int $damage
 }
 
 /**
+ * owned_set_detail sidebar's "Gesamt" row — a compact version of
+ * renderLdrawRenderOverlay()'s SVG progress ring (src/ldraw.php): same
+ * stroke-dasharray/stroke-dashoffset technique, but sized for a table row
+ * rather than a full-screen overlay, styled for a light background instead
+ * of the LDraw overlay's dark one, and rendered once with the correct
+ * offset already baked in (no tick loop — there's nothing asynchronous
+ * here, just a snapshot of the current actual/nominal split). The ring's id
+ * (owned-set-total-ring-fg/-label) lets a save handler update it in place
+ * afterwards without touching the rest of the row.
+ */
+function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal): string
+{
+    $circumference = 2 * M_PI * 45;
+    $offset = $circumference * (1 - min(100.0, $percent) / 100);
+    $label = number_format($actual) . ' / ' . number_format($nominal);
+
+    $html = '<div class="owned-set-total-ring-wrap">';
+    $html .= '<svg class="owned-set-total-ring" viewBox="0 0 100 100" aria-hidden="true">';
+    $html .= '<circle class="owned-set-total-ring-bg" cx="50" cy="50" r="45"></circle>';
+    $html .= '<circle class="owned-set-total-ring-fg" id="owned-set-total-ring-fg" cx="50" cy="50" r="45" style="stroke-dasharray: ' . sprintf('%.2f', $circumference) . '; stroke-dashoffset: ' . sprintf('%.2f', $offset) . ';"></circle>';
+    $html .= '</svg>';
+    $html .= '<span class="owned-set-total-ring-label" id="owned-set-total-ring-label">' . htmlspecialchars($label) . '</span>';
+    $html .= '</div>';
+
+    return $html;
+}
+
+/**
  * One tile in an owned-set inventory grid — visually matches renderPartCard()
  * (image/number/name) plus a status border and a permanently-visible
  * owned/damaged/missing summary line. Deliberately NOT given the .part-card
@@ -1672,6 +1700,52 @@ function renderOwnedSetQuantityModalScript(array $ownedSet, string $ownedField, 
     }
   }
 
+  function formatNumber(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  // Patches the top status bar in place (see renderApp()'s
+  // id="status-stat-{key}" spans) — shared by every AJAX action on this
+  // page that returns fresh stats, duplicated per script per this
+  // project's self-contained-overlay convention.
+  function applyStats(stats) {
+    if (!stats) {
+      return;
+    }
+    Object.keys(stats).forEach(function(key) {
+      var el = document.getElementById('status-stat-' + key);
+      var strong = el ? el.querySelector('strong') : null;
+      if (strong) {
+        strong.textContent = formatNumber(stats[key]);
+      }
+    });
+  }
+
+  // Patches the sidebar "Inventar" table (owned_set_detail's own summary
+  // rows/ring) after a save — the tile itself is already updated by
+  // updateTile(), this covers the aggregate numbers next to it.
+  function applySummary(summary) {
+    if (!summary) {
+      return;
+    }
+    ['exclusive', 'rare', 'stickers', 'minifigs'].forEach(function(key) {
+      var counts = summary[key];
+      var cell = document.getElementById('owned-set-summary-' + key);
+      if (counts && cell) {
+        cell.textContent = formatNumber(counts.actual) + ' / ' + formatNumber(counts.nominal);
+      }
+    });
+    var total = summary.total;
+    var ringFg = document.getElementById('owned-set-total-ring-fg');
+    var ringLabel = document.getElementById('owned-set-total-ring-label');
+    if (total && ringFg && ringLabel) {
+      var circumference = 2 * Math.PI * 45;
+      var percent = Math.min(100, total.percent);
+      ringFg.style.strokeDashoffset = (circumference * (1 - percent / 100)).toFixed(2);
+      ringLabel.textContent = formatNumber(total.actual) + ' / ' + formatNumber(total.nominal);
+    }
+  }
+
   function openModal(tile) {
     modalContent.innerHTML = '';
     modal.style.display = 'flex';
@@ -1743,6 +1817,8 @@ function renderOwnedSetQuantityModalScript(array $ownedSet, string $ownedField, 
           saveBtn.disabled = false;
           if (res.success) {
             updateTile(tile, newOwned, newDamaged);
+            applyStats(res.stats);
+            applySummary(res.summary);
             closeModal();
           } else {
             msg.textContent = res.message || texts.errorRetry;
