@@ -82,6 +82,23 @@ function getMinifigThemeTileImages(PDO $pdo, array $themeIds): array
 }
 
 /**
+ * A minifig's own constituent-parts inventory (head/torso/legs/accessories)
+ * — Rebrickable ships this as an "inventory" of its own, exactly like a
+ * set's, just keyed by the minifig's fig_num instead of a set_num in the
+ * same rebrickable_inventories.set_num column (already imported by the
+ * generic CSV import, nothing minifig-specific needed there). Same query
+ * shape as sets.php's getSetInventoryId() — the caller then feeds the
+ * result into getSetPartsList(), which has no set-specific logic either.
+ */
+function getMinifigInventoryId(PDO $pdo, string $figNum): ?int
+{
+    $stmt = $pdo->prepare('SELECT inventory_id FROM rebrickable_inventories WHERE set_num = ? ORDER BY version DESC LIMIT 1');
+    $stmt->execute([$figNum]);
+    $id = $stmt->fetchColumn();
+    return $id !== false ? (int) $id : null;
+}
+
+/**
  * Minifigs needed for one set's inventory (via rebrickable_inventories.
  * inventory_id, same as sets.php's getSetPartsList() for regular parts).
  *

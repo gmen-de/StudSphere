@@ -938,6 +938,62 @@ if (isset($_GET['action']) && $_GET['action'] === 'owned_set_missing_parts') {
     exit;
 }
 
+/**
+ * Fresh stats+summary payload for the quantity-modal save handlers below —
+ * lets each of them patch the sidebar summary table and the top status bar
+ * in place instead of requiring a reload (see
+ * renderOwnedSetQuantityModalScript()'s applyStats()/applySummary()).
+ */
+function buildOwnedSetLiveUpdatePayload(PDO $pdo, array $ownedSet): array
+{
+    $completeness = getOwnedSetCompleteness($pdo, $ownedSet);
+    $summary = getOwnedSetInventorySummary($pdo, $ownedSet, getLocale());
+    return [
+        'stats' => computeAppStats($pdo),
+        'summary' => [
+            'total' => ['actual' => $completeness['actual'], 'nominal' => $completeness['nominal'], 'percent' => $completeness['percent']],
+            'exclusive' => $summary['exclusive'],
+            'rare' => $summary['rare'],
+            'stickers' => $summary['stickers'],
+            'minifigs' => $summary['minifigs'],
+        ],
+    ];
+}
+
+/**
+ * Looks up a minifig's fig_num within one owned instance — every minifig
+ * POST/GET action needs this (getOwnedSetMinifigPartsWithStatus() and
+ * friends need the fig_num to resolve the minifig's own Rebrickable
+ * inventory, see getMinifigInventoryId()), and $minifigId alone doesn't
+ * carry it.
+ */
+function findOwnedSetMinifigFigNum(PDO $pdo, array $ownedSet, int $minifigId): ?string
+{
+    foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSet) as $fig) {
+        if ($fig['minifig_id'] === $minifigId) {
+            return $fig['fig_num'];
+        }
+    }
+    return null;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'owned_set_minifig_parts') {
+    header('Content-Type: application/json');
+    $minifigPartsOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));
+    $minifigId = (int) ($_GET['minifig_id'] ?? 0);
+    $figNum = $minifigPartsOwnedSet !== null ? findOwnedSetMinifigFigNum($pdo, $minifigPartsOwnedSet, $minifigId) : null;
+    if ($minifigPartsOwnedSet === null || $figNum === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode([
+        'success' => true,
+        'parts' => getOwnedSetMinifigPartsWithStatus($pdo, $minifigPartsOwnedSet, $minifigId, $figNum, getLocale()),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_owned_set_inventory') {
     header('Content-Type: application/json');
     try {
@@ -952,24 +1008,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         applyOwnedSetStickerInventory($pdo, $inventoryOwnedSet, (array) ($_POST['sticker_owned'] ?? []), (array) ($_POST['sticker_damaged'] ?? []), $userId);
         applyOwnedSetMinifigInventory($pdo, $inventoryOwnedSet, (array) ($_POST['minifig_owned'] ?? []), (array) ($_POST['minifig_damaged'] ?? []));
         refreshAppStatsCache($pdo);
+        echo json_encode(['success' => true] + buildOwnedSetLiveUpdatePayload($pdo, $inventoryOwnedSet), JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
 
-        // Lets the modal's save handler patch the sidebar summary table and
-        // the top status bar in place instead of requiring a reload — see
-        // renderOwnedSetQuantityModalScript()'s applySummaryUpdate()/
-        // applyStats().
-        $freshCompleteness = getOwnedSetCompleteness($pdo, $inventoryOwnedSet);
-        $freshSummary = getOwnedSetInventorySummary($pdo, $inventoryOwnedSet, getLocale());
-        echo json_encode([
-            'success' => true,
-            'stats' => computeAppStats($pdo),
-            'summary' => [
-                'total' => ['actual' => $freshCompleteness['actual'], 'nominal' => $freshCompleteness['nominal'], 'percent' => $freshCompleteness['percent']],
-                'exclusive' => $freshSummary['exclusive'],
-                'rare' => $freshSummary['rare'],
-                'stickers' => $freshSummary['stickers'],
-                'minifigs' => $freshSummary['minifigs'],
-            ],
-        ], JSON_UNESCAPED_UNICODE);
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_owned_set_minifig_parts') {
+    header('Content-Type: application/json');
+    try {
+        $minifigPartsSaveOwnedSet = getOwnedSetById($pdo, (int) ($_POST['owned_set_id'] ?? 0));
+        if ($minifigPartsSaveOwnedSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        $minifigPartsSaveMinifigId = (int) ($_POST['minifig_id'] ?? 0);
+        $minifigPartsSaveFigNum = findOwnedSetMinifigFigNum($pdo, $minifigPartsSaveOwnedSet, $minifigPartsSaveMinifigId);
+        if ($minifigPartsSaveFigNum === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        applyOwnedSetMinifigPartInventory($pdo, $minifigPartsSaveOwnedSet, $minifigPartsSaveMinifigId, $minifigPartsSaveFigNum, (array) ($_POST['part_owned'] ?? []), (array) ($_POST['part_damaged'] ?? []));
+        refreshAppStatsCache($pdo);
+        echo json_encode(['success' => true] + buildOwnedSetLiveUpdatePayload($pdo, $minifigPartsSaveOwnedSet), JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
@@ -2562,7 +2623,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
         }
         if ($tabKey === 'minifigs') {
             $ownedFigs = getOwnedSetMinifigsWithStatus($pdo, $ownedSet);
-            return renderOwnedSetMinifigInventoryGrid($ownedSet, $ownedFigs);
+            return renderOwnedSetMinifigInventoryGrid($pdo, $ownedSet, $ownedFigs);
         }
         if ($tabKey === 'damaged_missing') {
             return renderOwnedSetDamagedMissingSection($pdo, $ownedSet);

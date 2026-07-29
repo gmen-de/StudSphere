@@ -271,6 +271,34 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'users', 'is_admin', 'TINYINT(1) NOT NULL DEFAULT 0');
             $pdo->exec('UPDATE users SET is_admin = 1');
         },
+        18 => function (PDO $pdo): void {
+            // A minifig's own constituent parts (head/torso/legs/accessories),
+            // per owned instance — same reasoning as owned_set_minifigs
+            // (minifigs aren't a part+color combination, don't fit
+            // storage_items), just one level deeper. Rebrickable already
+            // ships each minifig's own part breakdown as its own "inventory"
+            // (rebrickable_inventories.set_num = a fig_num like "fig-000001",
+            // with matching inventory_parts rows) — the existing generic CSV
+            // import already pulled this in without any app code using it
+            // until now, so no import change is needed here, only this table
+            // to record what's actually present/damaged.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS owned_set_minifig_parts (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    owned_set_id INT NOT NULL,
+                    minifig_id INT NOT NULL,
+                    part_id INT NOT NULL,
+                    color_id INT DEFAULT NULL,
+                    quantity INT NOT NULL DEFAULT 0,
+                    damaged_quantity INT NOT NULL DEFAULT 0,
+                    UNIQUE KEY owned_set_minifig_part_unique (owned_set_id, minifig_id, part_id, color_id),
+                    CONSTRAINT fk_ownedsetminifigpart_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_ownedsetminifigpart_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_ownedsetminifigpart_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_ownedsetminifigpart_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -333,7 +361,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 17;
+const CURRENT_SCHEMA_VERSION = 18;
 
 function getInstalledSchemaVersion(): int
 {

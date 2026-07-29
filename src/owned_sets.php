@@ -154,10 +154,46 @@ function getAllOwnedSets(PDO $pdo): array
 }
 
 /**
- * Nominal (from the set's own Rebrickable inventory, non-spare) vs. actual
- * (storage_items at the instance's location) piece counts — the single
- * source of truth for "how complete is this set", computed on the fly
- * rather than stored, since actual quantity already lives in storage_items.
+ * Aggregate nominal/actual across every minifig's constituent parts for this
+ * owned instance — each minifig type's own per-unit part list
+ * (getSetMinifigsList() + getOwnedSetMinifigPartsWithStatus()) multiplied by
+ * how many of that minifig the SET nominally has (nominal is always the box
+ * truth here, same convention as everywhere else in this file — never
+ * scaled down just because fewer are actually owned). Folded into
+ * getOwnedSetCompleteness()'s and getOwnedSetInventorySummary()'s "Gesamt"
+ * totals so those no longer diverge from Rebrickable's own catalog
+ * num_parts by roughly one minifig's worth of parts per minifig in the set
+ * (head/torso/legs/etc. were previously untracked, see migration 18).
+ *
+ * @return array{actual:int, nominal:int}
+ */
+function getOwnedSetMinifigPartsTotal(PDO $pdo, array $ownedSet): array
+{
+    $inventoryId = resolveOwnedSetInventoryId($pdo, $ownedSet);
+    if ($inventoryId === null) {
+        return ['actual' => 0, 'nominal' => 0];
+    }
+    $total = ['actual' => 0, 'nominal' => 0];
+    foreach (getSetMinifigsList($pdo, $inventoryId) as $fig) {
+        $figCount = $fig['quantity'];
+        if ($figCount <= 0) {
+            continue;
+        }
+        foreach (getOwnedSetMinifigPartsWithStatus($pdo, $ownedSet, $fig['minifig_id'], $fig['fig_num']) as $part) {
+            $total['nominal'] += $part['nominal_quantity'] * $figCount;
+            $total['actual'] += $part['actual_quantity'] * $figCount;
+        }
+    }
+    return $total;
+}
+
+/**
+ * Nominal (from the set's own Rebrickable inventory, non-spare, plus every
+ * minifig's constituent parts via getOwnedSetMinifigPartsTotal()) vs. actual
+ * (storage_items at the instance's location, plus the same minifig-parts
+ * total) piece counts — the single source of truth for "how complete is
+ * this set", computed on the fly rather than stored, since actual quantity
+ * already lives in storage_items/owned_set_minifig_parts.
  *
  * @return array{nominal:int, actual:int, percent:float}
  */
@@ -175,6 +211,10 @@ function getOwnedSetCompleteness(PDO $pdo, array $ownedSet): array
     $actualStmt = $pdo->prepare('SELECT COALESCE(SUM(quantity), 0) FROM storage_items WHERE location_id = ?');
     $actualStmt->execute([$ownedSet['location_id']]);
     $actual = (int) $actualStmt->fetchColumn();
+
+    $minifigParts = getOwnedSetMinifigPartsTotal($pdo, $ownedSet);
+    $nominal += $minifigParts['nominal'];
+    $actual += $minifigParts['actual'];
 
     $percent = $nominal > 0 ? round(min(100.0, ($actual / $nominal) * 100), 1) : 100.0;
 
@@ -446,6 +486,59 @@ function getOwnedSetMinifigsWithStatus(PDO $pdo, array $ownedSet): array
 }
 
 /**
+ * One minifig's own constituent parts (head/torso/legs/accessories) for
+ * this owned instance — nominal/actual/damaged pairing, same shape and same
+ * "missing row = fully present, until corrected" convention as
+ * getOwnedSetItemsWithStatus() uses for regular parts. Nominal comes from
+ * the minifig's own Rebrickable inventory (getMinifigInventoryId() +
+ * getSetPartsList(), src/minifigs.php/src/sets.php — this is "how many of
+ * this part one single minifig needs", not scaled by how many of this
+ * minifig the set/instance has); actual/damaged come from the dedicated
+ * owned_set_minifig_parts table (see migration 18).
+ *
+ * @return array<int, array{part_id:int, part_num:string, name:string, color_id:int, color_name:?string, color_rgb:?string, thumbnail:?string, nominal_quantity:int, actual_quantity:int, damaged_quantity:int}>
+ */
+function getOwnedSetMinifigPartsWithStatus(PDO $pdo, array $ownedSet, int $minifigId, string $figNum, string $locale = 'en'): array
+{
+    $inventoryId = getMinifigInventoryId($pdo, $figNum);
+    if ($inventoryId === null) {
+        return [];
+    }
+    $nominalItems = getSetPartsList($pdo, $inventoryId, false, $locale);
+
+    $actualStmt = $pdo->prepare('SELECT part_id, color_id, quantity, damaged_quantity FROM owned_set_minifig_parts WHERE owned_set_id = ? AND minifig_id = ?');
+    $actualStmt->execute([$ownedSet['id'], $minifigId]);
+    $actualByKey = [];
+    $damagedByKey = [];
+    foreach ($actualStmt->fetchAll() as $row) {
+        $key = $row['part_id'] . ':' . $row['color_id'];
+        $actualByKey[$key] = (int) $row['quantity'];
+        $damagedByKey[$key] = (int) $row['damaged_quantity'];
+    }
+
+    $result = [];
+    foreach ($nominalItems as $item) {
+        if ($item['color_id'] === null) {
+            continue;
+        }
+        $key = $item['part_id'] . ':' . $item['color_id'];
+        $result[] = [
+            'part_id' => $item['part_id'],
+            'part_num' => $item['part_num'],
+            'name' => $item['name'],
+            'color_id' => $item['color_id'],
+            'color_name' => $item['color_name'],
+            'color_rgb' => $item['color_rgb'],
+            'thumbnail' => $item['ldraw_thumbnail'] ?? $item['thumbnail'] ?? $item['remote_thumbnail'] ?? null,
+            'nominal_quantity' => $item['quantity'],
+            'actual_quantity' => $actualByKey[$key] ?? $item['quantity'],
+            'damaged_quantity' => $damagedByKey[$key] ?? 0,
+        ];
+    }
+    return $result;
+}
+
+/**
  * Copies a set's current regular (non-spare, includes stickers) inventory
  * into storage_items at $locationId, one addStorageStock() call per
  * distinct part+color — the normal audit-logged path, just run in a loop,
@@ -673,6 +766,34 @@ function applyOwnedSetMinifigInventory(PDO $pdo, array $ownedSet, array $ownedIn
         $ownedQuantity = max(0, min((int) $rawOwned, $nominalByKey[$minifigId]));
         $damagedQuantity = max(0, min((int) ($damagedInput[$key] ?? 0), $ownedQuantity));
         $stmt->execute([$ownedSet['id'], $minifigId, $ownedQuantity, $damagedQuantity]);
+    }
+}
+
+/**
+ * Upserts owned_set_minifig_parts for one minifig's constituent parts —
+ * same clamp-to-nominal / clamp-damaged-to-owned shape as
+ * applyOwnedSetInventory(), scoped to a single $minifigId within this
+ * instance instead of the instance's own regular parts.
+ */
+function applyOwnedSetMinifigPartInventory(PDO $pdo, array $ownedSet, int $minifigId, string $figNum, array $ownedInput, array $damagedInput): void
+{
+    $nominalByKey = [];
+    foreach (getOwnedSetMinifigPartsWithStatus($pdo, $ownedSet, $minifigId, $figNum) as $part) {
+        $nominalByKey[$part['part_id'] . ':' . $part['color_id']] = $part['nominal_quantity'];
+    }
+    $stmt = $pdo->prepare(
+        'INSERT INTO owned_set_minifig_parts (owned_set_id, minifig_id, part_id, color_id, quantity, damaged_quantity)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), damaged_quantity = VALUES(damaged_quantity)'
+    );
+    foreach ($ownedInput as $key => $rawOwned) {
+        if (!isset($nominalByKey[$key])) {
+            continue;
+        }
+        [$partId, $colorId] = array_map('intval', explode(':', (string) $key, 2));
+        $ownedQuantity = max(0, min((int) $rawOwned, $nominalByKey[$key]));
+        $damagedQuantity = max(0, min((int) ($damagedInput[$key] ?? 0), $ownedQuantity));
+        $stmt->execute([$ownedSet['id'], $minifigId, $partId, $colorId, $ownedQuantity, $damagedQuantity]);
     }
 }
 
@@ -1524,6 +1645,18 @@ function ownedSetInventoryTileStatusClass(int $nominal, int $actual, int $damage
 }
 
 /**
+ * Picks the more severe of two tile status classes (same priority as
+ * ownedSetInventoryTileStatusClass(): missing beats damaged beats
+ * complete) — used to fold a minifig's own owned/damaged status together
+ * with its constituent parts' status into one tile border color.
+ */
+function ownedSetWorseStatusClass(string $a, string $b): string
+{
+    $priority = ['owned-set-inventory-tile-missing' => 2, 'owned-set-inventory-tile-damaged' => 1, 'owned-set-inventory-tile-complete' => 0];
+    return $priority[$a] >= $priority[$b] ? $a : $b;
+}
+
+/**
  * owned_set_detail sidebar's "Gesamt" row — a compact version of
  * renderLdrawRenderOverlay()'s SVG progress ring (src/ldraw.php): same
  * stroke-dasharray/stroke-dashoffset technique, but sized for a table row
@@ -1863,6 +1996,355 @@ function renderOwnedSetQuantityModalMarkup(): string
 }
 
 /**
+ * The Minifiguren tab's own quantity-modal script — same modal DOM
+ * (renderOwnedSetQuantityModalMarkup()) as the generic one, but a minifig
+ * needs more than the generic owned/damaged pair: below those two steppers
+ * it fetches (action=owned_set_minifig_parts) and lists this minifig's own
+ * constituent parts, each with its own owned/damaged stepper. Saving fires
+ * two existing endpoints in sequence — save_owned_set_inventory for the
+ * minifig-level pair (same action the generic modal already uses for
+ * minifigs, field names minifig_owned/minifig_damaged), then
+ * save_owned_set_minifig_parts for the constituent parts — and only then
+ * updates the tile (combining both into one status color, see
+ * ownedSetWorseStatusClass()) and the sidebar/status-bar
+ * (applyStats()/applySummary(), same shape as the generic modal's).
+ */
+function renderOwnedSetMinifigQuantityModalScript(array $ownedSet): string
+{
+    $labelsJson = json_encode([
+        'errorRetry' => t('import_error_retry'),
+        'ownedLabel' => t('owned_set_inventory_owned_label'),
+        'damagedLabel' => t('owned_set_inventory_damaged_label'),
+        'inventorySummary' => t('owned_set_inventory_summary'),
+        'saveButton' => t('owned_set_save_button'),
+        'partsHeading' => t('owned_set_minifig_parts_heading'),
+        'loading' => t('owned_set_tab_loading'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $gridIdJson = json_encode('owned-set-minifig-grid');
+
+    return <<<SCRIPT
+<script>
+(function(){
+  var texts = $labelsJson;
+  var ownedSetId = {$ownedSet['id']};
+
+  var grid = document.getElementById($gridIdJson);
+  var modal = document.getElementById('owned-set-qty-modal');
+  var modalContent = document.getElementById('owned-set-qty-modal-content');
+  var closeBtn = document.getElementById('owned-set-qty-modal-close');
+  if (!grid || !modal || !modalContent || !closeBtn) {
+    return;
+  }
+
+  function closeModal() {
+    modal.style.display = 'none';
+    modalContent.innerHTML = '';
+  }
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.style.display !== 'none') {
+      closeModal();
+    }
+  });
+
+  function buildStepper(minVal, maxVal, value) {
+    var wrap = document.createElement('div');
+    wrap.className = 'owned-set-inventory-stepper';
+    var minusBtn = document.createElement('button');
+    minusBtn.type = 'button';
+    minusBtn.className = 'owned-set-inventory-stepper-btn';
+    minusBtn.textContent = '\\u2212';
+    var input = document.createElement('input');
+    input.type = 'number';
+    input.min = String(minVal);
+    input.max = String(maxVal);
+    input.value = String(value);
+    var plusBtn = document.createElement('button');
+    plusBtn.type = 'button';
+    plusBtn.className = 'owned-set-inventory-stepper-btn';
+    plusBtn.textContent = '+';
+
+    function step(delta) {
+      var v = (parseInt(input.value, 10) || 0) + delta;
+      v = Math.max(parseInt(input.min, 10), Math.min(v, parseInt(input.max, 10)));
+      input.value = String(v);
+      input.dispatchEvent(new Event('input'));
+    }
+    minusBtn.addEventListener('click', function() { step(-1); });
+    plusBtn.addEventListener('click', function() { step(1); });
+
+    wrap.appendChild(minusBtn);
+    wrap.appendChild(input);
+    wrap.appendChild(plusBtn);
+    return { wrap: wrap, input: input };
+  }
+
+  function formatNumber(n) {
+    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+  }
+
+  function applyStats(stats) {
+    if (!stats) {
+      return;
+    }
+    Object.keys(stats).forEach(function(key) {
+      var el = document.getElementById('status-stat-' + key);
+      var strong = el ? el.querySelector('strong') : null;
+      if (strong) {
+        strong.textContent = formatNumber(stats[key]);
+      }
+    });
+  }
+
+  function applySummary(summary) {
+    if (!summary) {
+      return;
+    }
+    ['exclusive', 'rare', 'stickers', 'minifigs'].forEach(function(key) {
+      var counts = summary[key];
+      var cell = document.getElementById('owned-set-summary-' + key);
+      if (counts && cell) {
+        cell.textContent = formatNumber(counts.actual) + ' / ' + formatNumber(counts.nominal);
+      }
+    });
+    var total = summary.total;
+    var ringFg = document.getElementById('owned-set-total-ring-fg');
+    var ringLabel = document.getElementById('owned-set-total-ring-label');
+    if (total && ringFg && ringLabel) {
+      var circumference = 2 * Math.PI * 45;
+      var percent = Math.min(100, total.percent);
+      ringFg.style.strokeDashoffset = (circumference * (1 - percent / 100)).toFixed(2);
+      ringLabel.textContent = formatNumber(total.actual) + ' / ' + formatNumber(total.nominal);
+    }
+  }
+
+  function updateTile(tile, actual, damaged, partsNominal, partsActual, partsDamaged) {
+    var nominal = parseInt(tile.dataset.nominal, 10);
+    var missing = Math.max(0, nominal - actual);
+    var intact = actual - damaged;
+    tile.dataset.actual = String(actual);
+    tile.dataset.damaged = String(damaged);
+
+    var partsMissing = Math.max(0, partsNominal - partsActual);
+    tile.classList.remove('owned-set-inventory-tile-complete', 'owned-set-inventory-tile-damaged', 'owned-set-inventory-tile-missing');
+    if (missing > 0 || partsMissing > 0) {
+      tile.classList.add('owned-set-inventory-tile-missing');
+    } else if (damaged > 0 || partsDamaged > 0) {
+      tile.classList.add('owned-set-inventory-tile-damaged');
+    } else {
+      tile.classList.add('owned-set-inventory-tile-complete');
+    }
+    var summary = tile.querySelector('.owned-set-inventory-summary');
+    if (summary) {
+      summary.textContent = texts.inventorySummary
+        .replace('{intact}', intact)
+        .replace('{damaged}', damaged)
+        .replace('{missing}', missing);
+    }
+  }
+
+  function openModal(tile) {
+    modalContent.innerHTML = '';
+    modal.style.display = 'flex';
+
+    var minifigId = tile.dataset.key;
+    var nominal = parseInt(tile.dataset.nominal, 10);
+    var actual = parseInt(tile.dataset.actual, 10);
+    var damaged = parseInt(tile.dataset.damaged, 10);
+
+    var header = document.createElement('div');
+    header.className = 'owned-set-qty-modal-header';
+    var img = document.createElement('span');
+    img.className = 'owned-set-qty-modal-image';
+    if (tile.dataset.thumbnail) {
+      img.innerHTML = '<img src="' + tile.dataset.thumbnail + '" alt="">';
+    }
+    header.appendChild(img);
+    var info = document.createElement('div');
+    var title = document.createElement('h3');
+    title.textContent = tile.dataset.number;
+    var name = document.createElement('p');
+    name.textContent = tile.dataset.name;
+    info.appendChild(title);
+    info.appendChild(name);
+    header.appendChild(info);
+    modalContent.appendChild(header);
+
+    var ownedLabel = document.createElement('label');
+    ownedLabel.appendChild(document.createTextNode(texts.ownedLabel));
+    var ownedStepper = buildStepper(0, nominal, actual);
+    ownedLabel.appendChild(ownedStepper.wrap);
+    modalContent.appendChild(ownedLabel);
+
+    var damagedLabel = document.createElement('label');
+    damagedLabel.appendChild(document.createTextNode(texts.damagedLabel));
+    var damagedStepper = buildStepper(0, actual, damaged);
+    damagedLabel.appendChild(damagedStepper.wrap);
+    modalContent.appendChild(damagedLabel);
+
+    ownedStepper.input.addEventListener('input', function() {
+      var v = parseInt(ownedStepper.input.value, 10) || 0;
+      damagedStepper.input.max = String(v);
+      if ((parseInt(damagedStepper.input.value, 10) || 0) > v) {
+        damagedStepper.input.value = String(v);
+      }
+    });
+
+    var partsHeading = document.createElement('h4');
+    partsHeading.className = 'owned-set-minifig-parts-heading';
+    partsHeading.textContent = texts.partsHeading;
+    modalContent.appendChild(partsHeading);
+
+    var partsList = document.createElement('div');
+    partsList.className = 'owned-set-minifig-parts-list';
+    partsList.textContent = texts.loading;
+    modalContent.appendChild(partsList);
+
+    var partState = {};
+
+    fetch('?action=owned_set_minifig_parts&owned_set_id=' + ownedSetId + '&minifig_id=' + minifigId, { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        partsList.innerHTML = '';
+        if (!res.success) {
+          partsList.textContent = res.message || texts.errorRetry;
+          return;
+        }
+        res.parts.forEach(function(part) {
+          var key = part.part_id + ':' + part.color_id;
+          partState[key] = { nominal: part.nominal_quantity };
+
+          var row = document.createElement('div');
+          row.className = 'owned-set-minifig-part-row';
+
+          var partImg = document.createElement('span');
+          partImg.className = 'part-card-image';
+          if (part.thumbnail) {
+            partImg.innerHTML = '<img src="' + part.thumbnail + '" alt="">';
+          }
+          row.appendChild(partImg);
+
+          var partName = document.createElement('span');
+          partName.className = 'owned-set-minifig-part-name';
+          partName.textContent = part.name + (part.color_name ? ' \\u00b7 ' + part.color_name : '');
+          row.appendChild(partName);
+
+          var partOwnedStepper = buildStepper(0, part.nominal_quantity, part.actual_quantity);
+          var partDamagedStepper = buildStepper(0, part.actual_quantity, part.damaged_quantity);
+          partOwnedStepper.input.addEventListener('input', function() {
+            var v = parseInt(partOwnedStepper.input.value, 10) || 0;
+            partDamagedStepper.input.max = String(v);
+            if ((parseInt(partDamagedStepper.input.value, 10) || 0) > v) {
+              partDamagedStepper.input.value = String(v);
+            }
+          });
+          row.appendChild(partOwnedStepper.wrap);
+          row.appendChild(partDamagedStepper.wrap);
+          partsList.appendChild(row);
+
+          partState[key].ownedInput = partOwnedStepper.input;
+          partState[key].damagedInput = partDamagedStepper.input;
+        });
+      })
+      .catch(function() {
+        partsList.textContent = texts.errorRetry;
+      });
+
+    var msg = document.createElement('p');
+    msg.className = 'owned-set-message';
+    modalContent.appendChild(msg);
+
+    var saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = texts.saveButton;
+    saveBtn.addEventListener('click', function() {
+      msg.textContent = '';
+      var newOwned = Math.max(0, Math.min(parseInt(ownedStepper.input.value, 10) || 0, nominal));
+      var newDamaged = Math.max(0, Math.min(parseInt(damagedStepper.input.value, 10) || 0, newOwned));
+
+      var minifigFormData = new FormData();
+      minifigFormData.set('action', 'save_owned_set_inventory');
+      minifigFormData.set('owned_set_id', String(ownedSetId));
+      minifigFormData.set('minifig_owned[' + minifigId + ']', String(newOwned));
+      minifigFormData.set('minifig_damaged[' + minifigId + ']', String(newDamaged));
+
+      var partsFormData = new FormData();
+      partsFormData.set('action', 'save_owned_set_minifig_parts');
+      partsFormData.set('owned_set_id', String(ownedSetId));
+      partsFormData.set('minifig_id', minifigId);
+      var partsNominalSum = 0;
+      var partsActualSum = 0;
+      var partsDamagedSum = 0;
+      Object.keys(partState).forEach(function(key) {
+        var st = partState[key];
+        if (!st.ownedInput) {
+          return;
+        }
+        var partOwned = Math.max(0, Math.min(parseInt(st.ownedInput.value, 10) || 0, st.nominal));
+        var partDamaged = Math.max(0, Math.min(parseInt(st.damagedInput.value, 10) || 0, partOwned));
+        partsFormData.set('part_owned[' + key + ']', String(partOwned));
+        partsFormData.set('part_damaged[' + key + ']', String(partDamaged));
+        partsNominalSum += st.nominal;
+        partsActualSum += partOwned;
+        partsDamagedSum += partDamaged;
+      });
+
+      saveBtn.disabled = true;
+      fetch('?', { method: 'POST', body: minifigFormData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res1) {
+          if (!res1.success) {
+            throw new Error(res1.message || texts.errorRetry);
+          }
+          return fetch('?', { method: 'POST', body: partsFormData, credentials: 'same-origin' });
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(res2) {
+          saveBtn.disabled = false;
+          if (res2.success) {
+            updateTile(tile, newOwned, newDamaged, partsNominalSum, partsActualSum, partsDamagedSum);
+            applyStats(res2.stats);
+            applySummary(res2.summary);
+            closeModal();
+          } else {
+            msg.textContent = res2.message || texts.errorRetry;
+          }
+        })
+        .catch(function(err) {
+          saveBtn.disabled = false;
+          msg.textContent = (err && err.message) || texts.errorRetry;
+        });
+    });
+    modalContent.appendChild(saveBtn);
+  }
+
+  grid.addEventListener('click', function(e) {
+    var tile = e.target.closest('.owned-set-inventory-tile');
+    if (tile) {
+      openModal(tile);
+    }
+  });
+  grid.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter' && e.key !== ' ') {
+      return;
+    }
+    var tile = e.target.closest('.owned-set-inventory-tile');
+    if (tile) {
+      e.preventDefault();
+      openModal(tile);
+    }
+  });
+})();
+</script>
+SCRIPT;
+}
+
+/**
  * owned_set_detail's inventory grid — one per tab (Inventar/Ersatzteile/
  * Stickerbögen). Unlike the previous grouped/paginated wizard-style editor,
  * this is a static grid showing every part+color at once (same visual
@@ -1956,9 +2438,15 @@ function renderOwnedSetInventoryGrid(PDO $pdo, array $ownedSet, array $parts, st
 /**
  * owned_set_detail's Minifiguren tab — same status-tile/quantity-modal
  * treatment as renderOwnedSetInventoryGrid(), just keyed by minifig_id
- * instead of part_id+color_id (minifigs have no color variants).
+ * instead of part_id+color_id (minifigs have no color variants). Unlike a
+ * regular part, a minifig's own owned/damaged status isn't the whole
+ * picture — it's built from constituent parts (head/torso/legs/etc., see
+ * migration 18) that can individually be missing/damaged even while the
+ * minifig itself is marked "present", so each tile's border color folds in
+ * both (ownedSetWorseStatusClass()) and the modal (see
+ * renderOwnedSetMinifigQuantityModalScript()) lets both be edited together.
  */
-function renderOwnedSetMinifigInventoryGrid(array $ownedSet, array $minifigs): string
+function renderOwnedSetMinifigInventoryGrid(PDO $pdo, array $ownedSet, array $minifigs): string
 {
     if (empty($minifigs)) {
         return '<section class="card"><p>' . htmlspecialchars(t('set_detail_minifigs_empty')) . '</p></section>';
@@ -1966,20 +2454,44 @@ function renderOwnedSetMinifigInventoryGrid(array $ownedSet, array $minifigs): s
 
     $html = '<div class="parts-grid owned-set-inventory-grid" id="owned-set-minifig-grid">';
     foreach ($minifigs as $fig) {
-        $html .= renderOwnedSetInventoryTile(
-            (string) $fig['minifig_id'],
-            $fig['fig_num'],
-            $fig['name'],
-            $fig['thumbnail'],
-            (int) $fig['nominal_quantity'],
-            (int) $fig['actual_quantity'],
-            (int) $fig['damaged_quantity']
-        );
+        $nominal = (int) $fig['nominal_quantity'];
+        $actual = (int) $fig['actual_quantity'];
+        $damaged = (int) $fig['damaged_quantity'];
+        $statusClass = ownedSetInventoryTileStatusClass($nominal, $actual, $damaged);
+
+        $partsNominal = 0;
+        $partsActual = 0;
+        $partsDamaged = 0;
+        foreach (getOwnedSetMinifigPartsWithStatus($pdo, $ownedSet, $fig['minifig_id'], $fig['fig_num']) as $part) {
+            $partsNominal += (int) $part['nominal_quantity'];
+            $partsActual += (int) $part['actual_quantity'];
+            $partsDamaged += (int) $part['damaged_quantity'];
+        }
+        if ($partsNominal > 0) {
+            $statusClass = ownedSetWorseStatusClass($statusClass, ownedSetInventoryTileStatusClass($partsNominal, $partsActual, $partsDamaged));
+        }
+
+        $missing = max(0, $nominal - $actual);
+        $intact = $actual - $damaged;
+        $summary = t('owned_set_inventory_summary', ['intact' => (string) $intact, 'damaged' => (string) $damaged, 'missing' => (string) $missing]);
+
+        $html .= '<div class="owned-set-inventory-tile ' . $statusClass . '" role="button" tabindex="0"';
+        $html .= ' data-key="' . (int) $fig['minifig_id'] . '"';
+        $html .= ' data-fig-num="' . htmlspecialchars($fig['fig_num']) . '"';
+        $html .= ' data-number="' . htmlspecialchars($fig['fig_num']) . '"';
+        $html .= ' data-name="' . htmlspecialchars($fig['name']) . '"';
+        $html .= ' data-thumbnail="' . htmlspecialchars((string) $fig['thumbnail']) . '"';
+        $html .= ' data-nominal="' . $nominal . '" data-actual="' . $actual . '" data-damaged="' . $damaged . '">';
+        $html .= '<span class="part-card-image">' . ($fig['thumbnail'] !== null ? '<img src="' . htmlspecialchars($fig['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
+        $html .= '<span class="part-card-num">' . htmlspecialchars($fig['fig_num']) . '</span>';
+        $html .= '<span class="part-card-name">' . htmlspecialchars($fig['name']) . '</span>';
+        $html .= '<p class="owned-set-inventory-summary">' . htmlspecialchars($summary) . '</p>';
+        $html .= '</div>';
     }
     $html .= '</div>';
 
     $html .= renderOwnedSetQuantityModalMarkup();
-    $html .= renderOwnedSetQuantityModalScript($ownedSet, 'minifig_owned', 'minifig_damaged', 'owned-set-minifig-grid');
+    $html .= renderOwnedSetMinifigQuantityModalScript($ownedSet);
 
     return $html;
 }

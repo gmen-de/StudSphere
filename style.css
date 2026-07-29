@@ -2778,6 +2778,52 @@ footer {
   font-size: 0.95rem;
 }
 
+#owned-set-qty-modal-content {
+  overflow-y: auto;
+  max-height: calc(90vh - 6rem);
+  padding-right: 0.5rem;
+}
+
+.owned-set-minifig-parts-heading {
+  margin: 1.25rem 0 0.75rem;
+  font-size: 1rem;
+  color: #334155;
+}
+
+.owned-set-minifig-parts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.owned-set-minifig-part-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.6rem;
+}
+
+.owned-set-minifig-part-row .part-card-image {
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.owned-set-minifig-part-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.85rem;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .owned-set-photo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
