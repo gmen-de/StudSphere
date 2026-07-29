@@ -184,23 +184,21 @@ function getOwnedSetCompleteness(PDO $pdo, array $ownedSet): array
 /**
  * Same exclusive/rare/sticker bucketing as sets.php's getSetInventorySummary(),
  * but paired with this owned instance's actual stock (storage_items at its
- * location) so each bucket can show "{actual} / {nominal}" instead of just
- * the catalog's nominal count — mirrors getOwnedSetCompleteness()'s
- * nominal-vs-actual pairing, split per rarity bucket. Also folds in the
- * instance's minifig actual/nominal totals, since owned_set_detail's own
- * "Inventar" table shows all of these together. Stickers stay a plain
- * nominal count of sheet rows (matching the catalog table exactly) — sticker
- * quantity was never part of the exclusive/rare bucketing to begin with, and
- * wasn't asked to gain an actual figure.
+ * location) so each bucket — including stickers, unlike the catalog table's
+ * plain sheet-row count — can show "{actual} / {nominal}" instead of just
+ * the catalog's nominal count. Mirrors getOwnedSetCompleteness()'s
+ * nominal-vs-actual pairing, split per rarity/category bucket. Also folds in
+ * the instance's minifig actual/nominal totals, since owned_set_detail's own
+ * "Inventar" table shows all of these together.
  *
- * @return array{exclusive: array{actual:int, nominal:int}, rare: array{actual:int, nominal:int}, stickers: int, minifigs: array{actual:int, nominal:int}}
+ * @return array{exclusive: array{actual:int, nominal:int}, rare: array{actual:int, nominal:int}, stickers: array{actual:int, nominal:int}, minifigs: array{actual:int, nominal:int}}
  */
 function getOwnedSetInventorySummary(PDO $pdo, array $ownedSet, string $locale): array
 {
     $empty = ['actual' => 0, 'nominal' => 0];
     $inventoryId = resolveOwnedSetInventoryId($pdo, $ownedSet);
     if ($inventoryId === null) {
-        return ['exclusive' => $empty, 'rare' => $empty, 'stickers' => 0, 'minifigs' => $empty];
+        return ['exclusive' => $empty, 'rare' => $empty, 'stickers' => $empty, 'minifigs' => $empty];
     }
 
     $items = getSetPartsList($pdo, $inventoryId, false, $locale);
@@ -223,10 +221,14 @@ function getOwnedSetInventorySummary(PDO $pdo, array $ownedSet, string $locale):
 
     $exclusive = ['actual' => 0, 'nominal' => 0];
     $rare = ['actual' => 0, 'nominal' => 0];
-    $stickers = 0;
+    $stickers = ['actual' => 0, 'nominal' => 0];
     foreach ($items as $item) {
+        $key = $item['part_id'] . ':' . $item['color_id'];
+        $actual = $actualByKey[$key] ?? $item['quantity'];
+
         if (isset($stickerPartIds[$item['part_id']])) {
-            $stickers++;
+            $stickers['nominal'] += $item['quantity'];
+            $stickers['actual'] += $actual;
             continue;
         }
         $count = $item['rebrickable_color_id'] !== null
@@ -235,8 +237,6 @@ function getOwnedSetInventorySummary(PDO $pdo, array $ownedSet, string $locale):
         if ($count < 1 || $count > 3) {
             continue;
         }
-        $key = $item['part_id'] . ':' . $item['color_id'];
-        $actual = $actualByKey[$key] ?? $item['quantity'];
         $bucket = $count === 1 ? 'exclusive' : 'rare';
         if ($bucket === 'exclusive') {
             $exclusive['nominal'] += $item['quantity'];
@@ -310,7 +310,7 @@ function getAdjacentOwnedSets(PDO $pdo, array $ownedSet): array
  * that to "everything except these ids".
  *
  * @param int[]|null $partIdFilter
- * @return array<int, array{part_id:int, part_num:string, name:string, color_id:int, color_name:?string, color_rgb:?string, thumbnail:?string, nominal_quantity:int, actual_quantity:int, damaged_quantity:int}>
+ * @return array<int, array{part_id:int, part_num:string, name:string, color_id:int, color_name:?string, color_rgb:?string, rebrickable_color_id:?int, thumbnail:?string, nominal_quantity:int, actual_quantity:int, damaged_quantity:int}>
  */
 function getOwnedSetItemsWithStatus(PDO $pdo, array $ownedSet, string $locale, bool $spares, ?array $partIdFilter = null, bool $invert = false): array
 {
@@ -350,6 +350,7 @@ function getOwnedSetItemsWithStatus(PDO $pdo, array $ownedSet, string $locale, b
             'color_id' => $item['color_id'],
             'color_name' => $item['color_name'],
             'color_rgb' => $item['color_rgb'],
+            'rebrickable_color_id' => $item['rebrickable_color_id'],
             'thumbnail' => $item['ldraw_thumbnail'] ?? $item['thumbnail'] ?? $item['remote_thumbnail'] ?? null,
             'nominal_quantity' => $item['quantity'],
             'actual_quantity' => $actualByKey[$key] ?? ($spares ? 0 : $item['quantity']),
@@ -1796,17 +1797,25 @@ function renderOwnedSetQuantityModalMarkup(): string
  * (and therefore which storage_items columns, via applyOwnedSetInventory()/
  * applyOwnedSetSpareInventory()/applyOwnedSetStickerInventory() in
  * index.php's save_owned_set_inventory handler) this instance targets.
+ *
+ * $groupByRarity splits the grid into Exklusive/Seltene/Normale sub-groups
+ * with a header+rule between them, same as the catalog set-detail page's own
+ * inventory tab (see index.php's $renderSetPartsGrid) — only meaningful for
+ * the main Inventar tab (spares/stickers callers leave it false, matching
+ * the catalog's own choice there). A "Stickerbögen" bucket isn't needed
+ * here unlike the catalog: this grid's $parts never contains sticker items
+ * to begin with (those already live in owned_set_detail's own Stickerbögen
+ * tab, see getOwnedSetPartsWithStatus()'s doc comment).
  */
-function renderOwnedSetInventoryGrid(array $ownedSet, array $parts, string $ownedField = 'owned', string $damagedField = 'damaged'): string
+function renderOwnedSetInventoryGrid(PDO $pdo, array $ownedSet, array $parts, string $ownedField = 'owned', string $damagedField = 'damaged', bool $groupByRarity = false): string
 {
     if (empty($parts)) {
         return '<section class="card"><p>' . htmlspecialchars(t('set_detail_inventory_empty')) . '</p></section>';
     }
 
-    $html = '<div class="parts-grid owned-set-inventory-grid" id="owned-set-inventory-grid">';
-    foreach ($parts as $part) {
+    $renderTile = function (array $part): string {
         $name = $part['name'] . ($part['color_name'] !== null ? ' · ' . $part['color_name'] : '');
-        $html .= renderOwnedSetInventoryTile(
+        return renderOwnedSetInventoryTile(
             $part['part_id'] . ':' . $part['color_id'],
             $part['part_num'],
             $name,
@@ -1815,9 +1824,53 @@ function renderOwnedSetInventoryGrid(array $ownedSet, array $parts, string $owne
             (int) $part['actual_quantity'],
             (int) $part['damaged_quantity']
         );
-    }
-    $html .= '</div>';
+    };
 
+    $tilesHtml = '';
+    if ($groupByRarity) {
+        $pairs = [];
+        foreach ($parts as $part) {
+            if ($part['rebrickable_color_id'] !== null) {
+                $pairs[] = ['part_id' => $part['part_id'], 'color_id' => $part['rebrickable_color_id']];
+            }
+        }
+        $setCounts = getPartSetCounts($pdo, $pairs);
+
+        $buckets = ['exclusive' => [], 'rare' => [], 'normal' => []];
+        foreach ($parts as $part) {
+            $count = $part['rebrickable_color_id'] !== null
+                ? ($setCounts[$part['part_id'] . ':' . $part['rebrickable_color_id']] ?? 0)
+                : 0;
+            if ($count === 1) {
+                $buckets['exclusive'][] = $part;
+            } elseif ($count >= 2 && $count <= 3) {
+                $buckets['rare'][] = $part;
+            } else {
+                $buckets['normal'][] = $part;
+            }
+        }
+
+        $groupLabels = [
+            'exclusive' => t('set_detail_group_exclusive'),
+            'rare' => t('set_detail_group_rare'),
+            'normal' => t('set_detail_group_normal'),
+        ];
+        foreach ($groupLabels as $bucketKey => $label) {
+            if (empty($buckets[$bucketKey])) {
+                continue;
+            }
+            $tilesHtml .= '<div class="group-header"><span class="group-header-label">' . htmlspecialchars($label) . '</span><hr class="group-header-rule"></div>';
+            foreach ($buckets[$bucketKey] as $part) {
+                $tilesHtml .= $renderTile($part);
+            }
+        }
+    } else {
+        foreach ($parts as $part) {
+            $tilesHtml .= $renderTile($part);
+        }
+    }
+
+    $html = '<div class="parts-grid owned-set-inventory-grid" id="owned-set-inventory-grid">' . $tilesHtml . '</div>';
     $html .= renderOwnedSetQuantityModalMarkup();
     $html .= renderOwnedSetQuantityModalScript($ownedSet, $ownedField, $damagedField, 'owned-set-inventory-grid');
 
