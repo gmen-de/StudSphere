@@ -2605,6 +2605,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
 
     $completeness = getOwnedSetCompleteness($pdo, $ownedSet);
     $locationPath = getStorageLocationAncestors($ownedSet['location_id']);
+    $adjacentOwnedSets = getAdjacentOwnedSets($pdo, $ownedSet);
 
     $content = '<div class="set-detail-header">';
     $content .= '<span class="set-detail-image">' . ($ownedSet['thumbnail'] !== null ? '<img src="' . htmlspecialchars($ownedSet['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
@@ -2615,7 +2616,48 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
         $content .= '<p class="owned-set-message">' . htmlspecialchars($ownedSetDetailMessage) . '</p>';
     }
 
+    // Same prev/next nav as the catalog set-detail page, just walking this
+    // user's own owned-set instances (getAdjacentOwnedSets()) instead of the
+    // whole catalog, and linking to owned_set_detail instead of set_detail.
+    $content .= '<div class="set-detail-setnav">';
+    $content .= $adjacentOwnedSets['prev'] !== null
+        ? '<a href="?page=owned_set_detail&id=' . $adjacentOwnedSets['prev']['id'] . '">&lsaquo; ' . htmlspecialchars($adjacentOwnedSets['prev']['rebrickable_set_num']) . '</a>'
+        : '<span></span>';
+    $content .= $adjacentOwnedSets['next'] !== null
+        ? '<a href="?page=owned_set_detail&id=' . $adjacentOwnedSets['next']['id'] . '">' . htmlspecialchars($adjacentOwnedSets['next']['rebrickable_set_num']) . ' &rsaquo;</a>'
+        : '<span></span>';
+    $content .= '</div>';
+
+    // Same table shape as the catalog set-detail page's own "Inventar"
+    // summary (heading + Gesamt/Exklusive/Seltene/Stickerbögen rows), plus a
+    // Minifiguren row — Gesamt/Exklusive/Seltene/Minifiguren show
+    // "{actual} / {nominal}" for this instance instead of the catalog's
+    // static counts; Stickerbögen stays a plain nominal count, matching the
+    // catalog table exactly (see getOwnedSetInventorySummary()'s doc comment).
+    $ownedInventorySummary = getOwnedSetInventorySummary($pdo, $ownedSet, getLocale());
+    $renderActualNominalRow = function (string $labelKey, array $counts) use (&$content): void {
+        $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td>' . htmlspecialchars(t('owned_set_num_parts_actual', ['actual' => number_format($counts['actual']), 'nominal' => number_format($counts['nominal'])])) . '</td></tr>';
+    };
+
     $content .= '<div class="set-detail-table-wrap">';
+    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
+    $content .= '<table class="set-detail-table">';
+    $renderActualNominalRow('set_detail_field_total', ['actual' => $completeness['actual'], 'nominal' => $completeness['nominal']]);
+    $renderActualNominalRow('set_detail_field_exclusive', $ownedInventorySummary['exclusive']);
+    $renderActualNominalRow('set_detail_field_rare', $ownedInventorySummary['rare']);
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_stickers')) . '</th><td>' . (int) $ownedInventorySummary['stickers'] . '</td></tr>';
+    $renderActualNominalRow('owned_set_tab_minifigs', $ownedInventorySummary['minifigs']);
+    $content .= '</table>';
+    $content .= '</div>';
+
+    // Read-only — matches the catalog set-detail page, which doesn't offer
+    // inline editing here either. A still-sealed ("new") instance trivially
+    // has its instructions, box, and a complete box (see addOwnedSet()'s
+    // doc comment), so the stored value already reflects that; nothing
+    // special to compute here. Zustand/Lagerort live here too now (per user
+    // request) rather than in their own table.
+    $content .= '<div class="set-detail-table-wrap">';
+    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('owned_set_box_info_heading')) . '</span>';
     $content .= '<table class="set-detail-table">';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th><td>' . htmlspecialchars($ownedSet['condition_type'] === 'new' ? t('owned_set_condition_new') : t('owned_set_condition_used')) . '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_location')) . '</th><td>';
@@ -2625,36 +2667,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     }
     $content .= implode(' » ', $locationLinks);
     $content .= '</td></tr>';
-    $content .= '</table>';
-    $content .= '</div>';
-
-    // Same table shape as the catalog set-detail page's own "Inventar"
-    // summary (heading + Gesamt/Exklusive/Seltene/Stickerbögen rows) — only
-    // the "Gesamt" row differs, showing actual/nominal for this instance
-    // instead of the catalog's static part count.
-    $ownedInventoryId = resolveOwnedSetInventoryId($pdo, $ownedSet);
-    $ownedInventorySummary = $ownedInventoryId !== null
-        ? getSetInventorySummary($pdo, $ownedInventoryId, getLocale())
-        : ['exclusive' => 0, 'rare' => 0, 'stickers' => 0];
-
-    $content .= '<div class="set-detail-table-wrap">';
-    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
-    $content .= '<table class="set-detail-table">';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_total')) . '</th><td>' . htmlspecialchars(t('owned_set_num_parts_actual', ['actual' => number_format($completeness['actual']), 'nominal' => number_format($completeness['nominal'])])) . '</td></tr>';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_exclusive')) . '</th><td>' . (int) $ownedInventorySummary['exclusive'] . '</td></tr>';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_rare')) . '</th><td>' . (int) $ownedInventorySummary['rare'] . '</td></tr>';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_stickers')) . '</th><td>' . (int) $ownedInventorySummary['stickers'] . '</td></tr>';
-    $content .= '</table>';
-    $content .= '</div>';
-
-    // Read-only — matches the catalog set-detail page, which doesn't offer
-    // inline editing here either. A still-sealed ("new") instance trivially
-    // has its instructions, box, and a complete box (see addOwnedSet()'s
-    // doc comment), so the stored value already reflects that; nothing
-    // special to compute here.
-    $content .= '<div class="set-detail-table-wrap">';
-    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('owned_set_box_info_heading')) . '</span>';
-    $content .= '<table class="set-detail-table">';
     $renderBoxInfoRow = function (string $labelKey, bool $value, ?string $notesLabelKey, ?string $notes) use (&$content): void {
         $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td>' . htmlspecialchars($value ? t('owned_set_wizard_yes') : t('owned_set_wizard_no'));
         if ($notes !== null && $notes !== '' && $notesLabelKey !== null) {

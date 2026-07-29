@@ -182,6 +182,123 @@ function getOwnedSetCompleteness(PDO $pdo, array $ownedSet): array
 }
 
 /**
+ * Same exclusive/rare/sticker bucketing as sets.php's getSetInventorySummary(),
+ * but paired with this owned instance's actual stock (storage_items at its
+ * location) so each bucket can show "{actual} / {nominal}" instead of just
+ * the catalog's nominal count — mirrors getOwnedSetCompleteness()'s
+ * nominal-vs-actual pairing, split per rarity bucket. Also folds in the
+ * instance's minifig actual/nominal totals, since owned_set_detail's own
+ * "Inventar" table shows all of these together. Stickers stay a plain
+ * nominal count of sheet rows (matching the catalog table exactly) — sticker
+ * quantity was never part of the exclusive/rare bucketing to begin with, and
+ * wasn't asked to gain an actual figure.
+ *
+ * @return array{exclusive: array{actual:int, nominal:int}, rare: array{actual:int, nominal:int}, stickers: int, minifigs: array{actual:int, nominal:int}}
+ */
+function getOwnedSetInventorySummary(PDO $pdo, array $ownedSet, string $locale): array
+{
+    $empty = ['actual' => 0, 'nominal' => 0];
+    $inventoryId = resolveOwnedSetInventoryId($pdo, $ownedSet);
+    if ($inventoryId === null) {
+        return ['exclusive' => $empty, 'rare' => $empty, 'stickers' => 0, 'minifigs' => $empty];
+    }
+
+    $items = getSetPartsList($pdo, $inventoryId, false, $locale);
+    $stickerPartIds = getStickerPartIds($pdo, $inventoryId);
+
+    $actualStmt = $pdo->prepare('SELECT part_id, color_id, quantity FROM storage_items WHERE location_id = ?');
+    $actualStmt->execute([$ownedSet['location_id']]);
+    $actualByKey = [];
+    foreach ($actualStmt->fetchAll() as $row) {
+        $actualByKey[$row['part_id'] . ':' . $row['color_id']] = (int) $row['quantity'];
+    }
+
+    $pairs = [];
+    foreach ($items as $item) {
+        if ($item['rebrickable_color_id'] !== null && !isset($stickerPartIds[$item['part_id']])) {
+            $pairs[] = ['part_id' => $item['part_id'], 'color_id' => $item['rebrickable_color_id']];
+        }
+    }
+    $setCounts = getPartSetCounts($pdo, $pairs);
+
+    $exclusive = ['actual' => 0, 'nominal' => 0];
+    $rare = ['actual' => 0, 'nominal' => 0];
+    $stickers = 0;
+    foreach ($items as $item) {
+        if (isset($stickerPartIds[$item['part_id']])) {
+            $stickers++;
+            continue;
+        }
+        $count = $item['rebrickable_color_id'] !== null
+            ? ($setCounts[$item['part_id'] . ':' . $item['rebrickable_color_id']] ?? 0)
+            : 0;
+        if ($count < 1 || $count > 3) {
+            continue;
+        }
+        $key = $item['part_id'] . ':' . $item['color_id'];
+        $actual = $actualByKey[$key] ?? $item['quantity'];
+        $bucket = $count === 1 ? 'exclusive' : 'rare';
+        if ($bucket === 'exclusive') {
+            $exclusive['nominal'] += $item['quantity'];
+            $exclusive['actual'] += $actual;
+        } else {
+            $rare['nominal'] += $item['quantity'];
+            $rare['actual'] += $actual;
+        }
+    }
+
+    $minifigs = ['actual' => 0, 'nominal' => 0];
+    foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSet) as $fig) {
+        $minifigs['nominal'] += $fig['nominal_quantity'];
+        $minifigs['actual'] += $fig['actual_quantity'];
+    }
+
+    return ['exclusive' => $exclusive, 'rare' => $rare, 'stickers' => $stickers, 'minifigs' => $minifigs];
+}
+
+/**
+ * Prev/next navigation between owned-set instances (not catalog sets) —
+ * owned_set_detail's own equivalent of sets.php's getAdjacentSets(), same
+ * numeric set-number comparison, with owned_sets.created_at then id as the
+ * tie-break so multiple instances of the same set sit next to each other in
+ * a stable order instead of comparing equal.
+ *
+ * @return array{prev: ?array{id:int, rebrickable_set_num:string}, next: ?array{id:int, rebrickable_set_num:string}}
+ */
+function getAdjacentOwnedSets(PDO $pdo, array $ownedSet): array
+{
+    $base = "CAST(SUBSTRING_INDEX(s.rebrickable_set_num, '-', 1) AS UNSIGNED)";
+    $variant = "CAST(SUBSTRING_INDEX(s.rebrickable_set_num, '-', -1) AS UNSIGNED)";
+    $currentBase = "CAST(SUBSTRING_INDEX(?, '-', 1) AS UNSIGNED)";
+    $currentVariant = "CAST(SUBSTRING_INDEX(?, '-', -1) AS UNSIGNED)";
+
+    $prevStmt = $pdo->prepare(
+        "SELECT os.id, s.rebrickable_set_num FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id
+         WHERE ($base, $variant, os.created_at, os.id) < ($currentBase, $currentVariant, ?, ?)
+         ORDER BY $base DESC, $variant DESC, os.created_at DESC, os.id DESC
+         LIMIT 1"
+    );
+    $prevStmt->execute([$ownedSet['rebrickable_set_num'], $ownedSet['rebrickable_set_num'], $ownedSet['created_at'], $ownedSet['id']]);
+    $prev = $prevStmt->fetch();
+
+    $nextStmt = $pdo->prepare(
+        "SELECT os.id, s.rebrickable_set_num FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id
+         WHERE ($base, $variant, os.created_at, os.id) > ($currentBase, $currentVariant, ?, ?)
+         ORDER BY $base ASC, $variant ASC, os.created_at ASC, os.id ASC
+         LIMIT 1"
+    );
+    $nextStmt->execute([$ownedSet['rebrickable_set_num'], $ownedSet['rebrickable_set_num'], $ownedSet['created_at'], $ownedSet['id']]);
+    $next = $nextStmt->fetch();
+
+    return [
+        'prev' => $prev !== false ? ['id' => (int) $prev['id'], 'rebrickable_set_num' => $prev['rebrickable_set_num']] : null,
+        'next' => $next !== false ? ['id' => (int) $next['id'], 'rebrickable_set_num' => $next['rebrickable_set_num']] : null,
+    ];
+}
+
+/**
  * Shared by getOwnedSetPartsWithStatus()/getOwnedSetStickerPartsWithStatus()/
  * getOwnedSetSparePartsWithStatus() — fetches one category's nominal list
  * (getSetPartsList()) plus the matching actual/damaged (or spare/
