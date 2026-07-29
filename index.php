@@ -2192,28 +2192,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
         : '<span></span>';
     $content .= '</div>';
 
-    $content .= '<div class="set-detail-table-wrap">';
-    $content .= '<table class="set-detail-table">';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_name')) . '</th><td>' . htmlspecialchars($set['name']) . '</td></tr>';
-    if ($set['year'] !== null) {
-        $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_released')) . '</th><td id="set-detail-year-text">' . htmlspecialchars((string) $set['year']) . '</td></tr>';
-    }
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_eol')) . '</th><td class="set-detail-retired-year">';
-    $content .= '<a href="#" id="set-retired-year-toggle">' . htmlspecialchars($set['year_retired'] !== null ? (string) $set['year_retired'] . ' · ' . t('set_detail_edit_retired_year_button') : t('set_detail_add_retired_year_button')) . '</a>';
-    $content .= '<form id="set-retired-year-form" class="set-retired-year-form" style="display:none;">';
-    $content .= '<input type="number" id="set-retired-year-input" min="1900" max="2100" placeholder="' . htmlspecialchars(t('set_detail_retired_year_placeholder')) . '" value="' . ($set['year_retired'] !== null ? (int) $set['year_retired'] : '') . '">';
-    $content .= '<button type="submit">' . htmlspecialchars(t('set_detail_retired_year_save_button')) . '</button>';
-    $content .= '<button type="button" id="set-retired-year-cancel">' . htmlspecialchars(t('set_detail_retired_year_cancel_button')) . '</button>';
-    $content .= '<span class="set-retired-year-message" id="set-retired-year-message"></span>';
-    $content .= '</form>';
-    $content .= '</td></tr>';
-    if ($set['theme_id'] !== null) {
-        $themeTree = getSetThemeTree($pdo);
-        $themePath = implode(' » ', array_column(getThemeAncestors($themeTree, $set['theme_id']), 'name'));
-        $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_theme')) . '</th><td>' . htmlspecialchars($themePath) . '</td></tr>';
-    }
-    $content .= '</table>';
-    $content .= '</div>';
+    $content .= renderSetGeneralInfoTable($pdo, $set);
 
     $content .= '<div class="set-detail-table-wrap">';
     $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
@@ -2249,64 +2228,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
     $content .= '</div>';
 
     $content .= '</div></div></div>';
-
-    $retiredYearLabelsJson = json_encode([
-        'addButton' => t('set_detail_add_retired_year_button'),
-        'editButton' => t('set_detail_edit_retired_year_button'),
-        'errorRetry' => t('import_error_retry'),
-    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-
-    $content .= <<<SCRIPT
-<script>
-(function(){
-  var texts = $retiredYearLabelsJson;
-  var toggle = document.getElementById('set-retired-year-toggle');
-  var form = document.getElementById('set-retired-year-form');
-  var input = document.getElementById('set-retired-year-input');
-  var cancelBtn = document.getElementById('set-retired-year-cancel');
-  var msg = document.getElementById('set-retired-year-message');
-  if (!toggle || !form || !input || !cancelBtn || !msg) {
-    return;
-  }
-
-  toggle.addEventListener('click', function(e) {
-    e.preventDefault();
-    toggle.style.display = 'none';
-    form.style.display = 'inline-flex';
-    input.focus();
-  });
-  cancelBtn.addEventListener('click', function() {
-    form.style.display = 'none';
-    toggle.style.display = 'inline-block';
-    msg.textContent = '';
-  });
-
-  form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    msg.textContent = '';
-    var formData = new FormData();
-    formData.set('action', 'save_set_retired_year');
-    formData.set('set_id', '$setId');
-    formData.set('year_retired', input.value);
-
-    fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(res) {
-        if (res.success) {
-          form.style.display = 'none';
-          toggle.style.display = 'inline-block';
-          toggle.textContent = res.yearRetired ? (res.yearRetired + ' · ' + texts.editButton) : texts.addButton;
-        } else {
-          msg.textContent = res.message;
-        }
-      })
-      .catch(function() {
-        msg.textContent = texts.errorRetry;
-      });
-  });
-})();
-</script>
-SCRIPT;
 
     $content .= '<nav class="set-detail-tabs">';
     foreach ($setTabs as $tabKey => $tabLabel) {
@@ -2627,6 +2548,15 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
         ? '<a href="?page=owned_set_detail&id=' . $adjacentOwnedSets['next']['id'] . '">' . htmlspecialchars($adjacentOwnedSets['next']['rebrickable_set_num']) . ' &rsaquo;</a>'
         : '<span></span>';
     $content .= '</div>';
+
+    // Same general info table as the catalog set-detail page (Name/
+    // Erschienen/Rücknahmejahr/Thema) — this is catalog-level set metadata,
+    // not owned-instance data, so it's fetched via getSetById() same as the
+    // catalog page and rendered through the same shared function.
+    $catalogSet = getSetById($pdo, $ownedSet['set_id']);
+    if ($catalogSet !== null) {
+        $content .= renderSetGeneralInfoTable($pdo, $catalogSet);
+    }
 
     // Same table shape as the catalog set-detail page's own "Inventar"
     // summary (heading + Gesamt/Exklusive/Seltene/Stickerbögen rows), plus a
