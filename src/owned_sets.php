@@ -1098,15 +1098,6 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
 
     $html .= '</div></div>';
 
-    // Minifig tiles in the inventory step open this same modal (markup only
-    // — the click/fetch/save wiring is its own block further down in this
-    // function's script, not renderOwnedSetMinifigQuantityModalScript(),
-    // since createdOwnedSetId is a JS variable set partway through the
-    // wizard rather than a PHP-known $ownedSet at render time). Sits as a
-    // sibling overlay to #add-owned-set-modal — same .modal-overlay
-    // z-index, later in the DOM, so it stacks on top when opened.
-    $html .= renderOwnedSetQuantityModalMarkup();
-
     $labelsJson = json_encode([
         'stepLabel' => t('owned_set_wizard_step_label'),
         'locationRequired' => t('owned_set_wizard_location_required'),
@@ -1123,7 +1114,6 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         'categoryMinifigs' => t('owned_set_wizard_category_minifigs'),
         'partsHeading' => t('owned_set_minifig_parts_heading'),
         'nominalLabel' => t('owned_set_minifig_nominal_label'),
-        'saveButton' => t('owned_set_save_button'),
         'loading' => t('owned_set_tab_loading'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
@@ -1143,10 +1133,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   var modal = document.getElementById('add-owned-set-modal');
   var closeBtn = document.getElementById('add-owned-set-modal-close');
   var progress = document.getElementById('owned-set-wizard-progress');
-  var qtyModal = document.getElementById('owned-set-qty-modal');
-  var qtyModalContent = document.getElementById('owned-set-qty-modal-content');
-  var qtyModalCloseBtn = document.getElementById('owned-set-qty-modal-close');
-  if (!modal || !closeBtn || !progress || !qtyModal || !qtyModalContent || !qtyModalCloseBtn) {
+  if (!modal || !closeBtn || !progress) {
     return;
   }
 
@@ -1245,10 +1232,9 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     if (usedRadio) { usedRadio.checked = true; }
     pages = [];
     pageIndex = 0;
-    state = { parts: {}, spares: {}, stickers: {} };
+    state = { parts: {}, spares: {}, stickers: {}, minifigs: {} };
     document.getElementById('owned-set-wizard-parts-list').innerHTML = '';
     document.getElementById('owned-set-wizard-inventory-progress').textContent = '';
-    closeQtyModal();
     showStep(steps[0] ? parseInt(steps[0].dataset.step, 10) : 1);
   }
 
@@ -1260,22 +1246,6 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   function closeModal() {
     modal.style.display = 'none';
   }
-
-  // The minifig constituent-parts modal (#owned-set-qty-modal) opens on top
-  // of this wizard modal (see renderMinifigTile()/openMinifigModal() below)
-  // — its own close handling is kept separate from the wizard's own
-  // modal/closeBtn above so Escape/click-outside on the inner modal doesn't
-  // also close the whole wizard.
-  function closeQtyModal() {
-    qtyModal.style.display = 'none';
-    qtyModalContent.innerHTML = '';
-  }
-  qtyModalCloseBtn.addEventListener('click', closeQtyModal);
-  qtyModal.addEventListener('click', function(e) {
-    if (e.target === qtyModal) {
-      closeQtyModal();
-    }
-  });
 
   if (openBtn) {
     openBtn.addEventListener('click', function(e) {
@@ -1293,9 +1263,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     if (e.key !== 'Escape') {
       return;
     }
-    if (qtyModal.style.display !== 'none') {
-      closeQtyModal();
-    } else if (modal.style.display !== 'none') {
+    if (modal.style.display !== 'none') {
       closeModal();
     }
   });
@@ -1444,7 +1412,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   // survives page changes (not just the currently-visible page), so paging
   // back and forth never loses an already-entered value.
   var pages = [];
-  var state = { parts: {}, spares: {}, stickers: {} };
+  var state = { parts: {}, spares: {}, stickers: {}, minifigs: {} };
   var pageIndex = 0;
   var invList = document.getElementById('owned-set-wizard-parts-list');
   var invProgress = document.getElementById('owned-set-wizard-inventory-progress');
@@ -1453,7 +1421,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
 
   function initInventoryPages(data) {
     pages = [];
-    state = { parts: {}, spares: {}, stickers: {} };
+    state = { parts: {}, spares: {}, stickers: {}, minifigs: {} };
     pageIndex = 0;
 
     var defs = [
@@ -1479,7 +1447,10 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
           categoryPages[indexByPartNum[item.part_num]].push(item);
         });
       } else {
-        categoryPages = [def.items];
+        // One page per minifig (not one page for all of them) — each gets
+        // its full constituent-parts checklist rendered inline as soon as
+        // its page is reached, no extra click needed.
+        categoryPages = def.items.map(function(item) { return [item]; });
       }
       categoryPages.forEach(function(items, i) {
         pages.push({ category: def.category, kind: def.kind, label: def.label, items: items, categoryIndex: i + 1, categoryTotal: categoryPages.length });
@@ -1521,80 +1492,208 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     return { wrap: wrap, input: input };
   }
 
-  // Minifig tiles aren't inline-editable (unlike parts/spares/stickers,
-  // which keep their own owned/damaged steppers right on the tile) — they
-  // open the constituent-parts modal instead, same as owned_set_detail's
-  // Minifiguren tab (see openMinifigModal() further down). This mirrors
-  // ownedSetInventoryTileStatusClass() in PHP.
-  function minifigTileStatusClass(nominal, actual, damaged) {
-    if (nominal - actual > 0) {
-      return 'owned-set-inventory-tile-missing';
+  // Mirrors ownedSetMinifigBottleneckStatus() in this file's PHP — see its
+  // doc comment for why "present" uses max() across parts (one missing
+  // accessory doesn't erase an otherwise-present minifig) while "complete"
+  // uses min() (the scarcest/most-damaged part bottlenecks how many
+  // complete copies exist).
+  function bottleneckStatus(parts, n) {
+    if (n <= 0) {
+      return { present: 0, complete: 0, damaged: 0 };
     }
-    if (damaged > 0) {
-      return 'owned-set-inventory-tile-damaged';
+    if (parts.length === 0) {
+      return { present: n, complete: n, damaged: 0 };
     }
-    return 'owned-set-inventory-tile-complete';
+    var maxPresentRatio = 0;
+    var minIntactRatio = 1;
+    parts.forEach(function(p) {
+      if (p.nominal <= 0) {
+        return;
+      }
+      var actualRatio = Math.min(1, p.actual / p.nominal);
+      var intactRatio = Math.min(1, Math.max(0, p.actual - p.damaged) / p.nominal);
+      maxPresentRatio = Math.max(maxPresentRatio, actualRatio);
+      minIntactRatio = Math.min(minIntactRatio, intactRatio);
+    });
+    var present = Math.min(n, Math.floor(maxPresentRatio * n + 1e-9));
+    var complete = Math.min(present, Math.floor(minIntactRatio * n + 1e-9));
+    return { present: present, complete: complete, damaged: Math.max(0, present - complete) };
   }
 
-  function renderMinifigTile(item) {
-    var nominal = item.nominal_quantity;
-    var actual = item.actual_quantity;
-    var damaged = item.damaged_quantity;
+  function getMinifigState(item) {
+    if (!state.minifigs[item.minifig_id]) {
+      state.minifigs[item.minifig_id] = { nominal: item.nominal_quantity, parts: {}, loaded: false };
+    }
+    return state.minifigs[item.minifig_id];
+  }
 
-    var tile = document.createElement('div');
-    tile.className = 'owned-set-inventory-tile ' + minifigTileStatusClass(nominal, actual, damaged);
-    tile.setAttribute('role', 'button');
-    tile.setAttribute('tabindex', '0');
-    tile.dataset.key = String(item.minifig_id);
-    tile.dataset.figNum = item.fig_num;
-    tile.dataset.number = item.fig_num;
-    tile.dataset.name = item.name;
-    tile.dataset.thumbnail = item.thumbnail || '';
-    tile.dataset.nominal = String(nominal);
-    tile.dataset.actual = String(actual);
-    tile.dataset.damaged = String(damaged);
+  // Minifigs get their own page per figure (see initInventoryPages()) and
+  // that page renders the full constituent-parts checklist inline as soon
+  // as it's reached — no click/modal step, per the user's request that the
+  // wizard "direkt die Bauteile der Figur abfragt". Vorhanden/Beschädigt for
+  // the whole figure are read-only, derived live from the parts via
+  // bottleneckStatus() (mirrors owned_set_detail's minifig modal). Edits
+  // are kept in state.minifigs[id] (plain numbers, not DOM refs) so paging
+  // away and back doesn't lose them or re-fetch.
+  function renderMinifigPanel(item) {
+    var mState = getMinifigState(item);
+    var nominal = mState.nominal;
 
+    var panel = document.createElement('div');
+    panel.className = 'owned-set-wizard-minifig-panel';
+
+    var header = document.createElement('div');
+    header.className = 'owned-set-qty-modal-header';
     var img = document.createElement('span');
-    img.className = 'minifig-card-image';
+    img.className = 'owned-set-qty-modal-image';
     if (item.thumbnail) {
       img.innerHTML = '<img src="' + item.thumbnail + '" alt="">';
     }
-    tile.appendChild(img);
-
-    var num = document.createElement('span');
-    num.className = 'minifig-card-num';
-    num.textContent = item.fig_num;
-    tile.appendChild(num);
-
-    var name = document.createElement('span');
-    name.className = 'minifig-card-name';
+    header.appendChild(img);
+    var info = document.createElement('div');
+    var title = document.createElement('h3');
+    title.textContent = item.fig_num;
+    var name = document.createElement('p');
     name.textContent = item.name;
-    tile.appendChild(name);
+    var nominalLine = document.createElement('p');
+    nominalLine.className = 'owned-set-minifig-nominal-line';
+    nominalLine.textContent = texts.nominalLabel.replace('{count}', nominal);
+    info.appendChild(title);
+    info.appendChild(name);
+    info.appendChild(nominalLine);
+    header.appendChild(info);
+    panel.appendChild(header);
 
-    var summary = document.createElement('p');
-    summary.className = 'owned-set-inventory-summary';
-    var intact = actual - damaged;
-    var missing = Math.max(0, nominal - actual);
-    summary.textContent = texts.inventorySummary
-      .replace('{intact}', intact)
-      .replace('{damaged}', damaged)
-      .replace('{missing}', missing);
-    tile.appendChild(summary);
+    var ownedLabel = document.createElement('label');
+    ownedLabel.appendChild(document.createTextNode(texts.ownedLabel));
+    var ownedValue = document.createElement('span');
+    ownedValue.className = 'owned-set-minifig-readonly-value';
+    ownedLabel.appendChild(ownedValue);
+    panel.appendChild(ownedLabel);
 
-    tile.addEventListener('click', function() { openMinifigModal(tile); });
-    tile.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        openMinifigModal(tile);
-      }
-    });
+    var damagedLabel = document.createElement('label');
+    damagedLabel.appendChild(document.createTextNode(texts.damagedLabel));
+    var damagedValue = document.createElement('span');
+    damagedValue.className = 'owned-set-minifig-readonly-value';
+    damagedLabel.appendChild(damagedValue);
+    panel.appendChild(damagedLabel);
 
-    return tile;
+    var partsHeading = document.createElement('h4');
+    partsHeading.className = 'owned-set-minifig-parts-heading';
+    partsHeading.textContent = texts.partsHeading;
+    panel.appendChild(partsHeading);
+
+    var columnHeader = document.createElement('div');
+    columnHeader.className = 'owned-set-minifig-part-row owned-set-minifig-part-header';
+    var columnHeaderSpacer = document.createElement('span');
+    columnHeaderSpacer.className = 'part-card-image';
+    var columnHeaderName = document.createElement('span');
+    columnHeaderName.className = 'owned-set-minifig-part-name';
+    var columnHeaderOwned = document.createElement('span');
+    columnHeaderOwned.className = 'owned-set-minifig-part-col-label';
+    columnHeaderOwned.textContent = texts.ownedLabel;
+    var columnHeaderDamaged = document.createElement('span');
+    columnHeaderDamaged.className = 'owned-set-minifig-part-col-label';
+    columnHeaderDamaged.textContent = texts.damagedLabel;
+    columnHeader.appendChild(columnHeaderSpacer);
+    columnHeader.appendChild(columnHeaderName);
+    columnHeader.appendChild(columnHeaderOwned);
+    columnHeader.appendChild(columnHeaderDamaged);
+    panel.appendChild(columnHeader);
+
+    var partsList = document.createElement('div');
+    partsList.className = 'owned-set-minifig-parts-list';
+    panel.appendChild(partsList);
+
+    function recompute() {
+      var parts = Object.keys(mState.parts).map(function(key) {
+        var p = mState.parts[key];
+        return { nominal: p.nominal, actual: p.owned, damaged: p.damaged };
+      });
+      var status = bottleneckStatus(parts, nominal);
+      ownedValue.textContent = String(status.present);
+      damagedValue.textContent = String(status.damaged);
+      return status;
+    }
+
+    function renderRows() {
+      partsList.innerHTML = '';
+      Object.keys(mState.parts).forEach(function(key) {
+        var p = mState.parts[key];
+        var row = document.createElement('div');
+        row.className = 'owned-set-minifig-part-row';
+
+        var partImg = document.createElement('span');
+        partImg.className = 'part-card-image';
+        if (p.thumbnail) {
+          partImg.innerHTML = '<img src="' + p.thumbnail + '" alt="">';
+        }
+        row.appendChild(partImg);
+
+        var partName = document.createElement('span');
+        partName.className = 'owned-set-minifig-part-name';
+        partName.textContent = p.name + (p.colorName ? ' \\u00b7 ' + p.colorName : '');
+        row.appendChild(partName);
+
+        var ownedStepper = buildStepper(0, p.nominal, p.owned);
+        var damagedStepper = buildStepper(0, p.owned, p.damaged);
+        ownedStepper.input.addEventListener('input', function() {
+          var v = parseInt(ownedStepper.input.value, 10) || 0;
+          p.owned = v;
+          damagedStepper.input.max = String(v);
+          if (p.damaged > v) {
+            p.damaged = v;
+            damagedStepper.input.value = String(v);
+          }
+          recompute();
+        });
+        damagedStepper.input.addEventListener('input', function() {
+          p.damaged = parseInt(damagedStepper.input.value, 10) || 0;
+          recompute();
+        });
+        row.appendChild(ownedStepper.wrap);
+        row.appendChild(damagedStepper.wrap);
+        partsList.appendChild(row);
+      });
+      recompute();
+    }
+
+    if (mState.loaded) {
+      renderRows();
+    } else {
+      partsList.textContent = texts.loading;
+      fetch('?action=owned_set_minifig_parts&owned_set_id=' + createdOwnedSetId + '&minifig_id=' + item.minifig_id, { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (!res.success) {
+            partsList.textContent = res.message || texts.errorRetry;
+            return;
+          }
+          res.parts.forEach(function(part) {
+            var key = part.part_id + ':' + part.color_id;
+            mState.parts[key] = {
+              nominal: part.nominal_quantity,
+              owned: part.actual_quantity,
+              damaged: part.damaged_quantity,
+              thumbnail: part.thumbnail,
+              name: part.name,
+              colorName: part.color_name
+            };
+          });
+          mState.loaded = true;
+          renderRows();
+        })
+        .catch(function() {
+          partsList.textContent = texts.errorRetry;
+        });
+    }
+
+    return panel;
   }
 
   function renderTile(item, category, kind) {
     if (kind === 'minifig') {
-      return renderMinifigTile(item);
+      return renderMinifigPanel(item);
     }
 
     var key = item.part_id + ':' + item.color_id;
@@ -1699,271 +1798,6 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     }
   });
 
-  // Mirrors ownedSetMinifigBottleneckStatus() in this file's PHP — see its
-  // doc comment for why "present" uses max() across parts (one missing
-  // accessory doesn't erase an otherwise-present minifig) while "complete"
-  // uses min() (the scarcest/most-damaged part bottlenecks how many
-  // complete copies exist).
-  function bottleneckStatus(parts, n) {
-    if (n <= 0) {
-      return { present: 0, complete: 0, damaged: 0 };
-    }
-    if (parts.length === 0) {
-      return { present: n, complete: n, damaged: 0 };
-    }
-    var maxPresentRatio = 0;
-    var minIntactRatio = 1;
-    parts.forEach(function(p) {
-      if (p.nominal <= 0) {
-        return;
-      }
-      var actualRatio = Math.min(1, p.actual / p.nominal);
-      var intactRatio = Math.min(1, Math.max(0, p.actual - p.damaged) / p.nominal);
-      maxPresentRatio = Math.max(maxPresentRatio, actualRatio);
-      minIntactRatio = Math.min(minIntactRatio, intactRatio);
-    });
-    var present = Math.min(n, Math.floor(maxPresentRatio * n + 1e-9));
-    var complete = Math.min(present, Math.floor(minIntactRatio * n + 1e-9));
-    return { present: present, complete: complete, damaged: Math.max(0, present - complete) };
-  }
-
-  function formatNumber(n) {
-    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
-  }
-
-  function applyStats(stats) {
-    if (!stats) {
-      return;
-    }
-    Object.keys(stats).forEach(function(key) {
-      var el = document.getElementById('status-stat-' + key);
-      var strong = el ? el.querySelector('strong') : null;
-      if (strong) {
-        strong.textContent = formatNumber(stats[key]);
-      }
-    });
-  }
-
-  function updateMinifigTile(tile, actual, damaged) {
-    var nominal = parseInt(tile.dataset.nominal, 10);
-    tile.dataset.actual = String(actual);
-    tile.dataset.damaged = String(damaged);
-    tile.classList.remove('owned-set-inventory-tile-complete', 'owned-set-inventory-tile-damaged', 'owned-set-inventory-tile-missing');
-    tile.classList.add(minifigTileStatusClass(nominal, actual, damaged));
-    var missing = Math.max(0, nominal - actual);
-    var intact = actual - damaged;
-    var summary = tile.querySelector('.owned-set-inventory-summary');
-    if (summary) {
-      summary.textContent = texts.inventorySummary
-        .replace('{intact}', intact)
-        .replace('{damaged}', damaged)
-        .replace('{missing}', missing);
-    }
-  }
-
-  // Opens #owned-set-qty-modal (markup shared with owned_set_detail, see
-  // renderOwnedSetQuantityModalMarkup()) for one minifig tile — fetches its
-  // constituent parts, lets each be corrected, live-recomputes the
-  // read-only Vorhanden/Beschädigt via bottleneckStatus(), and on save
-  // posts straight to the real endpoints (createdOwnedSetId already exists
-  // by the time the inventory step is reachable — see submitAddOwnedSet())
-  // instead of deferring to the wizard's own "Fertig" bulk save.
-  function openMinifigModal(tile) {
-    qtyModalContent.innerHTML = '';
-    qtyModal.style.display = 'flex';
-
-    var minifigId = tile.dataset.key;
-    var nominal = parseInt(tile.dataset.nominal, 10);
-
-    var header = document.createElement('div');
-    header.className = 'owned-set-qty-modal-header';
-    var img = document.createElement('span');
-    img.className = 'owned-set-qty-modal-image';
-    if (tile.dataset.thumbnail) {
-      img.innerHTML = '<img src="' + tile.dataset.thumbnail + '" alt="">';
-    }
-    header.appendChild(img);
-    var info = document.createElement('div');
-    var title = document.createElement('h3');
-    title.textContent = tile.dataset.number;
-    var name = document.createElement('p');
-    name.textContent = tile.dataset.name;
-    var nominalLine = document.createElement('p');
-    nominalLine.className = 'owned-set-minifig-nominal-line';
-    nominalLine.textContent = texts.nominalLabel.replace('{count}', nominal);
-    info.appendChild(title);
-    info.appendChild(name);
-    info.appendChild(nominalLine);
-    header.appendChild(info);
-    qtyModalContent.appendChild(header);
-
-    var ownedLabel = document.createElement('label');
-    ownedLabel.appendChild(document.createTextNode(texts.ownedLabel));
-    var ownedValue = document.createElement('span');
-    ownedValue.className = 'owned-set-minifig-readonly-value';
-    ownedLabel.appendChild(ownedValue);
-    qtyModalContent.appendChild(ownedLabel);
-
-    var damagedLabel = document.createElement('label');
-    damagedLabel.appendChild(document.createTextNode(texts.damagedLabel));
-    var damagedValue = document.createElement('span');
-    damagedValue.className = 'owned-set-minifig-readonly-value';
-    damagedLabel.appendChild(damagedValue);
-    qtyModalContent.appendChild(damagedLabel);
-
-    var partsHeading = document.createElement('h4');
-    partsHeading.className = 'owned-set-minifig-parts-heading';
-    partsHeading.textContent = texts.partsHeading;
-    qtyModalContent.appendChild(partsHeading);
-
-    var columnHeader = document.createElement('div');
-    columnHeader.className = 'owned-set-minifig-part-row owned-set-minifig-part-header';
-    var columnHeaderSpacer = document.createElement('span');
-    columnHeaderSpacer.className = 'part-card-image';
-    var columnHeaderName = document.createElement('span');
-    columnHeaderName.className = 'owned-set-minifig-part-name';
-    var columnHeaderOwned = document.createElement('span');
-    columnHeaderOwned.className = 'owned-set-minifig-part-col-label';
-    columnHeaderOwned.textContent = texts.ownedLabel;
-    var columnHeaderDamaged = document.createElement('span');
-    columnHeaderDamaged.className = 'owned-set-minifig-part-col-label';
-    columnHeaderDamaged.textContent = texts.damagedLabel;
-    columnHeader.appendChild(columnHeaderSpacer);
-    columnHeader.appendChild(columnHeaderName);
-    columnHeader.appendChild(columnHeaderOwned);
-    columnHeader.appendChild(columnHeaderDamaged);
-    qtyModalContent.appendChild(columnHeader);
-
-    var partsList = document.createElement('div');
-    partsList.className = 'owned-set-minifig-parts-list';
-    partsList.textContent = texts.loading;
-    qtyModalContent.appendChild(partsList);
-
-    var partState = {};
-
-    function recompute() {
-      var parts = Object.keys(partState).map(function(key) {
-        var st = partState[key];
-        return {
-          nominal: st.nominal,
-          actual: parseInt(st.ownedInput.value, 10) || 0,
-          damaged: parseInt(st.damagedInput.value, 10) || 0
-        };
-      });
-      var status = bottleneckStatus(parts, nominal);
-      ownedValue.textContent = String(status.present);
-      damagedValue.textContent = String(status.damaged);
-      return status;
-    }
-
-    fetch('?action=owned_set_minifig_parts&owned_set_id=' + createdOwnedSetId + '&minifig_id=' + minifigId, { credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(res) {
-        partsList.innerHTML = '';
-        if (!res.success) {
-          partsList.textContent = res.message || texts.errorRetry;
-          return;
-        }
-        res.parts.forEach(function(part) {
-          var key = part.part_id + ':' + part.color_id;
-          partState[key] = { nominal: part.nominal_quantity };
-
-          var row = document.createElement('div');
-          row.className = 'owned-set-minifig-part-row';
-
-          var partImg = document.createElement('span');
-          partImg.className = 'part-card-image';
-          if (part.thumbnail) {
-            partImg.innerHTML = '<img src="' + part.thumbnail + '" alt="">';
-          }
-          row.appendChild(partImg);
-
-          var partName = document.createElement('span');
-          partName.className = 'owned-set-minifig-part-name';
-          partName.textContent = part.name + (part.color_name ? ' \\u00b7 ' + part.color_name : '');
-          row.appendChild(partName);
-
-          var partOwnedStepper = buildStepper(0, part.nominal_quantity, part.actual_quantity);
-          var partDamagedStepper = buildStepper(0, part.actual_quantity, part.damaged_quantity);
-          partOwnedStepper.input.addEventListener('input', function() {
-            var v = parseInt(partOwnedStepper.input.value, 10) || 0;
-            partDamagedStepper.input.max = String(v);
-            if ((parseInt(partDamagedStepper.input.value, 10) || 0) > v) {
-              partDamagedStepper.input.value = String(v);
-            }
-            recompute();
-          });
-          partDamagedStepper.input.addEventListener('input', recompute);
-          row.appendChild(partOwnedStepper.wrap);
-          row.appendChild(partDamagedStepper.wrap);
-          partsList.appendChild(row);
-
-          partState[key].ownedInput = partOwnedStepper.input;
-          partState[key].damagedInput = partDamagedStepper.input;
-        });
-        recompute();
-      })
-      .catch(function() {
-        partsList.textContent = texts.errorRetry;
-      });
-
-    var msg = document.createElement('p');
-    msg.className = 'owned-set-message';
-    qtyModalContent.appendChild(msg);
-
-    var saveBtn = document.createElement('button');
-    saveBtn.type = 'button';
-    saveBtn.textContent = texts.saveButton;
-    saveBtn.addEventListener('click', function() {
-      msg.textContent = '';
-      var status = recompute();
-
-      var minifigFormData = new FormData();
-      minifigFormData.set('action', 'save_owned_set_inventory');
-      minifigFormData.set('owned_set_id', String(createdOwnedSetId));
-      minifigFormData.set('minifig_owned[' + minifigId + ']', String(status.present));
-      minifigFormData.set('minifig_damaged[' + minifigId + ']', String(status.damaged));
-
-      var partsFormData = new FormData();
-      partsFormData.set('action', 'save_owned_set_minifig_parts');
-      partsFormData.set('owned_set_id', String(createdOwnedSetId));
-      partsFormData.set('minifig_id', minifigId);
-      Object.keys(partState).forEach(function(key) {
-        var st = partState[key];
-        var partOwned = Math.max(0, Math.min(parseInt(st.ownedInput.value, 10) || 0, st.nominal));
-        var partDamaged = Math.max(0, Math.min(parseInt(st.damagedInput.value, 10) || 0, partOwned));
-        partsFormData.set('part_owned[' + key + ']', String(partOwned));
-        partsFormData.set('part_damaged[' + key + ']', String(partDamaged));
-      });
-
-      saveBtn.disabled = true;
-      fetch('?', { method: 'POST', body: minifigFormData, credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(res1) {
-          if (!res1.success) {
-            throw new Error(res1.message || texts.errorRetry);
-          }
-          return fetch('?', { method: 'POST', body: partsFormData, credentials: 'same-origin' });
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(res2) {
-          saveBtn.disabled = false;
-          if (res2.success) {
-            updateMinifigTile(tile, status.present, status.damaged);
-            applyStats(res2.stats);
-            closeQtyModal();
-          } else {
-            msg.textContent = res2.message || texts.errorRetry;
-          }
-        })
-        .catch(function(err) {
-          saveBtn.disabled = false;
-          msg.textContent = (err && err.message) || texts.errorRetry;
-        });
-    });
-    qtyModalContent.appendChild(saveBtn);
-  }
-
   var inventoryFieldNames = {
     parts: ['owned', 'damaged'],
     spares: ['spare_owned', 'spare_damaged'],
@@ -1976,24 +1810,65 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     var formData = new FormData();
     formData.set('action', 'save_owned_set_inventory');
     formData.set('owned_set_id', String(createdOwnedSetId));
-    Object.keys(state).forEach(function(category) {
+    Object.keys(inventoryFieldNames).forEach(function(category) {
       var fieldNames = inventoryFieldNames[category];
       Object.keys(state[category]).forEach(function(key) {
         formData.set(fieldNames[0] + '[' + key + ']', String(state[category][key].owned));
         formData.set(fieldNames[1] + '[' + key + ']', String(state[category][key].damaged));
       });
     });
+
+    // Minifigs whose page was never reached simply keep their default
+    // (fully present, undamaged) inventory, same as unvisited parts/spares/
+    // stickers pages — only figures actually shown (mState.loaded) send
+    // anything. The aggregate present/damaged for save_owned_set_inventory
+    // and the per-part breakdown for save_owned_set_minifig_parts are both
+    // derived from the same cached parts, so they can't disagree.
+    var minifigPartSaves = [];
+    Object.keys(state.minifigs).forEach(function(minifigId) {
+      var mState = state.minifigs[minifigId];
+      if (!mState.loaded) {
+        return;
+      }
+      var parts = Object.keys(mState.parts).map(function(key) {
+        var p = mState.parts[key];
+        return { nominal: p.nominal, actual: p.owned, damaged: p.damaged };
+      });
+      var status = bottleneckStatus(parts, mState.nominal);
+      formData.set('minifig_owned[' + minifigId + ']', String(status.present));
+      formData.set('minifig_damaged[' + minifigId + ']', String(status.damaged));
+
+      var partsFormData = new FormData();
+      partsFormData.set('action', 'save_owned_set_minifig_parts');
+      partsFormData.set('owned_set_id', String(createdOwnedSetId));
+      partsFormData.set('minifig_id', minifigId);
+      Object.keys(mState.parts).forEach(function(key) {
+        var p = mState.parts[key];
+        partsFormData.set('part_owned[' + key + ']', String(p.owned));
+        partsFormData.set('part_damaged[' + key + ']', String(p.damaged));
+      });
+      minifigPartSaves.push(partsFormData);
+    });
+
     fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
       .then(function(res) {
-        if (res.success) {
-          window.location.href = '?page=owned_set_detail&id=' + createdOwnedSetId;
-        } else {
-          errorEl.textContent = res.message || texts.errorRetry;
+        if (!res.success) {
+          throw new Error(res.message || texts.errorRetry);
         }
+        return Promise.all(minifigPartSaves.map(function(partsFormData) {
+          return fetch('?', { method: 'POST', body: partsFormData, credentials: 'same-origin' }).then(function(r) { return r.json(); });
+        }));
       })
-      .catch(function() {
-        errorEl.textContent = texts.errorRetry;
+      .then(function(results) {
+        var failed = results.find(function(r) { return !r.success; });
+        if (failed) {
+          throw new Error(failed.message || texts.errorRetry);
+        }
+        window.location.href = '?page=owned_set_detail&id=' + createdOwnedSetId;
+      })
+      .catch(function(err) {
+        errorEl.textContent = (err && err.message) || texts.errorRetry;
       });
   });
 

@@ -2555,6 +2555,23 @@ footer {
   margin-bottom: 1rem;
 }
 
+/* Wizard step 5's minifig page — spans the full tile grid width instead of
+   sitting in a single grid cell, since it's a full inline parts checklist
+   (see renderMinifigPanel() in renderAddOwnedSetWizardModal()), not a
+   compact clickable tile like the parts/spares/stickers pages. */
+.owned-set-wizard-minifig-panel {
+  grid-column: 1 / -1;
+  padding: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.75rem;
+}
+
+.owned-set-wizard-minifig-panel > label {
+  display: block;
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
 .owned-set-inventory-tile-inputs {
   display: flex;
   flex-direction: column;
