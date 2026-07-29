@@ -961,17 +961,20 @@ function buildOwnedSetLiveUpdatePayload(PDO $pdo, array $ownedSet): array
 }
 
 /**
- * Looks up a minifig's fig_num within one owned instance — every minifig
- * POST/GET action needs this (getOwnedSetMinifigPartsWithStatus() and
- * friends need the fig_num to resolve the minifig's own Rebrickable
- * inventory, see getMinifigInventoryId()), and $minifigId alone doesn't
- * carry it.
+ * Looks up a minifig's fig_num + nominal count within one owned instance —
+ * every minifig POST/GET action needs both (getOwnedSetMinifigPartsWithStatus()
+ * needs fig_num to resolve the minifig's own Rebrickable inventory, see
+ * getMinifigInventoryId(), and needs the nominal count to scale that
+ * inventory to however many of this minifig the set actually has — see
+ * that function's doc comment), and $minifigId alone doesn't carry either.
+ *
+ * @return array{fig_num:string, nominal_quantity:int}|null
  */
-function findOwnedSetMinifigFigNum(PDO $pdo, array $ownedSet, int $minifigId): ?string
+function findOwnedSetMinifig(PDO $pdo, array $ownedSet, int $minifigId): ?array
 {
     foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSet) as $fig) {
         if ($fig['minifig_id'] === $minifigId) {
-            return $fig['fig_num'];
+            return ['fig_num' => $fig['fig_num'], 'nominal_quantity' => (int) $fig['nominal_quantity']];
         }
     }
     return null;
@@ -981,15 +984,15 @@ if (isset($_GET['action']) && $_GET['action'] === 'owned_set_minifig_parts') {
     header('Content-Type: application/json');
     $minifigPartsOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));
     $minifigId = (int) ($_GET['minifig_id'] ?? 0);
-    $figNum = $minifigPartsOwnedSet !== null ? findOwnedSetMinifigFigNum($pdo, $minifigPartsOwnedSet, $minifigId) : null;
-    if ($minifigPartsOwnedSet === null || $figNum === null) {
+    $minifigInfo = $minifigPartsOwnedSet !== null ? findOwnedSetMinifig($pdo, $minifigPartsOwnedSet, $minifigId) : null;
+    if ($minifigPartsOwnedSet === null || $minifigInfo === null) {
         http_response_code(404);
         echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     echo json_encode([
         'success' => true,
-        'parts' => getOwnedSetMinifigPartsWithStatus($pdo, $minifigPartsOwnedSet, $minifigId, $figNum, getLocale()),
+        'parts' => getOwnedSetMinifigPartsWithStatus($pdo, $minifigPartsOwnedSet, $minifigId, $minifigInfo['fig_num'], $minifigInfo['nominal_quantity'], getLocale()),
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -1024,11 +1027,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
         $minifigPartsSaveMinifigId = (int) ($_POST['minifig_id'] ?? 0);
-        $minifigPartsSaveFigNum = findOwnedSetMinifigFigNum($pdo, $minifigPartsSaveOwnedSet, $minifigPartsSaveMinifigId);
-        if ($minifigPartsSaveFigNum === null) {
+        $minifigPartsSaveInfo = findOwnedSetMinifig($pdo, $minifigPartsSaveOwnedSet, $minifigPartsSaveMinifigId);
+        if ($minifigPartsSaveInfo === null) {
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
-        applyOwnedSetMinifigPartInventory($pdo, $minifigPartsSaveOwnedSet, $minifigPartsSaveMinifigId, $minifigPartsSaveFigNum, (array) ($_POST['part_owned'] ?? []), (array) ($_POST['part_damaged'] ?? []));
+        applyOwnedSetMinifigPartInventory($pdo, $minifigPartsSaveOwnedSet, $minifigPartsSaveMinifigId, $minifigPartsSaveInfo['fig_num'], $minifigPartsSaveInfo['nominal_quantity'], (array) ($_POST['part_owned'] ?? []), (array) ($_POST['part_damaged'] ?? []));
         refreshAppStatsCache($pdo);
         echo json_encode(['success' => true] + buildOwnedSetLiveUpdatePayload($pdo, $minifigPartsSaveOwnedSet), JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {

@@ -390,6 +390,7 @@ return [
     'owned_set_tab_gallery' => 'Photos',
     'owned_set_tab_loading' => 'loading …',
     'owned_set_minifig_parts_heading' => "This minifig's parts",
+    'owned_set_minifig_nominal_label' => '{count}x included in this set',
     'owned_set_damaged_missing_empty' => 'No damaged or missing parts.',
     'owned_set_damaged_missing_row' => '{damaged} damaged · {missing} missing',
     'owned_set_missing_parts_heading' => 'Missing parts',
