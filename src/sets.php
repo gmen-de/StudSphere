@@ -218,6 +218,29 @@ function getThemeAncestors(array $tree, int $themeId): array
 }
 
 /**
+ * Where to send the user after removing a set from their collection — back
+ * into "Meine Sets nach Themen" at the theme the set was filed under, if
+ * that theme (or one of its subthemes) still has an owned set; otherwise
+ * one level up, and so on up the ancestor chain; and if nothing up the
+ * whole chain does either (e.g. the collection is now empty), the flat
+ * "Meine Sets" list (same destination the nav's own ?page=my_sets link
+ * redirects to). $tree must be built (getOwnedSetThemeTree()) *after* the
+ * removal so recursive_count already reflects it.
+ */
+function resolveOwnedSetRemovalRedirect(array $tree, ?int $themeId): string
+{
+    $current = $themeId;
+    $guard = 0;
+    while ($current !== null && isset($tree['byId'][$current]) && $guard++ < 20) {
+        if ($tree['byId'][$current]['recursive_count'] > 0) {
+            return '?page=my_sets_themes&theme=' . $current;
+        }
+        $current = $tree['byId'][$current]['parent_theme_id'];
+    }
+    return '?page=my_sets_all';
+}
+
+/**
  * One representative set image per tile, for the theme tile grid — mirrors
  * parts.php's getCategoryTileImages(). $themeIdGroups maps each tile's own
  * theme_id to the full list of ids to search an image among (itself + all

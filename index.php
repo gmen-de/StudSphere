@@ -1064,7 +1064,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remov
     try {
         removeOwnedSet($pdo, $removeOwnedSetId);
         refreshAppStatsCache($pdo);
-        header('Location: ?page=set_detail&id=' . $removeOwnedSetSetId);
+        $removedSet = getSetById($pdo, $removeOwnedSetSetId);
+        $redirectUrl = resolveOwnedSetRemovalRedirect(getOwnedSetThemeTree($pdo), $removedSet['theme_id'] ?? null);
+        header('Location: ' . $redirectUrl);
         exit;
     } catch (Throwable $e) {
         $ownedSetDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
