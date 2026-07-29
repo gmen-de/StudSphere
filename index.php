@@ -2618,7 +2618,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= '<div class="set-detail-table-wrap">';
     $content .= '<table class="set-detail-table">';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th><td>' . htmlspecialchars($ownedSet['condition_type'] === 'new' ? t('owned_set_condition_new') : t('owned_set_condition_used')) . '</td></tr>';
-    $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_completeness')) . '</th><td>' . htmlspecialchars(t('owned_set_completeness_value', ['percent' => (string) $completeness['percent'], 'actual' => number_format($completeness['actual']), 'nominal' => number_format($completeness['nominal'])])) . '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_location')) . '</th><td>';
     $locationLinks = [];
     foreach ($locationPath as $ancestor) {
@@ -2626,6 +2625,25 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     }
     $content .= implode(' » ', $locationLinks);
     $content .= '</td></tr>';
+    $content .= '</table>';
+    $content .= '</div>';
+
+    // Same table shape as the catalog set-detail page's own "Inventar"
+    // summary (heading + Gesamt/Exklusive/Seltene/Stickerbögen rows) — only
+    // the "Gesamt" row differs, showing actual/nominal for this instance
+    // instead of the catalog's static part count.
+    $ownedInventoryId = resolveOwnedSetInventoryId($pdo, $ownedSet);
+    $ownedInventorySummary = $ownedInventoryId !== null
+        ? getSetInventorySummary($pdo, $ownedInventoryId, getLocale())
+        : ['exclusive' => 0, 'rare' => 0, 'stickers' => 0];
+
+    $content .= '<div class="set-detail-table-wrap">';
+    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
+    $content .= '<table class="set-detail-table">';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_total')) . '</th><td>' . htmlspecialchars(t('owned_set_num_parts_actual', ['actual' => number_format($completeness['actual']), 'nominal' => number_format($completeness['nominal'])])) . '</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_exclusive')) . '</th><td>' . (int) $ownedInventorySummary['exclusive'] . '</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_rare')) . '</th><td>' . (int) $ownedInventorySummary['rare'] . '</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_stickers')) . '</th><td>' . (int) $ownedInventorySummary['stickers'] . '</td></tr>';
     $content .= '</table>';
     $content .= '</div>';
 
