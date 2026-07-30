@@ -323,15 +323,27 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '</body></html>';
 }
 
+/**
+ * Only ever a same-app relative path (no scheme/host) — guards the login
+ * form's "redirect" field against being used as an open redirect to an
+ * off-site URL.
+ */
+function isSafeLocalRedirectTarget(string $path): bool
+{
+    return $path !== '' && $path[0] === '/' && !str_starts_with($path, '//') && !str_contains($path, '://');
+}
+
 if (isset($_POST['action']) && $_POST['action'] === 'login') {
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
+    $loginRedirect = (string) ($_POST['redirect'] ?? '');
+    $loginRedirectTarget = isSafeLocalRedirectTarget($loginRedirect) ? $loginRedirect : $_SERVER['PHP_SELF'];
     $stmt = $pdo->prepare('SELECT id, password_hash FROM users WHERE username = ?');
     $stmt->execute([$username]);
     $user = $stmt->fetch();
     if ($user && password_verify($password, $user['password_hash'])) {
         $_SESSION['user_id'] = $user['id'];
-        header('Location: ' . $_SERVER['PHP_SELF']);
+        header('Location: ' . $loginRedirectTarget);
         exit;
     }
     render(t('login_failed_title'), '<section class="card alert"><h2>' . htmlspecialchars(t('login_failed_heading')) . '</h2><p>' . htmlspecialchars(t('login_failed_message')) . '</p></section>');
@@ -392,7 +404,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'set_locale') {
 }
 
 if (!isset($_SESSION['user_id'])) {
-    $content = '<section class="card"><h2>' . htmlspecialchars(t('login_title')) . '</h2><form method="post"><input type="hidden" name="action" value="login"><label>' . htmlspecialchars(t('login_username')) . '<input name="username" autocomplete="username"></label><label>' . htmlspecialchars(t('login_password')) . '<input type="password" name="password" autocomplete="current-password"></label><button type="submit">' . htmlspecialchars(t('login_button')) . '</button></form></section>';
+    $loginRedirectField = isSafeLocalRedirectTarget((string) ($_SERVER['REQUEST_URI'] ?? '')) ? $_SERVER['REQUEST_URI'] : '';
+    $content = '<section class="card"><h2>' . htmlspecialchars(t('login_title')) . '</h2><form method="post"><input type="hidden" name="action" value="login"><input type="hidden" name="redirect" value="' . htmlspecialchars($loginRedirectField) . '"><label>' . htmlspecialchars(t('login_username')) . '<input name="username" autocomplete="username"></label><label>' . htmlspecialchars(t('login_password')) . '<input type="password" name="password" autocomplete="current-password"></label><button type="submit">' . htmlspecialchars(t('login_button')) . '</button></form></section>';
     render(t('login_title'), $content);
     exit;
 }
