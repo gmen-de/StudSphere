@@ -932,21 +932,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 
 $ownedSetDetailMessage = '';
 
-if (isset($_GET['action']) && $_GET['action'] === 'owned_set_missing_parts') {
+/**
+ * Catalog-only inventory preview for the add-to-collection wizard's review
+ * steps — used before any owned_sets row exists (the wizard now defers
+ * add_owned_set to its final "Speichern" click, see
+ * renderAddOwnedSetWizardModal()). Replaces the old owned-set-scoped
+ * action=owned_set_missing_parts, which required a row to already exist.
+ */
+if (isset($_GET['action']) && $_GET['action'] === 'set_inventory_preview') {
     header('Content-Type: application/json');
-    $wizardOwnedSetId = (int) ($_GET['owned_set_id'] ?? 0);
-    $wizardOwnedSet = getOwnedSetById($pdo, $wizardOwnedSetId);
-    if ($wizardOwnedSet === null) {
+    $previewSetId = (int) ($_GET['set_id'] ?? 0);
+    $previewSet = getSetById($pdo, $previewSetId);
+    if ($previewSet === null) {
         http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $previewInventoryIdRaw = trim((string) ($_GET['inventory_id'] ?? ''));
+    $previewInventoryId = $previewInventoryIdRaw !== '' ? (int) $previewInventoryIdRaw : getSetInventoryId($pdo, $previewSet['rebrickable_set_num']);
+    if ($previewInventoryId === null) {
+        echo json_encode(['success' => true, 'parts' => [], 'spares' => [], 'stickers' => [], 'minifigs' => []], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode([
+        'success' => true,
+        'parts' => getSetPartsPreview($pdo, $previewInventoryId, getLocale()),
+        'spares' => getSetSparePartsPreview($pdo, $previewInventoryId, getLocale()),
+        'stickers' => getSetStickerPartsPreview($pdo, $previewInventoryId, getLocale()),
+        'minifigs' => getSetMinifigsPreview($pdo, $previewInventoryId),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/** @see the set_inventory_preview handler above — one minifig's constituent parts. */
+if (isset($_GET['action']) && $_GET['action'] === 'minifig_parts_preview') {
+    header('Content-Type: application/json');
+    $previewFigNum = trim((string) ($_GET['fig_num'] ?? ''));
+    $previewNominalCount = (int) ($_GET['nominal_count'] ?? 0);
+    if ($previewFigNum === '' || $previewNominalCount <= 0) {
+        http_response_code(400);
         echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
         exit;
     }
     echo json_encode([
         'success' => true,
-        'parts' => getOwnedSetPartsWithStatus($pdo, $wizardOwnedSet, getLocale()),
-        'spares' => getOwnedSetSparePartsWithStatus($pdo, $wizardOwnedSet, getLocale()),
-        'stickers' => getOwnedSetStickerPartsWithStatus($pdo, $wizardOwnedSet, getLocale()),
-        'minifigs' => getOwnedSetMinifigsWithStatus($pdo, $wizardOwnedSet),
+        'parts' => getMinifigPartsPreview($pdo, $previewFigNum, $previewNominalCount, getLocale()),
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }

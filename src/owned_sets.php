@@ -544,6 +544,120 @@ function getOwnedSetMinifigPartsWithStatus(PDO $pdo, array $ownedSet, int $minif
 }
 
 /**
+ * Catalog-only nominal preview for the add-to-collection wizard, before any
+ * owned_sets row exists yet — the wizard now defers add_owned_set all the
+ * way to its final "Speichern" step, so the earlier inventory-review step
+ * needs nominal quantities without an owned_set_id to look actuals up
+ * against. Mirrors getOwnedSetItemsWithStatus()'s shape and defaults
+ * exactly (same sticker-filtering via getStickerPartIds(), same "spares
+ * default to 0, everything else defaults to nominal" asymmetry — see that
+ * function's own field-level comments), just skipping the storage_items
+ * lookup entirely: nothing has been corrected yet, so actual_quantity IS
+ * nominal_quantity (or 0 for spares) and damaged_quantity is always 0.
+ */
+function getSetItemsPreview(PDO $pdo, int $inventoryId, string $locale, bool $spares, ?array $partIdFilter = null, bool $invert = false): array
+{
+    $nominalItems = getSetPartsList($pdo, $inventoryId, $spares, $locale);
+    $filterSet = $partIdFilter !== null ? array_flip($partIdFilter) : null;
+
+    $result = [];
+    foreach ($nominalItems as $item) {
+        if ($item['color_id'] === null) {
+            continue;
+        }
+        if ($filterSet !== null && (isset($filterSet[$item['part_id']]) === $invert)) {
+            continue;
+        }
+        $result[] = [
+            'part_id' => $item['part_id'],
+            'part_num' => $item['part_num'],
+            'name' => $item['name'],
+            'color_id' => $item['color_id'],
+            'color_name' => $item['color_name'],
+            'color_rgb' => $item['color_rgb'],
+            'rebrickable_color_id' => $item['rebrickable_color_id'],
+            'thumbnail' => $item['ldraw_thumbnail'] ?? $item['thumbnail'] ?? $item['remote_thumbnail'] ?? null,
+            'nominal_quantity' => $item['quantity'],
+            'actual_quantity' => $spares ? 0 : $item['quantity'],
+            'damaged_quantity' => 0,
+        ];
+    }
+    return $result;
+}
+
+/** @see getSetItemsPreview() — regular-parts slice, mirrors getOwnedSetPartsWithStatus(). */
+function getSetPartsPreview(PDO $pdo, int $inventoryId, string $locale = 'en'): array
+{
+    $stickerPartIds = array_keys(getStickerPartIds($pdo, $inventoryId));
+    return getSetItemsPreview($pdo, $inventoryId, $locale, false, $stickerPartIds, true);
+}
+
+/** @see getSetItemsPreview() — sticker-sheets slice, mirrors getOwnedSetStickerPartsWithStatus(). */
+function getSetStickerPartsPreview(PDO $pdo, int $inventoryId, string $locale = 'en'): array
+{
+    $stickerPartIds = array_keys(getStickerPartIds($pdo, $inventoryId));
+    if (empty($stickerPartIds)) {
+        return [];
+    }
+    return getSetItemsPreview($pdo, $inventoryId, $locale, false, $stickerPartIds, false);
+}
+
+/** @see getSetItemsPreview() — spares, mirrors getOwnedSetSparePartsWithStatus(). */
+function getSetSparePartsPreview(PDO $pdo, int $inventoryId, string $locale = 'en'): array
+{
+    return getSetItemsPreview($pdo, $inventoryId, $locale, true);
+}
+
+/** @see getSetItemsPreview()'s doc comment — minifig-list version, mirrors getOwnedSetMinifigsWithStatus(). */
+function getSetMinifigsPreview(PDO $pdo, int $inventoryId): array
+{
+    $result = [];
+    foreach (getSetMinifigsList($pdo, $inventoryId) as $item) {
+        $result[] = [
+            'minifig_id' => $item['minifig_id'],
+            'fig_num' => $item['fig_num'],
+            'name' => $item['name'],
+            'thumbnail' => $item['thumbnail'],
+            'nominal_quantity' => $item['quantity'],
+            'actual_quantity' => $item['quantity'],
+            'damaged_quantity' => 0,
+        ];
+    }
+    return $result;
+}
+
+/** @see getSetItemsPreview()'s doc comment — one minifig's constituent parts, mirrors getOwnedSetMinifigPartsWithStatus(). */
+function getMinifigPartsPreview(PDO $pdo, string $figNum, int $minifigNominalCount, string $locale = 'en'): array
+{
+    $inventoryId = getMinifigInventoryId($pdo, $figNum);
+    if ($inventoryId === null) {
+        return [];
+    }
+    $nominalItems = getSetPartsList($pdo, $inventoryId, false, $locale);
+
+    $result = [];
+    foreach ($nominalItems as $item) {
+        if ($item['color_id'] === null) {
+            continue;
+        }
+        $totalNominal = $item['quantity'] * $minifigNominalCount;
+        $result[] = [
+            'part_id' => $item['part_id'],
+            'part_num' => $item['part_num'],
+            'name' => $item['name'],
+            'color_id' => $item['color_id'],
+            'color_name' => $item['color_name'],
+            'color_rgb' => $item['color_rgb'],
+            'thumbnail' => $item['ldraw_thumbnail'] ?? $item['thumbnail'] ?? $item['remote_thumbnail'] ?? null,
+            'nominal_quantity' => $totalNominal,
+            'actual_quantity' => $totalNominal,
+            'damaged_quantity' => 0,
+        ];
+    }
+    return $result;
+}
+
+/**
  * Copies a set's current regular (non-spare, includes stickers) inventory
  * into storage_items at $locationId, one addStorageStock() call per
  * distinct part+color — the normal audit-logged path, just run in a loop,
@@ -1004,8 +1118,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     $hasVersionStep = count($versions) > 1;
 
     $stepNames = $hasVersionStep
-        ? ['version' => 1, 'location' => 2, 'details' => 3, 'notes' => 4, 'question' => 5, 'inventory' => 6]
-        : ['location' => 1, 'details' => 2, 'notes' => 3, 'question' => 4, 'inventory' => 5];
+        ? ['version' => 1, 'location' => 2, 'details' => 3, 'notes' => 4, 'question' => 5, 'inventory' => 6, 'overview' => 7]
+        : ['location' => 1, 'details' => 2, 'notes' => 3, 'question' => 4, 'inventory' => 5, 'overview' => 6];
 
     $html = '<div class="modal-overlay" id="add-owned-set-modal" style="display:none;">';
     $html .= '<div class="modal-box owned-set-wizard-box">';
@@ -1094,7 +1208,16 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     $html .= '<button type="button" id="owned-set-wizard-inventory-next">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button>';
     $html .= '</div>';
     $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step5-error"></p>';
-    $html .= '<div class="owned-set-wizard-nav"><a href="#" id="owned-set-wizard-skip">' . htmlspecialchars(t('owned_set_wizard_skip')) . '</a><button type="button" id="owned-set-wizard-finish">' . htmlspecialchars(t('owned_set_wizard_finish')) . '</button></div>';
+    $html .= '</div>';
+
+    $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['overview'] . '" data-step="' . $stepNames['overview'] . '" style="display:none;">';
+    $html .= '<h3>' . htmlspecialchars(t('owned_set_wizard_overview_heading')) . '</h3>';
+    $html .= '<h4>' . htmlspecialchars(t('owned_set_wizard_overview_details_heading')) . '</h4>';
+    $html .= '<div id="owned-set-wizard-overview-recap"></div>';
+    $html .= '<h4>' . htmlspecialchars(t('owned_set_wizard_overview_inventory_heading')) . '</h4>';
+    $html .= '<div id="owned-set-wizard-overview-summary"></div>';
+    $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-overview-error"></p>';
+    $html .= '<div class="owned-set-wizard-nav"><button type="button" id="owned-set-wizard-overview-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" id="owned-set-wizard-save">' . htmlspecialchars(t('owned_set_save_button')) . '</button></div>';
     $html .= '</div>';
 
     $html .= '</div>'; // .owned-set-wizard-body
@@ -1119,11 +1242,25 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         'categoryMinifigs' => t('owned_set_wizard_category_minifigs'),
         'nominalLabel' => t('owned_set_minifig_nominal_label'),
         'loading' => t('owned_set_tab_loading'),
+        'minifigSummary' => t('owned_set_wizard_minifig_summary'),
+        'unsavedConfirm' => t('owned_set_wizard_unsaved_confirm'),
+        'recapLocation' => t('owned_set_field_location'),
+        'recapCondition' => t('owned_set_field_condition'),
+        'conditionNew' => t('owned_set_condition_new'),
+        'conditionUsed' => t('owned_set_condition_used'),
+        'recapInstructions' => t('owned_set_has_instructions'),
+        'recapBox' => t('owned_set_has_box'),
+        'recapBoxComplete' => t('owned_set_box_complete'),
+        'recapNotes' => t('owned_set_notes_label'),
+        'yesLabel' => t('owned_set_wizard_yes'),
+        'noLabel' => t('owned_set_wizard_no'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $detailsStep = $stepNames['details'];
+    $notesStep = $stepNames['notes'];
     $questionStep = $stepNames['question'];
     $inventoryStep = $stepNames['inventory'];
+    $overviewStep = $stepNames['overview'];
 
     $html .= <<<SCRIPT
 <script>
@@ -1131,8 +1268,10 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   var texts = $labelsJson;
   var setId = $setId;
   var DETAILS_STEP = $detailsStep;
+  var NOTES_STEP = $notesStep;
   var QUESTION_STEP = $questionStep;
   var INVENTORY_STEP = $inventoryStep;
+  var OVERVIEW_STEP = $overviewStep;
   var openBtn = document.getElementById('add-owned-set-open');
   var modal = document.getElementById('add-owned-set-modal');
   var closeBtn = document.getElementById('add-owned-set-modal-close');
@@ -1144,6 +1283,17 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   var steps = Array.prototype.slice.call(modal.querySelectorAll('.owned-set-wizard-step'));
   var totalSteps = QUESTION_STEP;
   var createdOwnedSetId = null;
+  // Nothing is persisted until the final "Speichern" click (see the
+  // owned-set-wizard-save handler) — this just tracks whether the user has
+  // gotten far enough that closing/navigating away without saving would
+  // actually lose something worth warning about.
+  var hasUnsavedProgress = false;
+  // Which step the overview's own "Zurück" button returns to — varies by
+  // path (sealed/"new" set skips straight from Notes, "Nein" skips from the
+  // Question step, a full inventory run comes from the last inventory page),
+  // so it's set right before navigating to the overview rather than baked
+  // into the markup like the other steps' static data-back attributes.
+  var overviewBackTarget = QUESTION_STEP;
 
   var loc1 = document.getElementById('owned-set-wizard-location-1');
   var loc2 = document.getElementById('owned-set-wizard-location-2');
@@ -1213,10 +1363,14 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       // last time the inventory step was open on every other step's line.
       invProgress.textContent = '';
     }
+    if (n > 1) {
+      hasUnsavedProgress = true;
+    }
   }
 
   function resetWizard() {
     createdOwnedSetId = null;
+    hasUnsavedProgress = false;
     totalSteps = QUESTION_STEP;
     var firstVersionRadio = modal.querySelector('input[name="owned-set-wizard-version"]');
     if (firstVersionRadio) { firstVersionRadio.checked = true; }
@@ -1245,6 +1399,10 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     state = { parts: {}, spares: {}, stickers: {}, minifigs: {} };
     document.getElementById('owned-set-wizard-parts-list').innerHTML = '';
     document.getElementById('owned-set-wizard-inventory-progress').textContent = '';
+    document.getElementById('owned-set-wizard-overview-recap').innerHTML = '';
+    document.getElementById('owned-set-wizard-overview-summary').innerHTML = '';
+    document.getElementById('owned-set-wizard-overview-error').textContent = '';
+    overviewBackTarget = QUESTION_STEP;
     showStep(steps[0] ? parseInt(steps[0].dataset.step, 10) : 1);
   }
 
@@ -1253,7 +1411,14 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     modal.style.display = 'flex';
   }
 
+  // Nothing is saved until "Speichern" succeeds (hasUnsavedProgress tracks
+  // exactly that), so closing early is safe to allow — it just needs a
+  // confirmation first, since the user might not realize how much of the
+  // wizard is unsaved client-side state.
   function closeModal() {
+    if (hasUnsavedProgress && !window.confirm(texts.unsavedConfirm)) {
+      return;
+    }
     modal.style.display = 'none';
   }
 
@@ -1277,6 +1442,16 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       closeModal();
     }
   });
+  // Native browser prompt for the "leaving/closing the tab" case (the
+  // message itself is browser-controlled, can't be customized) — the modal
+  // close confirm above handles the "closing the wizard, staying on the
+  // page" case, this handles actually navigating away or closing the tab.
+  window.addEventListener('beforeunload', function(e) {
+    if (hasUnsavedProgress) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 
   modal.querySelectorAll('.owned-set-wizard-next').forEach(function(btn) {
     btn.addEventListener('click', function() {
@@ -1294,10 +1469,11 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         // A still-sealed set can't be inventoried (nothing can be verified
         // without opening it, which is itself the new -> used transition —
         // see openOwnedSet() in src/owned_sets.php), so the question step is
-        // skipped entirely and the wizard finishes right here.
+        // skipped entirely and the wizard goes straight to the overview.
         var conditionRadio = modal.querySelector('input[name="owned-set-wizard-condition"]:checked');
         if (conditionRadio && conditionRadio.value === 'new') {
-          finishWithoutInventory(document.getElementById('owned-set-wizard-step3-error'));
+          overviewBackTarget = NOTES_STEP;
+          goToOverview(document.getElementById('owned-set-wizard-step3-error'));
           return;
         }
       }
@@ -1372,41 +1548,59 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       .then(function(r) { return r.json(); });
   }
 
-  function finishWithoutInventory(errorEl) {
+  // Catalog-only preview (see action=set_inventory_preview in index.php) —
+  // no owned_sets row exists yet at this point, add_owned_set only runs
+  // once at the final "Speichern" click (see the owned-set-wizard-save
+  // handler further down). Shared by the "Ja"/"Nein" answers and the
+  // sealed-"new" shortcut, since all three need the same nominal data to
+  // show an honest overview, even the two that skip the per-tile review.
+  function fetchInventoryPreview() {
+    var versionRadio = modal.querySelector('input[name="owned-set-wizard-version"]:checked');
+    var params = new URLSearchParams();
+    params.set('action', 'set_inventory_preview');
+    params.set('set_id', String(setId));
+    if (versionRadio) {
+      params.set('inventory_id', versionRadio.value);
+    }
+    return fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.success) {
+          throw new Error(data.message || texts.errorRetry);
+        }
+        initInventoryPages(data);
+      });
+  }
+
+  function showOverview() {
+    renderOverview();
+    totalSteps = OVERVIEW_STEP;
+    showStep(OVERVIEW_STEP);
+  }
+
+  function goToOverview(errorEl) {
     errorEl.textContent = '';
-    submitAddOwnedSet().then(function(res) {
-      if (res.success) {
-        window.location.href = '?page=owned_set_detail&id=' + res.ownedSetId;
-      } else {
-        errorEl.textContent = res.message || texts.errorRetry;
-      }
-    }).catch(function() {
-      errorEl.textContent = texts.errorRetry;
+    fetchInventoryPreview().then(function() {
+      showOverview();
+    }).catch(function(err) {
+      errorEl.textContent = (err && err.message) || texts.errorRetry;
     });
   }
 
   document.getElementById('owned-set-wizard-inventory-no').addEventListener('click', function() {
-    finishWithoutInventory(document.getElementById('owned-set-wizard-step4-error'));
+    overviewBackTarget = QUESTION_STEP;
+    goToOverview(document.getElementById('owned-set-wizard-step4-error'));
   });
 
   document.getElementById('owned-set-wizard-inventory-yes').addEventListener('click', function() {
     var errorEl = document.getElementById('owned-set-wizard-step4-error');
     errorEl.textContent = '';
-    submitAddOwnedSet().then(function(res) {
-      if (!res.success) {
-        errorEl.textContent = res.message || texts.errorRetry;
-        return;
-      }
-      createdOwnedSetId = res.ownedSetId;
-      return fetch('?action=owned_set_missing_parts&owned_set_id=' + createdOwnedSetId, { credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          initInventoryPages(data);
-          totalSteps = INVENTORY_STEP;
-          showStep(INVENTORY_STEP);
-        });
-    }).catch(function() {
-      errorEl.textContent = texts.errorRetry;
+    fetchInventoryPreview().then(function() {
+      renderPage();
+      totalSteps = OVERVIEW_STEP;
+      showStep(INVENTORY_STEP);
+    }).catch(function(err) {
+      errorEl.textContent = (err && err.message) || texts.errorRetry;
     });
   });
 
@@ -1445,6 +1639,23 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       if (!def.items.length) {
         return;
       }
+      // Seeded eagerly for every item, not just the ones the user actually
+      // pages to — the overview step (computeCategorySummary()/
+      // computeMinifigSummary()) needs to sum over the whole set, including
+      // pages nobody visited. nominal wasn't kept in state before (only
+      // needed at tile-render time); now it has to survive until the
+      // overview computes totals from it.
+      if (def.kind === 'part') {
+        def.items.forEach(function(item) {
+          var key = item.part_id + ':' + item.color_id;
+          state[def.category][key] = { owned: item.actual_quantity, damaged: item.damaged_quantity, nominal: item.nominal_quantity };
+        });
+      } else {
+        def.items.forEach(function(item) {
+          state.minifigs[item.minifig_id] = { nominal: item.nominal_quantity, parts: {}, loaded: false };
+        });
+      }
+
       var categoryPages;
       if (def.kind === 'part') {
         var indexByPartNum = {};
@@ -1466,8 +1677,6 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         pages.push({ category: def.category, kind: def.kind, label: def.label, items: items, categoryIndex: i + 1, categoryTotal: categoryPages.length });
       });
     });
-
-    renderPage();
   }
 
   function buildStepper(minVal, maxVal, value) {
@@ -1637,7 +1846,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       renderRows();
     } else {
       partsList.textContent = texts.loading;
-      fetch('?action=owned_set_minifig_parts&owned_set_id=' + createdOwnedSetId + '&minifig_id=' + item.minifig_id, { credentials: 'same-origin' })
+      fetch('?action=minifig_parts_preview&fig_num=' + encodeURIComponent(item.fig_num) + '&nominal_count=' + mState.nominal, { credentials: 'same-origin' })
         .then(function(r) { return r.json(); })
         .then(function(res) {
           if (!res.success) {
@@ -1760,7 +1969,9 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     var progressTemplate = page.kind === 'minifig' ? texts.minifigProgress : texts.partProgress;
     invProgress.textContent = ' \\u00bb ' + progressTemplate.replace('{current}', page.categoryIndex).replace('{total}', page.categoryTotal);
     invBackBtn.disabled = pageIndex === 0;
-    invNextBtn.disabled = pageIndex >= pages.length - 1;
+    // Never disabled on the last page anymore — "Weiter" there advances to
+    // the overview instead of paging further (see the click handler below).
+    invNextBtn.disabled = false;
 
     page.items.forEach(function(item) {
       invList.appendChild(renderTile(item, page.category, page.kind));
@@ -1777,6 +1988,9 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     if (pageIndex < pages.length - 1) {
       pageIndex++;
       renderPage();
+    } else {
+      overviewBackTarget = INVENTORY_STEP;
+      showOverview();
     }
   });
 
@@ -1786,77 +2000,203 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     stickers: ['sticker_owned', 'sticker_damaged']
   };
 
-  document.getElementById('owned-set-wizard-finish').addEventListener('click', function() {
-    var errorEl = document.getElementById('owned-set-wizard-step5-error');
-    errorEl.textContent = '';
-    var formData = new FormData();
-    formData.set('action', 'save_owned_set_inventory');
-    formData.set('owned_set_id', String(createdOwnedSetId));
-    Object.keys(inventoryFieldNames).forEach(function(category) {
-      var fieldNames = inventoryFieldNames[category];
-      Object.keys(state[category]).forEach(function(key) {
-        formData.set(fieldNames[0] + '[' + key + ']', String(state[category][key].owned));
-        formData.set(fieldNames[1] + '[' + key + ']', String(state[category][key].damaged));
-      });
+  // Sums one part-kind category's state into the same
+  // intact/damaged/missing shape texts.inventorySummary already renders
+  // per-tile elsewhere — here summed across every item, not just one.
+  function computeCategorySummary(category) {
+    var intact = 0, damaged = 0, missing = 0;
+    Object.keys(state[category]).forEach(function(key) {
+      var s = state[category][key];
+      var owned = Math.max(0, Math.min(s.owned, s.nominal));
+      var dmg = Math.max(0, Math.min(s.damaged, owned));
+      intact += (owned - dmg);
+      damaged += dmg;
+      missing += (s.nominal - owned);
+    });
+    return { intact: intact, damaged: damaged, missing: missing };
+  }
+
+  // Mirrors the Fertig/Speichern save logic's own defaulting: a minifig
+  // whose page was never opened counts as fully present and undamaged
+  // (mState.loaded stays false, matching materializeOwnedSetMinifigs()'s
+  // default once the set is actually saved). "unvollständig" is
+  // nominal - present — bottleneckStatus() already computes present/
+  // complete/damaged, this is just the one derived number it doesn't
+  // return itself.
+  function computeMinifigSummary() {
+    var complete = 0, incomplete = 0, damaged = 0;
+    Object.keys(state.minifigs).forEach(function(id) {
+      var mState = state.minifigs[id];
+      var status;
+      if (mState.loaded) {
+        var parts = Object.keys(mState.parts).map(function(key) {
+          var p = mState.parts[key];
+          return { nominal: p.nominal, actual: p.owned, damaged: p.damaged };
+        });
+        status = bottleneckStatus(parts, mState.nominal);
+      } else {
+        status = { present: mState.nominal, complete: mState.nominal, damaged: 0 };
+      }
+      complete += status.complete;
+      damaged += status.damaged;
+      incomplete += (mState.nominal - status.present);
+    });
+    return { complete: complete, incomplete: incomplete, damaged: damaged };
+  }
+
+  function getSelectedLocationLabel() {
+    var select = loc3.value ? loc3 : (loc2.value ? loc2 : loc1);
+    var opt = select.options[select.selectedIndex];
+    return opt ? opt.textContent : '';
+  }
+
+  function buildRecapLine(label, value) {
+    var p = document.createElement('p');
+    p.textContent = label + ': ' + value;
+    return p;
+  }
+
+  // Reads straight from the still-intact form fields of every earlier step
+  // (nothing gets reset until the wizard actually closes/reopens) — nothing
+  // here is persisted state, just a read-only recap of what's about to be
+  // saved.
+  function renderOverview() {
+    var recap = document.getElementById('owned-set-wizard-overview-recap');
+    recap.innerHTML = '';
+
+    var conditionRadio = modal.querySelector('input[name="owned-set-wizard-condition"]:checked');
+    var isNew = conditionRadio && conditionRadio.value === 'new';
+    recap.appendChild(buildRecapLine(texts.recapLocation, getSelectedLocationLabel()));
+    recap.appendChild(buildRecapLine(texts.recapCondition, isNew ? texts.conditionNew : texts.conditionUsed));
+
+    [
+      ['has-instructions', 'instructions-notes', texts.recapInstructions],
+      ['has-box', 'box-notes', texts.recapBox],
+      ['has-box-complete', 'box-complete-notes', texts.recapBoxComplete]
+    ].forEach(function(triple) {
+      var checkbox = document.getElementById('owned-set-wizard-' + triple[0]);
+      var notes = document.getElementById('owned-set-wizard-' + triple[1]);
+      var value = checkbox.checked ? texts.yesLabel : texts.noLabel;
+      if (checkbox.checked && notes.value.trim()) {
+        value += ' \\u2014 ' + notes.value.trim();
+      }
+      recap.appendChild(buildRecapLine(triple[2], value));
     });
 
-    // Minifigs whose page was never reached simply keep their default
-    // (fully present, undamaged) inventory, same as unvisited parts/spares/
-    // stickers pages — only figures actually shown (mState.loaded) send
-    // anything. The aggregate present/damaged for save_owned_set_inventory
-    // and the per-part breakdown for save_owned_set_minifig_parts are both
-    // derived from the same cached parts, so they can't disagree.
-    var minifigPartSaves = [];
-    Object.keys(state.minifigs).forEach(function(minifigId) {
-      var mState = state.minifigs[minifigId];
-      if (!mState.loaded) {
+    var freeNotes = document.getElementById('owned-set-wizard-notes').value.trim();
+    if (freeNotes) {
+      recap.appendChild(buildRecapLine(texts.recapNotes, freeNotes));
+    }
+
+    var summary = document.getElementById('owned-set-wizard-overview-summary');
+    summary.innerHTML = '';
+    [
+      ['parts', texts.categoryParts],
+      ['spares', texts.categorySpares],
+      ['stickers', texts.categoryStickers]
+    ].forEach(function(pair) {
+      if (Object.keys(state[pair[0]]).length === 0) {
         return;
       }
-      var parts = Object.keys(mState.parts).map(function(key) {
-        var p = mState.parts[key];
-        return { nominal: p.nominal, actual: p.owned, damaged: p.damaged };
-      });
-      var status = bottleneckStatus(parts, mState.nominal);
-      formData.set('minifig_owned[' + minifigId + ']', String(status.present));
-      formData.set('minifig_damaged[' + minifigId + ']', String(status.damaged));
-
-      var partsFormData = new FormData();
-      partsFormData.set('action', 'save_owned_set_minifig_parts');
-      partsFormData.set('owned_set_id', String(createdOwnedSetId));
-      partsFormData.set('minifig_id', minifigId);
-      Object.keys(mState.parts).forEach(function(key) {
-        var p = mState.parts[key];
-        partsFormData.set('part_owned[' + key + ']', String(p.owned));
-        partsFormData.set('part_damaged[' + key + ']', String(p.damaged));
-      });
-      minifigPartSaves.push(partsFormData);
+      var s = computeCategorySummary(pair[0]);
+      summary.appendChild(buildRecapLine(pair[1], texts.inventorySummary
+        .replace('{intact}', s.intact).replace('{damaged}', s.damaged).replace('{missing}', s.missing)));
     });
+    if (Object.keys(state.minifigs).length > 0) {
+      var ms = computeMinifigSummary();
+      summary.appendChild(buildRecapLine(texts.categoryMinifigs, texts.minifigSummary
+        .replace('{complete}', ms.complete).replace('{incomplete}', ms.incomplete).replace('{damaged}', ms.damaged)));
+    }
+  }
 
-    fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(res) {
-        if (!res.success) {
-          throw new Error(res.message || texts.errorRetry);
-        }
-        return Promise.all(minifigPartSaves.map(function(partsFormData) {
-          return fetch('?', { method: 'POST', body: partsFormData, credentials: 'same-origin' }).then(function(r) { return r.json(); });
-        }));
-      })
-      .then(function(results) {
-        var failed = results.find(function(r) { return !r.success; });
-        if (failed) {
-          throw new Error(failed.message || texts.errorRetry);
-        }
-        window.location.href = '?page=owned_set_detail&id=' + createdOwnedSetId;
-      })
-      .catch(function(err) {
-        errorEl.textContent = (err && err.message) || texts.errorRetry;
-      });
+  document.getElementById('owned-set-wizard-overview-back').addEventListener('click', function() {
+    showStep(overviewBackTarget);
   });
 
-  document.getElementById('owned-set-wizard-skip').addEventListener('click', function(e) {
-    e.preventDefault();
-    window.location.href = '?page=owned_set_detail&id=' + createdOwnedSetId;
+  // The only point that actually persists anything — everything before this
+  // was preview/local state. add_owned_set runs first (creates the row +
+  // materializes nominal stock, same as it always did, just deferred to
+  // here), then the same inventory-save chain the old "Fertig" button ran
+  // replays on top of it. If that chain fails partway, the just-created row
+  // is rolled back (action=remove_owned_set) so a failed save never leaves
+  // an unconfirmed set sitting in the collection.
+  document.getElementById('owned-set-wizard-save').addEventListener('click', function() {
+    var errorEl = document.getElementById('owned-set-wizard-overview-error');
+    errorEl.textContent = '';
+    submitAddOwnedSet().then(function(res) {
+      if (!res.success) {
+        errorEl.textContent = res.message || texts.errorRetry;
+        return;
+      }
+      createdOwnedSetId = res.ownedSetId;
+
+      var formData = new FormData();
+      formData.set('action', 'save_owned_set_inventory');
+      formData.set('owned_set_id', String(createdOwnedSetId));
+      Object.keys(inventoryFieldNames).forEach(function(category) {
+        var fieldNames = inventoryFieldNames[category];
+        Object.keys(state[category]).forEach(function(key) {
+          formData.set(fieldNames[0] + '[' + key + ']', String(state[category][key].owned));
+          formData.set(fieldNames[1] + '[' + key + ']', String(state[category][key].damaged));
+        });
+      });
+
+      var minifigPartSaves = [];
+      Object.keys(state.minifigs).forEach(function(minifigId) {
+        var mState = state.minifigs[minifigId];
+        if (!mState.loaded) {
+          return;
+        }
+        var parts = Object.keys(mState.parts).map(function(key) {
+          var p = mState.parts[key];
+          return { nominal: p.nominal, actual: p.owned, damaged: p.damaged };
+        });
+        var status = bottleneckStatus(parts, mState.nominal);
+        formData.set('minifig_owned[' + minifigId + ']', String(status.present));
+        formData.set('minifig_damaged[' + minifigId + ']', String(status.damaged));
+
+        var partsFormData = new FormData();
+        partsFormData.set('action', 'save_owned_set_minifig_parts');
+        partsFormData.set('owned_set_id', String(createdOwnedSetId));
+        partsFormData.set('minifig_id', minifigId);
+        Object.keys(mState.parts).forEach(function(key) {
+          var p = mState.parts[key];
+          partsFormData.set('part_owned[' + key + ']', String(p.owned));
+          partsFormData.set('part_damaged[' + key + ']', String(p.damaged));
+        });
+        minifigPartSaves.push(partsFormData);
+      });
+
+      return fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res2) {
+          if (!res2.success) {
+            throw new Error(res2.message || texts.errorRetry);
+          }
+          return Promise.all(minifigPartSaves.map(function(partsFormData) {
+            return fetch('?', { method: 'POST', body: partsFormData, credentials: 'same-origin' }).then(function(r) { return r.json(); });
+          }));
+        })
+        .then(function(results) {
+          var failed = results.find(function(r) { return !r.success; });
+          if (failed) {
+            throw new Error(failed.message || texts.errorRetry);
+          }
+          hasUnsavedProgress = false;
+          window.location.href = '?page=owned_set_detail&id=' + createdOwnedSetId;
+        })
+        .catch(function(err) {
+          var rollbackData = new FormData();
+          rollbackData.set('action', 'remove_owned_set');
+          rollbackData.set('owned_set_id', String(createdOwnedSetId));
+          rollbackData.set('set_id', String(setId));
+          fetch('?', { method: 'POST', body: rollbackData, credentials: 'same-origin', redirect: 'manual' }).catch(function() {});
+          createdOwnedSetId = null;
+          errorEl.textContent = (err && err.message) || texts.errorRetry;
+        });
+    }).catch(function(err) {
+      errorEl.textContent = (err && err.message) || texts.errorRetry;
+    });
   });
 })();
 </script>
