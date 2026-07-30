@@ -2648,6 +2648,11 @@ footer {
 #owned-set-wizard-parts-list.owned-set-inventory-tiles {
   grid-template-columns: repeat(auto-fill, 11.5rem);
   justify-content: start;
+  /* The base rule's margin-bottom:1rem pushed the grid's total rendered
+     height past the explicit height set in JS (renderPage(), matched
+     exactly to the available space) — that small overflow was enough to
+     trigger .owned-set-wizard-body's own scrollbar. */
+  margin-bottom: 0;
 }
 
 #owned-set-wizard-parts-list .owned-set-inventory-tile {
