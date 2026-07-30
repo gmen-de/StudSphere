@@ -2460,27 +2460,22 @@ footer {
   margin-top: 0;
 }
 
-/* Only this modal's own overlay — not .modal-overlay itself, which is
-   shared by every other modal in the app — gets a tighter top/bottom
-   margin, so the box can use more of the viewport's height (the inventory
-   tiles need it to avoid an internal scrollbar; see .owned-set-wizard-body). */
-#add-owned-set-modal {
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
-}
-
 /* Fixed size rather than shrink/grow-to-content — the step content varies a
    lot (a 3-select location picker vs. a two-column minifig parts checklist),
    and letting the box resize with it made the modal visibly jump around
-   between steps/loaded parts. Width is a flat number (comfortable for the
-   two-column minifig parts checklist at a 1366x766 viewport); height tracks
-   the viewport instead, matching #add-owned-set-modal's 0.75rem top/bottom
-   padding above. */
+   between steps/loaded parts. Sized to sit comfortably within a 1366x766
+   viewport (.modal-overlay's own 1.5rem padding on each side already
+   accounted for), with a viewport-relative fallback for smaller screens.
+   Was briefly changed to a viewport-relative height (to give the inventory
+   tiles more room and avoid a scrollbar), but that made the whole dialog
+   noticeably taller than before — reverted back to the original fixed
+   height; the tile pagination cap (max 4 per page, see initInventoryPages())
+   already keeps a page's content short enough on its own. */
 .owned-set-wizard-box {
   width: 58rem;
   max-width: calc(100vw - 3rem);
-  height: calc(100vh - 1.5rem);
-  max-height: calc(100vh - 1.5rem);
+  height: 38rem;
+  max-height: calc(100vh - 3rem);
 }
 
 .owned-set-wizard-header {
