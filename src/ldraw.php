@@ -17,14 +17,16 @@ const LDRAW_LIBRARY_URL = 'https://library.ldraw.org/library/updates/complete.zi
 const LDRAW_DOWNLOAD_CHUNK_SIZE = 4_000_000; // ~4 MB per download tick
 const LDRAW_EXTRACT_BATCH_SIZE = 400; // zip entries extracted per tick
 
-// This module is only ever offered when ldrawToolsAvailable() is true, which
-// in practice means a self-hosted install with a real admin behind it, not
-// the shared-hosting target the rest of the app is built around — so unlike
-// IMAGE_DOWNLOAD_TIME_BUDGET_SECONDS (kept at 4s for hosts with a hard,
-// unraisable execution-time cap), this can afford a much longer tick. Each
-// render is its own leocad+Xvfb process spawn (~1.3s measured), so a short
-// budget would spend most ticks on HTTP round-trip overhead instead of work.
-const LDRAW_RENDER_TIME_BUDGET_SECONDS = 20.0;
+// Originally 20s, on the reasoning that this module only runs on a
+// self-hosted install with a real admin behind it, so a long tick wasn't a
+// shared-hosting execution-time problem the way IMAGE_DOWNLOAD_TIME_BUDGET_SECONDS's
+// 4s is. In practice a 20s tick is long enough to itself trip an SSL
+// offloader/reverse proxy's own gateway timeout (confirmed: a real HTTP 504
+// while viewing sets with lots of missing renders) — especially with several
+// set pages open at once, each running its own tick loop and competing for
+// CPU. Kept short instead; see also stepLdrawSetRenderBatch()'s render lock,
+// which handles the multi-tab CPU contention half of the same problem.
+const LDRAW_RENDER_TIME_BUDGET_SECONDS = 5.0;
 // Matches .part-modal-image's 16rem (256px) display size — the largest
 // context these renders show up in (part-detail modal); the card grid uses
 // a much smaller 4.5rem, so this comfortably covers both.
@@ -81,6 +83,11 @@ function getLdrawRenderTmpDir(): string
         throw new RuntimeException('Konnte Temp-Verzeichnis nicht erstellen: ' . $dir);
     }
     return $dir;
+}
+
+function getLdrawRenderLockPath(): string
+{
+    return getLdrawStorageDir() . '/render.lock';
 }
 
 /**
@@ -494,85 +501,106 @@ function stepLdrawSetRenderBatch(array &$state): array
         return ['done' => true];
     }
 
-    $upsertStmt = $pdo->prepare(
-        'INSERT INTO part_color_images (part_id, color_id, local_image_path)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE local_image_path = VALUES(local_image_path), fetched_at = CURRENT_TIMESTAMP'
-    );
-
-    $start = microtime(true);
-    $networkCalls = 0;
-    $consecutiveApiFailures = 0;
-
-    while ($state['index'] < $total) {
-        $pair = $pairs[$state['index']];
-        $needsApiCall = $pair['ldraw_id'] === null;
-
-        if ($needsApiCall && ($networkCalls >= LDRAW_MAX_API_CALLS_PER_TICK || $consecutiveApiFailures >= 3)) {
-            // Per-tick cap reached, or the API looks unavailable right now
-            // — stop attempting more lookups this tick. $state['index']
-            // isn't advanced past this pair, so the next tick retries it.
-            break;
+    // Only one render loop across the whole app runs at a time — several set
+    // pages left open at once would otherwise each spawn their own tick loop
+    // and compete for CPU on the same leocad+Xvfb renders, which is exactly
+    // what pushed a single tick's response time past an SSL offloader's
+    // gateway timeout (see LDRAW_RENDER_TIME_BUDGET_SECONDS's doc comment).
+    // Non-blocking trylock: a tick that loses the race does no work and
+    // returns immediately instead of queuing up behind the lock holder — the
+    // client's tick loop just polls again a moment later.
+    $lockHandle = fopen(getLdrawRenderLockPath(), 'c');
+    if ($lockHandle === false || !flock($lockHandle, LOCK_EX | LOCK_NB)) {
+        if ($lockHandle !== false) {
+            fclose($lockHandle);
         }
-
-        if ($needsApiCall) {
-            if ($networkCalls > 0) {
-                usleep(LDRAW_API_CALL_DELAY_MICROSECONDS);
-            }
-            $networkCalls++;
-        }
-
-        try {
-            $ldrawId = $needsApiCall
-                ? resolvePartLdrawId($pdo, $pair['part_id'], $pair['part_num'])
-                : ($pair['ldraw_id'] !== '' ? $pair['ldraw_id'] : null);
-            $consecutiveApiFailures = 0;
-        } catch (Throwable $e) {
-            if ($needsApiCall) {
-                $consecutiveApiFailures++;
-            }
-            $state['index']++;
-            $state['stats']['processed']++;
-            $state['stats']['errors']++;
-            continue;
-        }
-
-        $state['index']++;
-        $state['stats']['processed']++;
-
-        $ldrawColorCode = $pair['rgb'] !== null ? matchLdrawColorCode($pair['rgb'], $pair['is_trans']) : null;
-
-        if ($ldrawId === null || $ldrawColorCode === null) {
-            // Definitively resolved either way (confirmed no LDraw mapping,
-            // or no usable color) — permanent, mark it.
-            $upsertStmt->execute([$pair['part_id'], $pair['color_id'], null]);
-            $state['stats']['skipped']++;
-            continue;
-        }
-
-        $filename = $pair['color_id'] . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $ldrawId) . '.png';
-        $shard = getImageShard($filename);
-        $dir = getImageStorageDir('part_color_images', $shard);
-        $absolutePath = $dir . '/' . $filename;
-        $relativePath = getImageRelativePath('part_color_images', $shard, $filename);
-
-        if (renderLdrawPartImage($ldrawId, $ldrawColorCode, $absolutePath)) {
-            $upsertStmt->execute([$pair['part_id'], $pair['color_id'], $relativePath]);
-            $state['stats']['rendered']++;
-        } else {
-            // The .dat file wasn't found in the library — a real (if rare)
-            // gap, permanent for this library version, so it's marked too
-            // rather than re-attempted every time this part comes up.
-            $upsertStmt->execute([$pair['part_id'], $pair['color_id'], null]);
-            $state['stats']['errors']++;
-        }
-
-        if ((microtime(true) - $start) >= LDRAW_RENDER_TIME_BUDGET_SECONDS) {
-            break;
-        }
+        return ['done' => false];
     }
 
-    return ['done' => $state['index'] >= $total];
+    try {
+        $upsertStmt = $pdo->prepare(
+            'INSERT INTO part_color_images (part_id, color_id, local_image_path)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE local_image_path = VALUES(local_image_path), fetched_at = CURRENT_TIMESTAMP'
+        );
+
+        $start = microtime(true);
+        $networkCalls = 0;
+        $consecutiveApiFailures = 0;
+
+        while ($state['index'] < $total) {
+            $pair = $pairs[$state['index']];
+            $needsApiCall = $pair['ldraw_id'] === null;
+
+            if ($needsApiCall && ($networkCalls >= LDRAW_MAX_API_CALLS_PER_TICK || $consecutiveApiFailures >= 3)) {
+                // Per-tick cap reached, or the API looks unavailable right now
+                // — stop attempting more lookups this tick. $state['index']
+                // isn't advanced past this pair, so the next tick retries it.
+                break;
+            }
+
+            if ($needsApiCall) {
+                if ($networkCalls > 0) {
+                    usleep(LDRAW_API_CALL_DELAY_MICROSECONDS);
+                }
+                $networkCalls++;
+            }
+
+            try {
+                $ldrawId = $needsApiCall
+                    ? resolvePartLdrawId($pdo, $pair['part_id'], $pair['part_num'])
+                    : ($pair['ldraw_id'] !== '' ? $pair['ldraw_id'] : null);
+                $consecutiveApiFailures = 0;
+            } catch (Throwable $e) {
+                if ($needsApiCall) {
+                    $consecutiveApiFailures++;
+                }
+                $state['index']++;
+                $state['stats']['processed']++;
+                $state['stats']['errors']++;
+                continue;
+            }
+
+            $state['index']++;
+            $state['stats']['processed']++;
+
+            $ldrawColorCode = $pair['rgb'] !== null ? matchLdrawColorCode($pair['rgb'], $pair['is_trans']) : null;
+
+            if ($ldrawId === null || $ldrawColorCode === null) {
+                // Definitively resolved either way (confirmed no LDraw mapping,
+                // or no usable color) — permanent, mark it.
+                $upsertStmt->execute([$pair['part_id'], $pair['color_id'], null]);
+                $state['stats']['skipped']++;
+                continue;
+            }
+
+            $filename = $pair['color_id'] . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $ldrawId) . '.png';
+            $shard = getImageShard($filename);
+            $dir = getImageStorageDir('part_color_images', $shard);
+            $absolutePath = $dir . '/' . $filename;
+            $relativePath = getImageRelativePath('part_color_images', $shard, $filename);
+
+            if (renderLdrawPartImage($ldrawId, $ldrawColorCode, $absolutePath)) {
+                $upsertStmt->execute([$pair['part_id'], $pair['color_id'], $relativePath]);
+                $state['stats']['rendered']++;
+            } else {
+                // The .dat file wasn't found in the library — a real (if rare)
+                // gap, permanent for this library version, so it's marked too
+                // rather than re-attempted every time this part comes up.
+                $upsertStmt->execute([$pair['part_id'], $pair['color_id'], null]);
+                $state['stats']['errors']++;
+            }
+
+            if ((microtime(true) - $start) >= LDRAW_RENDER_TIME_BUDGET_SECONDS) {
+                break;
+            }
+        }
+
+        return ['done' => $state['index'] >= $total];
+    } finally {
+        flock($lockHandle, LOCK_UN);
+        fclose($lockHandle);
+    }
 }
 
 /**

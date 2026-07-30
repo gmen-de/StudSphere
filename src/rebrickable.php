@@ -27,7 +27,13 @@ function callRebrickableApi(string $path): array
         'Authorization: key ' . $apiKey,
         'Accept: application/json',
     ]);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+    // Was 20s — confirmed on the test server that a single stalled request
+    // (0 bytes received, Rebrickable just never responding) can eat the
+    // whole thing. Every caller here either retries on the next call (the
+    // LDraw render tick's per-part lookups, see LDRAW_RENDER_TIME_BUDGET_SECONDS's
+    // doc comment) or is a one-off admin action where failing fast and
+    // letting the user retry beats a long silent hang either way.
+    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
 
     $response = curl_exec($ch);
     $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
