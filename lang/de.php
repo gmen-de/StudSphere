@@ -377,6 +377,7 @@ return [
     'owned_set_wizard_damaged_label' => 'Defekt',
     'owned_set_inventory_summary' => '{intact} intakt · {damaged} beschädigt · {missing} fehlen',
     'owned_set_inventory_part_progress' => 'Teil {current} / {total}',
+    'owned_set_wizard_minifig_progress' => 'Minifigur {current} / {total}',
     'owned_set_wizard_version_heading' => 'Welche Version hast du?',
     'owned_set_wizard_version_label' => 'Version {version}',
     'owned_set_wizard_category_parts' => 'Bauteile',

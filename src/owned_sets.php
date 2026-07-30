@@ -1112,6 +1112,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         'damagedIcon' => getPartStatusIcon('damaged'),
         'inventorySummary' => t('owned_set_inventory_summary'),
         'partProgress' => t('owned_set_inventory_part_progress'),
+        'minifigProgress' => t('owned_set_wizard_minifig_progress'),
         'categoryParts' => t('owned_set_wizard_category_parts'),
         'categorySpares' => t('owned_set_wizard_category_spares'),
         'categoryStickers' => t('owned_set_wizard_category_stickers'),
@@ -1600,25 +1601,19 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         partName.textContent = p.name + (p.colorName ? ' \\u00b7 ' + p.colorName : '');
         row.appendChild(partName);
 
-        var ownedCol = document.createElement('div');
-        ownedCol.className = 'owned-set-minifig-part-col';
-        var ownedColLabel = document.createElement('span');
-        ownedColLabel.className = 'owned-set-minifig-part-col-label owned-set-stepper-icon owned-set-stepper-icon-owned';
-        ownedColLabel.innerHTML = texts.ownedIcon;
-        ownedColLabel.title = texts.ownedLabel;
         var ownedStepper = buildStepper(0, p.nominal, p.owned);
-        ownedCol.appendChild(ownedColLabel);
-        ownedCol.appendChild(ownedStepper.wrap);
+        var ownedIcon = document.createElement('span');
+        ownedIcon.className = 'owned-set-stepper-icon owned-set-stepper-icon-owned';
+        ownedIcon.innerHTML = texts.ownedIcon;
+        ownedIcon.title = texts.ownedLabel;
+        ownedStepper.wrap.insertBefore(ownedIcon, ownedStepper.wrap.firstChild);
 
-        var damagedCol = document.createElement('div');
-        damagedCol.className = 'owned-set-minifig-part-col';
-        var damagedColLabel = document.createElement('span');
-        damagedColLabel.className = 'owned-set-minifig-part-col-label owned-set-stepper-icon owned-set-stepper-icon-damaged';
-        damagedColLabel.innerHTML = texts.damagedIcon;
-        damagedColLabel.title = texts.damagedLabel;
         var damagedStepper = buildStepper(0, p.owned, p.damaged);
-        damagedCol.appendChild(damagedColLabel);
-        damagedCol.appendChild(damagedStepper.wrap);
+        var damagedIcon = document.createElement('span');
+        damagedIcon.className = 'owned-set-stepper-icon owned-set-stepper-icon-damaged';
+        damagedIcon.innerHTML = texts.damagedIcon;
+        damagedIcon.title = texts.damagedLabel;
+        damagedStepper.wrap.insertBefore(damagedIcon, damagedStepper.wrap.firstChild);
 
         ownedStepper.input.addEventListener('input', function() {
           var v = parseInt(ownedStepper.input.value, 10) || 0;
@@ -1632,8 +1627,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         damagedStepper.input.addEventListener('input', function() {
           p.damaged = parseInt(damagedStepper.input.value, 10) || 0;
         });
-        row.appendChild(ownedCol);
-        row.appendChild(damagedCol);
+        row.appendChild(ownedStepper.wrap);
+        row.appendChild(damagedStepper.wrap);
         partsList.appendChild(row);
       });
     }
@@ -1706,20 +1701,24 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     inputsWrap.className = 'owned-set-inventory-tile-inputs';
 
     var ownedLabel = document.createElement('label');
-    ownedLabel.className = 'owned-set-stepper-icon owned-set-stepper-icon-owned';
     ownedLabel.setAttribute('aria-label', texts.ownedLabel);
-    ownedLabel.innerHTML = texts.ownedIcon;
     var ownedStepper = buildStepper(0, item.nominal_quantity, s.owned);
     var ownedInput = ownedStepper.input;
+    var ownedIcon = document.createElement('span');
+    ownedIcon.className = 'owned-set-stepper-icon owned-set-stepper-icon-owned';
+    ownedIcon.innerHTML = texts.ownedIcon;
+    ownedStepper.wrap.insertBefore(ownedIcon, ownedStepper.wrap.firstChild);
     ownedLabel.appendChild(ownedStepper.wrap);
     inputsWrap.appendChild(ownedLabel);
 
     var damagedLabel = document.createElement('label');
-    damagedLabel.className = 'owned-set-stepper-icon owned-set-stepper-icon-damaged';
     damagedLabel.setAttribute('aria-label', texts.damagedLabel);
-    damagedLabel.innerHTML = texts.damagedIcon;
     var damagedStepper = buildStepper(0, s.owned, s.damaged);
     var damagedInput = damagedStepper.input;
+    var damagedIcon = document.createElement('span');
+    damagedIcon.className = 'owned-set-stepper-icon owned-set-stepper-icon-damaged';
+    damagedIcon.innerHTML = texts.damagedIcon;
+    damagedStepper.wrap.insertBefore(damagedIcon, damagedStepper.wrap.firstChild);
     damagedLabel.appendChild(damagedStepper.wrap);
     inputsWrap.appendChild(damagedLabel);
 
@@ -1758,7 +1757,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       return;
     }
     var page = pages[pageIndex];
-    invProgress.textContent = ' \\u00bb ' + texts.partProgress.replace('{current}', page.categoryIndex).replace('{total}', page.categoryTotal);
+    var progressTemplate = page.kind === 'minifig' ? texts.minifigProgress : texts.partProgress;
+    invProgress.textContent = ' \\u00bb ' + progressTemplate.replace('{current}', page.categoryIndex).replace('{total}', page.categoryTotal);
     invBackBtn.disabled = pageIndex === 0;
     invNextBtn.disabled = pageIndex >= pages.length - 1;
 

@@ -2619,16 +2619,6 @@ footer {
   gap: 0.6rem 1rem;
 }
 
-/* Each stepper gets its own small "Vorhanden"/"davon beschädigt" label
-   directly above it instead of one column-header row for the whole list —
-   a single header row can't label two side-by-side rows at once. */
-.owned-set-minifig-part-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.2rem;
-}
-
 .owned-set-inventory-tile-inputs {
   display: flex;
   flex-direction: column;
@@ -2940,21 +2930,25 @@ footer {
   letter-spacing: 0.03em;
 }
 
+/* No fixed width here anymore — icon + input + arrows now sit in one row
+   (see .owned-set-stepper-icon) and already have their own fixed sizes, so
+   the stepper's total width just follows from those instead of a guessed
+   number. */
 .owned-set-minifig-part-row .owned-set-inventory-stepper {
-  width: 6.5rem;
   justify-content: center;
 }
 
 /* Icon replacing the "Vorhanden"/"Defekt" stepper text label (wizard only —
-   see getPartStatusIcon() in src/icons.php) — overrides the muted gray text
-   color inherited from .owned-set-inventory-tile-inputs label /
-   .owned-set-minifig-part-col-label with a color that itself signals status,
-   since there's no label text doing that anymore. */
+   see getPartStatusIcon() in src/icons.php) — sits in the same row as the
+   stepper's input/+/- (icon | input | +/-, no line break), sized to match
+   the input's own height. Colored instead of the muted gray text it
+   replaces, so status still reads at a glance without a label: green for
+   present, orange for damaged — not red, which is reserved for "fehlend"
+   (missing) elsewhere in the app (.owned-set-inventory-tile-missing). */
 .owned-set-stepper-icon svg {
-  width: 1.1rem;
-  height: 1.1rem;
+  width: 2.3rem;
+  height: 2.3rem;
   display: block;
-  margin: 0 auto;
 }
 
 .owned-set-stepper-icon-owned {
@@ -2962,7 +2956,7 @@ footer {
 }
 
 .owned-set-stepper-icon-damaged {
-  color: #dc2626;
+  color: #d97706;
 }
 
 .owned-set-minifig-nominal-line {
