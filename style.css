@@ -2510,6 +2510,21 @@ footer {
   padding-right: 0.5rem;
 }
 
+/* The active step is toggled to display:flex (not :block) by showStep() in
+   JS specifically so this takes effect — fills .owned-set-wizard-body's
+   full height, so the trailing nav row's margin-top:auto (below) has
+   something to actually push against and lands at the true bottom of the
+   modal, not just wherever the step's own content happens to end. */
+.owned-set-wizard-step {
+  flex-direction: column;
+  height: 100%;
+}
+
+.owned-set-wizard-nav,
+.owned-set-inventory-nav {
+  margin-top: auto;
+}
+
 /* Compact sub-headings for the overview step's two tables — the browser
    default h4 margin looked disproportionately loose next to
    .set-detail-table's own tight row spacing, part of why the step read as

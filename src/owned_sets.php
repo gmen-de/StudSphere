@@ -1355,7 +1355,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
 
   function showStep(n) {
     steps.forEach(function(step) {
-      step.style.display = (parseInt(step.dataset.step, 10) === n) ? 'block' : 'none';
+      step.style.display = (parseInt(step.dataset.step, 10) === n) ? 'flex' : 'none';
     });
     progress.textContent = texts.stepLabel.replace('{current}', n).replace('{total}', totalSteps);
     if (n !== INVENTORY_STEP) {
