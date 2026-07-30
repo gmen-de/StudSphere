@@ -2606,10 +2606,16 @@ footer {
 /* Two constituent parts side by side before wrapping to the next line — the
    wizard box is now wide enough for it (see .owned-set-wizard-box). Scoped
    to the wizard only; owned_set_detail's own minifig modal keeps the
-   original single-column .owned-set-minifig-parts-list layout. */
+   original single-column .owned-set-minifig-parts-list layout.
+   minmax(0, 1fr), not plain 1fr: a row with a long part name (white-space:
+   nowrap on .owned-set-minifig-part-name) otherwise contributes its full
+   unwrapped min-content width to the track-sizing algorithm, so one column
+   would balloon past 50% and squeeze the other — minmax(0, ...) overrides
+   that, keeping both columns evenly split and letting the name's own
+   text-overflow:ellipsis actually truncate instead. */
 .owned-set-wizard-minifig-panel .owned-set-minifig-parts-list {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.6rem 1rem;
 }
 
