@@ -1458,6 +1458,11 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     if (hasUnsavedProgress && !window.confirm(texts.unsavedConfirm)) {
       return;
     }
+    // Once actually closed (confirmed, or there was nothing to confirm),
+    // the wizard's unsaved state no longer matters to the page as a whole —
+    // without this, beforeunload kept warning on every later page
+    // navigation even after the wizard itself was long closed.
+    hasUnsavedProgress = false;
     modal.style.display = 'none';
   }
 
