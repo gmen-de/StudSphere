@@ -2566,12 +2566,6 @@ footer {
   border-radius: 0.75rem;
 }
 
-.owned-set-wizard-minifig-panel > label {
-  display: block;
-  margin-bottom: 1rem;
-  font-size: 0.95rem;
-}
-
 .owned-set-inventory-tile-inputs {
   display: flex;
   flex-direction: column;
