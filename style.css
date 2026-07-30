@@ -2497,22 +2497,33 @@ footer {
 }
 
 /* Only the step content scrolls, within the box's fixed height — the header
-   row and progress label stay put above it. */
+   row and progress label stay put above it. Also a flex container itself
+   now (column, same direction as .modal-box) so the one visible step can
+   be a flex item with flex:1 below — that's what actually gives it a
+   reliable, definite height to fill. A plain height:100% on the step was
+   tried first and silently failed to resolve on some steps (the nav row's
+   margin-top:auto below had nothing to push against, so it just sat right
+   after the content instead of at the bottom) — percentage heights through
+   a flex-item chain are notoriously unreliable; flex-grow doesn't have
+   that problem, since it's not a percentage calculation at all. */
 .owned-set-wizard-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding-right: 0.5rem;
+  display: flex;
+  flex-direction: column;
 }
 
 /* The active step is toggled to display:flex (not :block) by showStep() in
-   JS specifically so this takes effect — fills .owned-set-wizard-body's
-   full height, so the trailing nav row's margin-top:auto (below) has
-   something to actually push against and lands at the true bottom of the
-   modal, not just wherever the step's own content happens to end. */
+   JS specifically so this takes effect as a flex item of
+   .owned-set-wizard-body above — fills the remaining height, so the
+   trailing nav row's margin-top:auto has something to actually push
+   against and lands at the true bottom of the modal. */
 .owned-set-wizard-step {
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .owned-set-wizard-nav,
@@ -2629,6 +2640,24 @@ footer {
   grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
   gap: 3px;
   margin-bottom: 1rem;
+}
+
+/* Fixed tile size in the wizard specifically — .owned-set-inventory-tile is
+   shared with owned_set_detail's "Beschädigt/Fehlend" tab too, which keeps
+   its own auto-sized grid, untouched. In the wizard, minmax(10rem, 1fr)'s
+   1fr stretched a lone tile (a page with only 1 item, common once a page
+   holds at most 4 — see initInventoryPages()) much wider than a page with
+   4, and tile height varied with name length — both were exactly the
+   "springt umher" jumpiness being complained about. A flat column width
+   plus a floor on tile height makes every page's tiles the same size. */
+#owned-set-wizard-parts-list.owned-set-inventory-tiles {
+  grid-template-columns: repeat(auto-fill, 11.5rem);
+  justify-content: start;
+}
+
+#owned-set-wizard-parts-list .owned-set-inventory-tile {
+  width: 11.5rem;
+  min-height: 13rem;
 }
 
 /* Wizard step 5's minifig page — spans the full tile grid width instead of
