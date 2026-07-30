@@ -408,7 +408,7 @@ return [
     'owned_set_instructions_notes_label' => 'Note about the instructions',
     'owned_set_box_notes_label' => 'Note about the box',
     'owned_set_box_complete_notes_label' => 'Note about the box completeness',
-    'owned_set_wizard_title' => 'Add set to collection',
+    'owned_set_wizard_title' => 'Add set {setNum} to collection',
     'owned_set_wizard_step_label' => 'Step {current} / {total}',
     'owned_set_wizard_step1_heading' => 'Storage location',
     'owned_set_wizard_step2_heading' => 'Set details',

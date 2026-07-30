@@ -37,6 +37,20 @@ function getPartStatusIcon(string $status): string
     return $icons[$status] ?? '';
 }
 
+/**
+ * Green-check / red-cross badge replacing a plain "Ja"/"Nein" in the
+ * add-to-collection wizard's overview table — colors are hardcoded (not
+ * currentColor) since the whole point is a fixed green/red status signal,
+ * independent of surrounding text color.
+ */
+function getBooleanStatusIcon(bool $value): string
+{
+    if ($value) {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" fill="none" stroke="#16a34a" stroke-width="1.8"/><path d="M7.5 12.3l3 3 6-6.6" stroke="#16a34a" stroke-width="2.2"/></svg>';
+    }
+    return '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" fill="none" stroke="#dc2626" stroke-width="1.8"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7" stroke="#dc2626" stroke-width="2.2"/></svg>';
+}
+
 function getFlagIcon(string $locale): string
 {
     $flags = [

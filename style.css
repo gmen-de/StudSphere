@@ -2460,17 +2460,27 @@ footer {
   margin-top: 0;
 }
 
+/* Only this modal's own overlay — not .modal-overlay itself, which is
+   shared by every other modal in the app — gets a tighter top/bottom
+   margin, so the box can use more of the viewport's height (the inventory
+   tiles need it to avoid an internal scrollbar; see .owned-set-wizard-body). */
+#add-owned-set-modal {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
 /* Fixed size rather than shrink/grow-to-content — the step content varies a
    lot (a 3-select location picker vs. a two-column minifig parts checklist),
    and letting the box resize with it made the modal visibly jump around
-   between steps/loaded parts. Sized to sit comfortably within a 1366x766
-   viewport (.modal-overlay's own 1.5rem padding on each side already
-   accounted for), with a viewport-relative fallback for smaller screens. */
+   between steps/loaded parts. Width is a flat number (comfortable for the
+   two-column minifig parts checklist at a 1366x766 viewport); height tracks
+   the viewport instead, matching #add-owned-set-modal's 0.75rem top/bottom
+   padding above. */
 .owned-set-wizard-box {
   width: 58rem;
   max-width: calc(100vw - 3rem);
-  height: 38rem;
-  max-height: calc(100vh - 3rem);
+  height: calc(100vh - 1.5rem);
+  max-height: calc(100vh - 1.5rem);
 }
 
 .owned-set-wizard-header {
@@ -2498,6 +2508,31 @@ footer {
   min-height: 0;
   overflow-y: auto;
   padding-right: 0.5rem;
+}
+
+/* Compact sub-headings for the overview step's two tables — the browser
+   default h4 margin looked disproportionately loose next to
+   .set-detail-table's own tight row spacing, part of why the step read as
+   "unruhig" (busy/cluttered) before. */
+.owned-set-wizard-overview-step h4 {
+  margin: 0.75rem 0 0.4rem;
+  font-size: 0.95rem;
+  color: #334155;
+}
+
+.owned-set-wizard-overview-step h4:first-child {
+  margin-top: 0;
+}
+
+.owned-set-wizard-bool-icon {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.owned-set-wizard-bool-icon svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  display: block;
 }
 
 .owned-set-wizard-step .location-level {
@@ -2555,6 +2590,7 @@ footer {
 .owned-set-wizard-nav {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.6rem;
   margin-top: 1rem;
 }
@@ -2567,13 +2603,6 @@ footer {
 .owned-set-wizard-nav .owned-set-wizard-back {
   background: #f1f5f9;
   color: #475569;
-  margin-right: auto;
-}
-
-#owned-set-wizard-skip {
-  margin-right: auto;
-  font-size: 0.85rem;
-  color: #64748b;
 }
 
 .owned-set-inventory-progress {
@@ -2719,6 +2748,7 @@ footer {
 .owned-set-inventory-nav {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.6rem;
   margin-bottom: 0.5rem;
 }
@@ -2726,6 +2756,14 @@ footer {
 .owned-set-inventory-nav button {
   width: auto;
   padding: 0.6rem 1.1rem;
+}
+
+/* Same fixed width on both — "Weiter" and "Speichern" sit in the same nav
+   position across steps, but their text is a different length, which made
+   the button visibly resize/jump between the inventory and overview steps. */
+#owned-set-wizard-inventory-next,
+#owned-set-wizard-save {
+  min-width: 7rem;
 }
 
 #owned-set-inventory-save {

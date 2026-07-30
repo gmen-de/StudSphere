@@ -408,7 +408,7 @@ return [
     'owned_set_instructions_notes_label' => 'Notiz zur Bauanleitung',
     'owned_set_box_notes_label' => 'Notiz zur OVP',
     'owned_set_box_complete_notes_label' => 'Notiz zur Vollständigkeit der OVP',
-    'owned_set_wizard_title' => 'Set zur Sammlung hinzufügen',
+    'owned_set_wizard_title' => 'Set {setNum} zur Sammlung hinzufügen',
     'owned_set_wizard_step_label' => 'Schritt {current} / {total}',
     'owned_set_wizard_step1_heading' => 'Lagerort',
     'owned_set_wizard_step2_heading' => 'Details zum Set',

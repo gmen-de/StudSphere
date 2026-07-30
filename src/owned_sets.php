@@ -1124,7 +1124,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     $html = '<div class="modal-overlay" id="add-owned-set-modal" style="display:none;">';
     $html .= '<div class="modal-box owned-set-wizard-box">';
     $html .= '<div class="owned-set-wizard-header">';
-    $html .= '<h2>' . htmlspecialchars(t('owned_set_wizard_title')) . '</h2>';
+    $html .= '<h2>' . htmlspecialchars(t('owned_set_wizard_title', ['setNum' => $set['rebrickable_set_num'] ?? ''])) . '</h2>';
     $html .= '<button type="button" class="modal-close" id="add-owned-set-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
     $html .= '</div>';
     $html .= '<p class="owned-set-wizard-progress"><span id="owned-set-wizard-progress"></span><span class="owned-set-wizard-progress-sub" id="owned-set-wizard-inventory-progress"></span></p>';
@@ -1210,12 +1210,11 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step5-error"></p>';
     $html .= '</div>';
 
-    $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['overview'] . '" data-step="' . $stepNames['overview'] . '" style="display:none;">';
-    $html .= '<h3>' . htmlspecialchars(t('owned_set_wizard_overview_heading')) . '</h3>';
+    $html .= '<div class="owned-set-wizard-step owned-set-wizard-overview-step" id="owned-set-wizard-step-' . $stepNames['overview'] . '" data-step="' . $stepNames['overview'] . '" style="display:none;">';
     $html .= '<h4>' . htmlspecialchars(t('owned_set_wizard_overview_details_heading')) . '</h4>';
-    $html .= '<div id="owned-set-wizard-overview-recap"></div>';
+    $html .= '<table class="set-detail-table" id="owned-set-wizard-overview-recap"></table>';
     $html .= '<h4>' . htmlspecialchars(t('owned_set_wizard_overview_inventory_heading')) . '</h4>';
-    $html .= '<div id="owned-set-wizard-overview-summary"></div>';
+    $html .= '<table class="set-detail-table" id="owned-set-wizard-overview-summary"></table>';
     $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-overview-error"></p>';
     $html .= '<div class="owned-set-wizard-nav"><button type="button" id="owned-set-wizard-overview-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" id="owned-set-wizard-save">' . htmlspecialchars(t('owned_set_save_button')) . '</button></div>';
     $html .= '</div>';
@@ -1254,6 +1253,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         'recapNotes' => t('owned_set_notes_label'),
         'yesLabel' => t('owned_set_wizard_yes'),
         'noLabel' => t('owned_set_wizard_no'),
+        'yesIcon' => getBooleanStatusIcon(true),
+        'noIcon' => getBooleanStatusIcon(false),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $detailsStep = $stepNames['details'];
@@ -1658,14 +1659,21 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
 
       var categoryPages;
       if (def.kind === 'part') {
+        // A part_num's color variants share a page, but more than 4 tiles
+        // wraps to a second row (the grid fits ~4 at the wizard's current
+        // width) — so once a part_num's current page is full, its
+        // remaining variants spill onto a fresh page of their own instead
+        // of all piling onto one.
         var indexByPartNum = {};
         categoryPages = [];
         def.items.forEach(function(item) {
-          if (!(item.part_num in indexByPartNum)) {
-            indexByPartNum[item.part_num] = categoryPages.length;
+          var idx = indexByPartNum[item.part_num];
+          if (idx === undefined || categoryPages[idx].length >= 4) {
+            idx = categoryPages.length;
             categoryPages.push([]);
+            indexByPartNum[item.part_num] = idx;
           }
-          categoryPages[indexByPartNum[item.part_num]].push(item);
+          categoryPages[idx].push(item);
         });
       } else {
         // One page per minifig (not one page for all of them) — each gets
@@ -2050,10 +2058,28 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     return opt ? opt.textContent : '';
   }
 
-  function buildRecapLine(label, value) {
-    var p = document.createElement('p');
-    p.textContent = label + ': ' + value;
-    return p;
+  // table is a <table class="set-detail-table"> — th=label, td=value,
+  // same compact label:value pattern renderSetGeneralInfoTable() uses
+  // elsewhere in the app. fillTd(td) populates the value cell — a plain
+  // string assignment for most rows, DOM (icon + optional note text) for
+  // the three Ja/Nein rows.
+  function addRecapRow(table, label, fillTd) {
+    var tr = document.createElement('tr');
+    var th = document.createElement('th');
+    th.textContent = label;
+    var td = document.createElement('td');
+    fillTd(td);
+    tr.appendChild(th);
+    tr.appendChild(td);
+    table.appendChild(tr);
+  }
+
+  function appendBooleanIcon(td, value, titleText) {
+    var icon = document.createElement('span');
+    icon.className = 'owned-set-wizard-bool-icon';
+    icon.innerHTML = value ? texts.yesIcon : texts.noIcon;
+    icon.title = titleText;
+    td.appendChild(icon);
   }
 
   // Reads straight from the still-intact form fields of every earlier step
@@ -2066,8 +2092,9 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
 
     var conditionRadio = modal.querySelector('input[name="owned-set-wizard-condition"]:checked');
     var isNew = conditionRadio && conditionRadio.value === 'new';
-    recap.appendChild(buildRecapLine(texts.recapLocation, getSelectedLocationLabel()));
-    recap.appendChild(buildRecapLine(texts.recapCondition, isNew ? texts.conditionNew : texts.conditionUsed));
+    var locationLabel = getSelectedLocationLabel();
+    addRecapRow(recap, texts.recapLocation, function(td) { td.textContent = locationLabel; });
+    addRecapRow(recap, texts.recapCondition, function(td) { td.textContent = isNew ? texts.conditionNew : texts.conditionUsed; });
 
     [
       ['has-instructions', 'instructions-notes', texts.recapInstructions],
@@ -2076,16 +2103,17 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     ].forEach(function(triple) {
       var checkbox = document.getElementById('owned-set-wizard-' + triple[0]);
       var notes = document.getElementById('owned-set-wizard-' + triple[1]);
-      var value = checkbox.checked ? texts.yesLabel : texts.noLabel;
-      if (checkbox.checked && notes.value.trim()) {
-        value += ' \\u2014 ' + notes.value.trim();
-      }
-      recap.appendChild(buildRecapLine(triple[2], value));
+      addRecapRow(recap, triple[2], function(td) {
+        appendBooleanIcon(td, checkbox.checked, checkbox.checked ? texts.yesLabel : texts.noLabel);
+        if (checkbox.checked && notes.value.trim()) {
+          td.appendChild(document.createTextNode(' ' + notes.value.trim()));
+        }
+      });
     });
 
     var freeNotes = document.getElementById('owned-set-wizard-notes').value.trim();
     if (freeNotes) {
-      recap.appendChild(buildRecapLine(texts.recapNotes, freeNotes));
+      addRecapRow(recap, texts.recapNotes, function(td) { td.textContent = freeNotes; });
     }
 
     var summary = document.getElementById('owned-set-wizard-overview-summary');
@@ -2099,13 +2127,15 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         return;
       }
       var s = computeCategorySummary(pair[0]);
-      summary.appendChild(buildRecapLine(pair[1], texts.inventorySummary
-        .replace('{intact}', s.intact).replace('{damaged}', s.damaged).replace('{missing}', s.missing)));
+      var text = texts.inventorySummary
+        .replace('{intact}', s.intact).replace('{damaged}', s.damaged).replace('{missing}', s.missing);
+      addRecapRow(summary, pair[1], function(td) { td.textContent = text; });
     });
     if (Object.keys(state.minifigs).length > 0) {
       var ms = computeMinifigSummary();
-      summary.appendChild(buildRecapLine(texts.categoryMinifigs, texts.minifigSummary
-        .replace('{complete}', ms.complete).replace('{incomplete}', ms.incomplete).replace('{damaged}', ms.damaged)));
+      var minifigText = texts.minifigSummary
+        .replace('{complete}', ms.complete).replace('{incomplete}', ms.incomplete).replace('{damaged}', ms.damaged);
+      addRecapRow(summary, texts.categoryMinifigs, function(td) { td.textContent = minifigText; });
     }
   }
 
