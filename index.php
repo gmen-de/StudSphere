@@ -619,6 +619,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
     $boxNotes = $boxNotes !== '' ? $boxNotes : null;
     $boxCompleteNotes = trim((string) ($_POST['box_complete_notes'] ?? ''));
     $boxCompleteNotes = $boxCompleteNotes !== '' ? $boxCompleteNotes : null;
+    $stickersApplied = ($_POST['stickers_applied'] ?? '') === '1';
+    $stickersNotes = trim((string) ($_POST['stickers_notes'] ?? ''));
+    $stickersNotes = $stickersNotes !== '' ? $stickersNotes : null;
     $inventoryIdRaw = trim((string) ($_POST['inventory_id'] ?? ''));
     $ownedSetInventoryId = $inventoryIdRaw !== '' ? (int) $inventoryIdRaw : null;
 
@@ -642,7 +645,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
             $instructionsNotes,
             $boxNotes,
             $boxCompleteNotes,
-            $ownedSetInventoryId
+            $ownedSetInventoryId,
+            $stickersApplied,
+            $stickersNotes
         );
         refreshAppStatsCache($pdo);
         echo json_encode(['success' => true, 'ownedSetId' => $newOwnedSetId], JSON_UNESCAPED_UNICODE);
@@ -2789,6 +2794,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $renderBoxInfoRow('owned_set_has_instructions', (bool) $ownedSet['has_instructions'], 'owned_set_instructions_notes_label', $ownedSet['instructions_notes']);
     $renderBoxInfoRow('owned_set_has_box', (bool) $ownedSet['has_box'], 'owned_set_box_notes_label', $ownedSet['box_notes']);
     $renderBoxInfoRow('owned_set_box_complete', (bool) $ownedSet['box_complete'], 'owned_set_box_complete_notes_label', $ownedSet['box_complete_notes']);
+    $renderBoxInfoRow('owned_set_stickers_applied', (bool) $ownedSet['stickers_applied'], 'owned_set_stickers_notes_label', $ownedSet['stickers_notes']);
     if ($ownedSet['notes'] !== null && $ownedSet['notes'] !== '') {
         $content .= '<tr><th>' . htmlspecialchars(t('owned_set_notes_label')) . '</th><td>' . htmlspecialchars($ownedSet['notes']) . '</td></tr>';
     }

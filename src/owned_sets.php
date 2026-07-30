@@ -66,13 +66,13 @@ function getNextOwnedSetInstanceNumber(PDO $pdo, int $setId): int
 }
 
 /**
- * @return array{id:int, set_id:int, inventory_id:?int, location_id:int, condition_type:string, has_instructions:bool, has_box:bool, box_complete:bool, notes:?string, instructions_notes:?string, box_notes:?string, box_complete_notes:?string, created_at:string, rebrickable_set_num:string, name:string, thumbnail:?string}|null
+ * @return array{id:int, set_id:int, inventory_id:?int, location_id:int, condition_type:string, has_instructions:bool, has_box:bool, box_complete:bool, notes:?string, instructions_notes:?string, box_notes:?string, box_complete_notes:?string, stickers_applied:bool, stickers_notes:?string, created_at:string, rebrickable_set_num:string, name:string, thumbnail:?string}|null
  */
 function getOwnedSetById(PDO $pdo, int $id): ?array
 {
     $stmt = $pdo->prepare(
         'SELECT os.id, os.set_id, os.inventory_id, os.location_id, os.condition_type, os.has_instructions, os.has_box, os.box_complete,
-                os.notes, os.instructions_notes, os.box_notes, os.box_complete_notes, os.created_at,
+                os.notes, os.instructions_notes, os.box_notes, os.box_complete_notes, os.stickers_applied, os.stickers_notes, os.created_at,
                 s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
          FROM owned_sets os
          INNER JOIN sets s ON s.id = os.set_id
@@ -90,6 +90,7 @@ function getOwnedSetById(PDO $pdo, int $id): ?array
     $row['has_instructions'] = (bool) $row['has_instructions'];
     $row['has_box'] = (bool) $row['has_box'];
     $row['box_complete'] = (bool) $row['box_complete'];
+    $row['stickers_applied'] = (bool) $row['stickers_applied'];
     return $row;
 }
 
@@ -736,7 +737,9 @@ function addOwnedSet(
     ?string $instructionsNotes = null,
     ?string $boxNotes = null,
     ?string $boxCompleteNotes = null,
-    ?int $inventoryId = null
+    ?int $inventoryId = null,
+    bool $stickersApplied = false,
+    ?string $stickersNotes = null
 ): int {
     $set = getSetById($pdo, $setId);
     if ($set === null) {
@@ -745,11 +748,13 @@ function addOwnedSet(
 
     // A still-sealed set trivially has its instructions, box, and a complete
     // box — enforced server-side too, not just via the wizard's disabled
-    // checkboxes, since those wouldn't stop a direct POST.
+    // checkboxes, since those wouldn't stop a direct POST. Stickers are the
+    // opposite: a sealed set trivially has NOT had its stickers applied yet.
     if ($conditionType === 'new') {
         $hasInstructions = true;
         $hasBox = true;
         $boxComplete = true;
+        $stickersApplied = false;
     }
 
     // No explicit choice (set only has one revision, or an older caller
@@ -764,8 +769,8 @@ function addOwnedSet(
     $locationId = createStorageLocation($parentLocationId, $locationName, 'owned_set');
 
     $stmt = $pdo->prepare(
-        'INSERT INTO owned_sets (set_id, inventory_id, location_id, condition_type, has_instructions, has_box, box_complete, notes, instructions_notes, box_notes, box_complete_notes, added_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO owned_sets (set_id, inventory_id, location_id, condition_type, has_instructions, has_box, box_complete, notes, instructions_notes, box_notes, box_complete_notes, stickers_applied, stickers_notes, added_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
         $setId,
@@ -779,6 +784,8 @@ function addOwnedSet(
         $instructionsNotes,
         $boxNotes,
         $boxCompleteNotes,
+        $stickersApplied ? 1 : 0,
+        $stickersNotes,
         $userId,
     ]);
     $ownedSetId = (int) $pdo->lastInsertId();
@@ -1193,6 +1200,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         ['has-instructions', 'owned_set_has_instructions', 'instructions-notes', 'owned_set_instructions_notes_label'],
         ['has-box', 'owned_set_has_box', 'box-notes', 'owned_set_box_notes_label'],
         ['has-box-complete', 'owned_set_box_complete', 'box-complete-notes', 'owned_set_box_complete_notes_label'],
+        ['stickers-applied', 'owned_set_stickers_applied', 'stickers-notes', 'owned_set_stickers_notes_label'],
     ];
     foreach ($detailFields as [$checkboxId, $checkboxLabelKey, $notesId, $notesLabelKey]) {
         $html .= '<div class="owned-set-wizard-detail-group">';
@@ -1284,6 +1292,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         'recapInstructions' => t('owned_set_has_instructions'),
         'recapBox' => t('owned_set_has_box'),
         'recapBoxComplete' => t('owned_set_box_complete'),
+        'recapStickers' => t('owned_set_stickers_applied'),
         'recapNotes' => t('owned_set_notes_label'),
         'yesLabel' => t('owned_set_wizard_yes'),
         'noLabel' => t('owned_set_wizard_no'),
@@ -1425,9 +1434,9 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     document.getElementById('owned-set-wizard-step4-error').textContent = '';
     document.getElementById('owned-set-wizard-step5-error').textContent = '';
     document.getElementById('owned-set-wizard-notes').value = '';
-    ['instructions', 'box', 'box-complete'].forEach(function(key) {
-      var checkbox = document.getElementById('owned-set-wizard-has-' + (key === 'box-complete' ? 'box-complete' : key));
-      var notes = document.getElementById('owned-set-wizard-' + key + '-notes');
+    detailPairs.forEach(function(pair) {
+      var checkbox = document.getElementById(pair[1]);
+      var notes = document.getElementById('owned-set-wizard-' + pair[0] + '-notes');
       if (checkbox) { checkbox.checked = false; checkbox.disabled = false; }
       if (notes) { notes.value = ''; notes.style.display = 'none'; }
     });
@@ -1531,9 +1540,10 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   });
 
   var detailPairs = [
-    ['instructions', 'owned-set-wizard-has-instructions'],
-    ['box', 'owned-set-wizard-has-box'],
-    ['box-complete', 'owned-set-wizard-has-box-complete']
+    ['instructions', 'owned-set-wizard-has-instructions', true],
+    ['box', 'owned-set-wizard-has-box', true],
+    ['box-complete', 'owned-set-wizard-has-box-complete', true],
+    ['stickers', 'owned-set-wizard-stickers-applied', false]
   ];
 
   detailPairs.forEach(function(pair) {
@@ -1549,7 +1559,10 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   // A still-sealed ("new") set trivially has its instructions, box, and a
   // complete box — nothing can be missing from something nobody has opened
   // yet. So those 3 checkboxes get force-checked and locked while "Neu" is
-  // selected; only their notes stay editable. Picking "Gebraucht" just
+  // selected; only their notes stay editable. Stickers are the opposite: a
+  // sealed set trivially has NOT had its stickers applied, so that one gets
+  // force-UNchecked instead — hence the per-field forced value in
+  // detailPairs[2] rather than a hardcoded true. Picking "Gebraucht" just
   // unlocks them again (their current checked state is left as-is).
   modal.querySelectorAll('input[name="owned-set-wizard-condition"]').forEach(function(radio) {
     radio.addEventListener('change', function() {
@@ -1562,8 +1575,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         var notes = document.getElementById('owned-set-wizard-' + pair[0] + '-notes');
         checkbox.disabled = isNew;
         if (isNew) {
-          checkbox.checked = true;
-          notes.style.display = 'block';
+          checkbox.checked = pair[2];
+          notes.style.display = checkbox.checked ? 'block' : 'none';
         }
       });
     });
@@ -1579,10 +1592,12 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     formData.set('has_instructions', document.getElementById('owned-set-wizard-has-instructions').checked ? '1' : '');
     formData.set('has_box', document.getElementById('owned-set-wizard-has-box').checked ? '1' : '');
     formData.set('box_complete', document.getElementById('owned-set-wizard-has-box-complete').checked ? '1' : '');
+    formData.set('stickers_applied', document.getElementById('owned-set-wizard-stickers-applied').checked ? '1' : '');
     formData.set('notes', document.getElementById('owned-set-wizard-notes').value);
     formData.set('instructions_notes', document.getElementById('owned-set-wizard-instructions-notes').value);
     formData.set('box_notes', document.getElementById('owned-set-wizard-box-notes').value);
     formData.set('box_complete_notes', document.getElementById('owned-set-wizard-box-complete-notes').value);
+    formData.set('stickers_notes', document.getElementById('owned-set-wizard-stickers-notes').value);
     var versionRadio = modal.querySelector('input[name="owned-set-wizard-version"]:checked');
     if (versionRadio) {
       formData.set('inventory_id', versionRadio.value);
@@ -2150,7 +2165,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     [
       ['has-instructions', 'instructions-notes', texts.recapInstructions],
       ['has-box', 'box-notes', texts.recapBox],
-      ['has-box-complete', 'box-complete-notes', texts.recapBoxComplete]
+      ['has-box-complete', 'box-complete-notes', texts.recapBoxComplete],
+      ['stickers-applied', 'stickers-notes', texts.recapStickers]
     ].forEach(function(triple) {
       var checkbox = document.getElementById('owned-set-wizard-' + triple[0]);
       var notes = document.getElementById('owned-set-wizard-' + triple[1]);

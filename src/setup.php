@@ -259,6 +259,8 @@ function installDatabase(): void
             instructions_notes TEXT DEFAULT NULL,
             box_notes TEXT DEFAULT NULL,
             box_complete_notes TEXT DEFAULT NULL,
+            stickers_applied TINYINT(1) NOT NULL DEFAULT 0,
+            stickers_notes TEXT DEFAULT NULL,
             added_by INT DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

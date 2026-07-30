@@ -299,6 +299,18 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        19 => function (PDO $pdo): void {
+            // A 4th wizard step-2 detail, same shape as instructions_notes/
+            // box_notes/box_complete_notes (migration 14) — whether the
+            // sticker sheet has actually been applied to the model. Unlike
+            // the other three, this is NOT trivially true for a sealed/
+            // "new" set (stickers can't be applied before the set is even
+            // built) — see the wizard's detailPairs array in
+            // renderAddOwnedSetWizardModal(), which forces it to false
+            // (not true) when condition=new.
+            addColumnIfMissing($pdo, 'owned_sets', 'stickers_applied', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'owned_sets', 'stickers_notes', 'TEXT DEFAULT NULL');
+        },
     ];
 }
 
@@ -361,7 +373,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 18;
+const CURRENT_SCHEMA_VERSION = 19;
 
 function getInstalledSchemaVersion(): int
 {
