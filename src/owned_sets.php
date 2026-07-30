@@ -1009,9 +1009,12 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
 
     $html = '<div class="modal-overlay" id="add-owned-set-modal" style="display:none;">';
     $html .= '<div class="modal-box owned-set-wizard-box">';
-    $html .= '<button type="button" class="modal-close" id="add-owned-set-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<div class="owned-set-wizard-header">';
     $html .= '<h2>' . htmlspecialchars(t('owned_set_wizard_title')) . '</h2>';
+    $html .= '<button type="button" class="modal-close" id="add-owned-set-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '</div>';
     $html .= '<p class="owned-set-wizard-progress" id="owned-set-wizard-progress"></p>';
+    $html .= '<div class="owned-set-wizard-body">';
 
     if ($hasVersionStep) {
         $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['version'] . '" data-step="' . $stepNames['version'] . '">';
@@ -1095,6 +1098,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     $html .= '<div class="owned-set-wizard-nav"><a href="#" id="owned-set-wizard-skip">' . htmlspecialchars(t('owned_set_wizard_skip')) . '</a><button type="button" id="owned-set-wizard-finish">' . htmlspecialchars(t('owned_set_wizard_finish')) . '</button></div>';
     $html .= '</div>';
 
+    $html .= '</div>'; // .owned-set-wizard-body
     $html .= '</div></div>';
 
     $labelsJson = json_encode([
@@ -1460,20 +1464,23 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
 
   function buildStepper(minVal, maxVal, value) {
     var wrap = document.createElement('div');
-    wrap.className = 'owned-set-inventory-stepper';
-    var minusBtn = document.createElement('button');
-    minusBtn.type = 'button';
-    minusBtn.className = 'owned-set-inventory-stepper-btn';
-    minusBtn.textContent = '\\u2212';
+    wrap.className = 'owned-set-inventory-stepper owned-set-inventory-stepper-stacked';
     var input = document.createElement('input');
     input.type = 'number';
     input.min = String(minVal);
     input.max = String(maxVal);
     input.value = String(value);
+
+    var arrows = document.createElement('div');
+    arrows.className = 'owned-set-inventory-stepper-arrows';
     var plusBtn = document.createElement('button');
     plusBtn.type = 'button';
-    plusBtn.className = 'owned-set-inventory-stepper-btn';
+    plusBtn.className = 'owned-set-inventory-stepper-btn owned-set-inventory-stepper-btn-up';
     plusBtn.textContent = '+';
+    var minusBtn = document.createElement('button');
+    minusBtn.type = 'button';
+    minusBtn.className = 'owned-set-inventory-stepper-btn owned-set-inventory-stepper-btn-down';
+    minusBtn.textContent = '\\u2212';
 
     function step(delta) {
       var v = (parseInt(input.value, 10) || 0) + delta;
@@ -1481,12 +1488,13 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       input.value = String(v);
       input.dispatchEvent(new Event('input'));
     }
-    minusBtn.addEventListener('click', function() { step(-1); });
     plusBtn.addEventListener('click', function() { step(1); });
+    minusBtn.addEventListener('click', function() { step(-1); });
 
-    wrap.appendChild(minusBtn);
+    arrows.appendChild(plusBtn);
+    arrows.appendChild(minusBtn);
     wrap.appendChild(input);
-    wrap.appendChild(plusBtn);
+    wrap.appendChild(arrows);
     return { wrap: wrap, input: input };
   }
 
@@ -1562,24 +1570,6 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     header.appendChild(info);
     panel.appendChild(header);
 
-    var columnHeader = document.createElement('div');
-    columnHeader.className = 'owned-set-minifig-part-row owned-set-minifig-part-header';
-    var columnHeaderSpacer = document.createElement('span');
-    columnHeaderSpacer.className = 'part-card-image';
-    var columnHeaderName = document.createElement('span');
-    columnHeaderName.className = 'owned-set-minifig-part-name';
-    var columnHeaderOwned = document.createElement('span');
-    columnHeaderOwned.className = 'owned-set-minifig-part-col-label';
-    columnHeaderOwned.textContent = texts.ownedLabel;
-    var columnHeaderDamaged = document.createElement('span');
-    columnHeaderDamaged.className = 'owned-set-minifig-part-col-label';
-    columnHeaderDamaged.textContent = texts.damagedLabel;
-    columnHeader.appendChild(columnHeaderSpacer);
-    columnHeader.appendChild(columnHeaderName);
-    columnHeader.appendChild(columnHeaderOwned);
-    columnHeader.appendChild(columnHeaderDamaged);
-    panel.appendChild(columnHeader);
-
     var partsList = document.createElement('div');
     partsList.className = 'owned-set-minifig-parts-list';
     panel.appendChild(partsList);
@@ -1603,8 +1593,24 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         partName.textContent = p.name + (p.colorName ? ' \\u00b7 ' + p.colorName : '');
         row.appendChild(partName);
 
+        var ownedCol = document.createElement('div');
+        ownedCol.className = 'owned-set-minifig-part-col';
+        var ownedColLabel = document.createElement('span');
+        ownedColLabel.className = 'owned-set-minifig-part-col-label';
+        ownedColLabel.textContent = texts.ownedLabel;
         var ownedStepper = buildStepper(0, p.nominal, p.owned);
+        ownedCol.appendChild(ownedColLabel);
+        ownedCol.appendChild(ownedStepper.wrap);
+
+        var damagedCol = document.createElement('div');
+        damagedCol.className = 'owned-set-minifig-part-col';
+        var damagedColLabel = document.createElement('span');
+        damagedColLabel.className = 'owned-set-minifig-part-col-label';
+        damagedColLabel.textContent = texts.damagedLabel;
         var damagedStepper = buildStepper(0, p.owned, p.damaged);
+        damagedCol.appendChild(damagedColLabel);
+        damagedCol.appendChild(damagedStepper.wrap);
+
         ownedStepper.input.addEventListener('input', function() {
           var v = parseInt(ownedStepper.input.value, 10) || 0;
           p.owned = v;
@@ -1617,8 +1623,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         damagedStepper.input.addEventListener('input', function() {
           p.damaged = parseInt(damagedStepper.input.value, 10) || 0;
         });
-        row.appendChild(ownedStepper.wrap);
-        row.appendChild(damagedStepper.wrap);
+        row.appendChild(ownedCol);
+        row.appendChild(damagedCol);
         partsList.appendChild(row);
       });
     }

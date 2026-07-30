@@ -2460,8 +2460,44 @@ footer {
   margin-top: 0;
 }
 
+/* Fixed size rather than shrink/grow-to-content — the step content varies a
+   lot (a 3-select location picker vs. a two-column minifig parts checklist),
+   and letting the box resize with it made the modal visibly jump around
+   between steps/loaded parts. Sized to sit comfortably within a 1366x766
+   viewport (.modal-overlay's own 1.5rem padding on each side already
+   accounted for), with a viewport-relative fallback for smaller screens. */
 .owned-set-wizard-box {
-  max-width: 34rem;
+  width: 58rem;
+  max-width: calc(100vw - 3rem);
+  height: 38rem;
+  max-height: calc(100vh - 3rem);
+}
+
+.owned-set-wizard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.owned-set-wizard-header h2 {
+  margin: 0;
+}
+
+/* Overrides .modal-close's absolute corner positioning — here it's a flex
+   sibling of the heading instead, sharing one row to save vertical space. */
+.owned-set-wizard-header .modal-close {
+  position: static;
+}
+
+/* Only the step content scrolls, within the box's fixed height — the header
+   row and progress label stay put above it. */
+.owned-set-wizard-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.5rem;
 }
 
 .owned-set-wizard-step .location-level {
@@ -2474,6 +2510,7 @@ footer {
 }
 
 .owned-set-wizard-progress {
+  flex-shrink: 0;
   margin: -0.5rem 0 1rem;
   font-size: 0.8rem;
   font-weight: 600;
@@ -2566,6 +2603,26 @@ footer {
   border-radius: 0.75rem;
 }
 
+/* Two constituent parts side by side before wrapping to the next line — the
+   wizard box is now wide enough for it (see .owned-set-wizard-box). Scoped
+   to the wizard only; owned_set_detail's own minifig modal keeps the
+   original single-column .owned-set-minifig-parts-list layout. */
+.owned-set-wizard-minifig-panel .owned-set-minifig-parts-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.6rem 1rem;
+}
+
+/* Each stepper gets its own small "Vorhanden"/"davon beschädigt" label
+   directly above it instead of one column-header row for the whole list —
+   a single header row can't label two side-by-side rows at once. */
+.owned-set-minifig-part-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+
 .owned-set-inventory-tile-inputs {
   display: flex;
   flex-direction: column;
@@ -2629,6 +2686,32 @@ footer {
 
 .owned-set-inventory-stepper-btn:hover {
   background: #e2e8f0;
+}
+
+/* +/- stacked to the right of the input instead of one on each side — same
+   total footprint as a row (image + name + two of these) is already
+   determined by the row's height, so trading width for a bit of extra
+   height here is the win. The input's own font-size is untouched — only
+   its box gets taller, and the browser centers single-line text within a
+   taller <input> box on its own, so no extra centering hack is needed. */
+.owned-set-inventory-stepper-stacked input {
+  width: 3rem;
+  height: 2.3rem;
+  padding: 0;
+  margin-top: 0;
+}
+
+.owned-set-inventory-stepper-arrows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.owned-set-inventory-stepper-stacked .owned-set-inventory-stepper-btn {
+  width: 1.4rem;
+  height: 1.1rem;
+  border-radius: 0.35rem;
+  font-size: 0.7rem;
 }
 
 .owned-set-inventory-summary {
