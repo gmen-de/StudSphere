@@ -1121,6 +1121,17 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         ? ['version' => 1, 'location' => 2, 'details' => 3, 'notes' => 4, 'question' => 5, 'inventory' => 6, 'overview' => 7]
         : ['location' => 1, 'details' => 2, 'notes' => 3, 'question' => 4, 'inventory' => 5, 'overview' => 6];
 
+    // Each step's content lives in .owned-set-wizard-body (scrollable), its
+    // nav buttons (+ error line) live in the always-visible
+    // .owned-set-wizard-footer instead — kept as a separate string and
+    // spliced in after the body closes below. Splitting header/content/
+    // footer like this is what actually makes the buttons land in the same
+    // place on every step; putting the nav row inside each step (as before)
+    // meant its position depended on that step's own content height, which
+    // in practice never lined up consistently between an empty question
+    // step and a full tile grid, no matter how the CSS tried to compensate.
+    $footerHtml = '<div class="owned-set-wizard-footer">';
+
     $html = '<div class="modal-overlay" id="add-owned-set-modal" style="display:none;">';
     $html .= '<div class="modal-box owned-set-wizard-box">';
     $html .= '<div class="owned-set-wizard-header">';
@@ -1137,8 +1148,11 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
             $checkedAttr = $i === 0 ? ' checked' : '';
             $html .= '<label class="checkbox-label"><input type="radio" name="owned-set-wizard-version" value="' . $v['inventory_id'] . '"' . $checkedAttr . '> ' . htmlspecialchars(t('owned_set_wizard_version_label', ['version' => (string) $v['version']])) . '</label>';
         }
-        $html .= '<div class="owned-set-wizard-nav"><button type="button" class="owned-set-wizard-next" data-next="' . $stepNames['location'] . '">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button></div>';
         $html .= '</div>';
+
+        $footerHtml .= '<div class="owned-set-wizard-footer-step" data-step="' . $stepNames['version'] . '" style="display:none;">';
+        $footerHtml .= '<div class="owned-set-wizard-nav"><button type="button" class="owned-set-wizard-next" data-next="' . $stepNames['location'] . '">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button></div>';
+        $footerHtml .= '</div>';
     }
 
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['location'] . '" data-step="' . $stepNames['location'] . '"' . ($hasVersionStep ? ' style="display:none;"' : '') . '>';
@@ -1162,10 +1176,13 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         $html .= '<span class="location-hint" id="owned-set-wizard-location-' . $level . '-hint"></span>';
         $html .= '</div>';
     }
-    $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step1-error"></p>';
-    $backBtn = $hasVersionStep ? '<button type="button" class="owned-set-wizard-back" data-back="' . $stepNames['version'] . '">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button>' : '';
-    $html .= '<div class="owned-set-wizard-nav">' . $backBtn . '<button type="button" class="owned-set-wizard-next" data-next="' . $stepNames['details'] . '">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button></div>';
     $html .= '</div>';
+
+    $footerHtml .= '<div class="owned-set-wizard-footer-step" data-step="' . $stepNames['location'] . '" style="display:none;">';
+    $footerHtml .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step1-error"></p>';
+    $backBtn = $hasVersionStep ? '<button type="button" class="owned-set-wizard-back" data-back="' . $stepNames['version'] . '">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button>' : '';
+    $footerHtml .= '<div class="owned-set-wizard-nav">' . $backBtn . '<button type="button" class="owned-set-wizard-next" data-next="' . $stepNames['details'] . '">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button></div>';
+    $footerHtml .= '</div>';
 
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['details'] . '" data-step="' . $stepNames['details'] . '" style="display:none;">';
     $html .= '<h3>' . htmlspecialchars(t('owned_set_wizard_step2_heading')) . '</h3>';
@@ -1183,43 +1200,60 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         $html .= '<textarea class="owned-set-wizard-subnote" id="owned-set-wizard-' . $notesId . '" rows="2" placeholder="' . htmlspecialchars(t($notesLabelKey)) . '" style="display:none;"></textarea>';
         $html .= '</div>';
     }
-
-    $html .= '<div class="owned-set-wizard-nav"><button type="button" class="owned-set-wizard-back" data-back="' . $stepNames['location'] . '">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" class="owned-set-wizard-next" data-next="' . $stepNames['notes'] . '">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button></div>';
     $html .= '</div>';
+
+    $footerHtml .= '<div class="owned-set-wizard-footer-step" data-step="' . $stepNames['details'] . '" style="display:none;">';
+    $footerHtml .= '<div class="owned-set-wizard-nav"><button type="button" class="owned-set-wizard-back" data-back="' . $stepNames['location'] . '">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" class="owned-set-wizard-next" data-next="' . $stepNames['notes'] . '">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button></div>';
+    $footerHtml .= '</div>';
 
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['notes'] . '" data-step="' . $stepNames['notes'] . '" style="display:none;">';
     $html .= '<h3>' . htmlspecialchars(t('owned_set_wizard_step3_heading')) . '</h3>';
     $html .= '<label>' . htmlspecialchars(t('owned_set_notes_label')) . '<textarea id="owned-set-wizard-notes" rows="4"></textarea></label>';
-    $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step3-error"></p>';
-    $html .= '<div class="owned-set-wizard-nav"><button type="button" class="owned-set-wizard-back" data-back="' . $stepNames['details'] . '">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" class="owned-set-wizard-next" data-next="' . $stepNames['question'] . '">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button></div>';
     $html .= '</div>';
+
+    $footerHtml .= '<div class="owned-set-wizard-footer-step" data-step="' . $stepNames['notes'] . '" style="display:none;">';
+    $footerHtml .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step3-error"></p>';
+    $footerHtml .= '<div class="owned-set-wizard-nav"><button type="button" class="owned-set-wizard-back" data-back="' . $stepNames['details'] . '">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" class="owned-set-wizard-next" data-next="' . $stepNames['question'] . '">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button></div>';
+    $footerHtml .= '</div>';
 
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['question'] . '" data-step="' . $stepNames['question'] . '" style="display:none;">';
     $html .= '<h3>' . htmlspecialchars(t('owned_set_wizard_step4_heading')) . '</h3>';
     $html .= '<p>' . htmlspecialchars(t('owned_set_wizard_inventory_question')) . '</p>';
-    $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step4-error"></p>';
-    $html .= '<div class="owned-set-wizard-nav"><button type="button" class="owned-set-wizard-back" data-back="' . $stepNames['notes'] . '">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" id="owned-set-wizard-inventory-no">' . htmlspecialchars(t('owned_set_wizard_no')) . '</button><button type="button" id="owned-set-wizard-inventory-yes">' . htmlspecialchars(t('owned_set_wizard_yes')) . '</button></div>';
     $html .= '</div>';
+
+    $footerHtml .= '<div class="owned-set-wizard-footer-step" data-step="' . $stepNames['question'] . '" style="display:none;">';
+    $footerHtml .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step4-error"></p>';
+    $footerHtml .= '<div class="owned-set-wizard-nav"><button type="button" class="owned-set-wizard-back" data-back="' . $stepNames['notes'] . '">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" id="owned-set-wizard-inventory-no">' . htmlspecialchars(t('owned_set_wizard_no')) . '</button><button type="button" id="owned-set-wizard-inventory-yes">' . htmlspecialchars(t('owned_set_wizard_yes')) . '</button></div>';
+    $footerHtml .= '</div>';
 
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['inventory'] . '" data-step="' . $stepNames['inventory'] . '" style="display:none;">';
     $html .= '<div class="owned-set-inventory-tiles" id="owned-set-wizard-parts-list"></div>';
-    $html .= '<div class="owned-set-inventory-nav">';
-    $html .= '<button type="button" id="owned-set-wizard-inventory-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button>';
-    $html .= '<button type="button" id="owned-set-wizard-inventory-next">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button>';
     $html .= '</div>';
-    $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step5-error"></p>';
-    $html .= '</div>';
+
+    $footerHtml .= '<div class="owned-set-wizard-footer-step" data-step="' . $stepNames['inventory'] . '" style="display:none;">';
+    $footerHtml .= '<p class="owned-set-wizard-error" id="owned-set-wizard-step5-error"></p>';
+    $footerHtml .= '<div class="owned-set-inventory-nav">';
+    $footerHtml .= '<button type="button" id="owned-set-wizard-inventory-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button>';
+    $footerHtml .= '<button type="button" id="owned-set-wizard-inventory-next">' . htmlspecialchars(t('owned_set_wizard_next')) . '</button>';
+    $footerHtml .= '</div>';
+    $footerHtml .= '</div>';
 
     $html .= '<div class="owned-set-wizard-step owned-set-wizard-overview-step" id="owned-set-wizard-step-' . $stepNames['overview'] . '" data-step="' . $stepNames['overview'] . '" style="display:none;">';
     $html .= '<h4>' . htmlspecialchars(t('owned_set_wizard_overview_details_heading')) . '</h4>';
     $html .= '<table class="set-detail-table" id="owned-set-wizard-overview-recap"></table>';
     $html .= '<h4>' . htmlspecialchars(t('owned_set_wizard_overview_inventory_heading')) . '</h4>';
     $html .= '<table class="set-detail-table" id="owned-set-wizard-overview-summary"></table>';
-    $html .= '<p class="owned-set-wizard-error" id="owned-set-wizard-overview-error"></p>';
-    $html .= '<div class="owned-set-wizard-nav"><button type="button" id="owned-set-wizard-overview-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" id="owned-set-wizard-save">' . htmlspecialchars(t('owned_set_save_button')) . '</button></div>';
     $html .= '</div>';
 
+    $footerHtml .= '<div class="owned-set-wizard-footer-step" data-step="' . $stepNames['overview'] . '" style="display:none;">';
+    $footerHtml .= '<p class="owned-set-wizard-error" id="owned-set-wizard-overview-error"></p>';
+    $footerHtml .= '<div class="owned-set-wizard-nav"><button type="button" id="owned-set-wizard-overview-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button><button type="button" id="owned-set-wizard-save">' . htmlspecialchars(t('owned_set_save_button')) . '</button></div>';
+    $footerHtml .= '</div>';
+
+    $footerHtml .= '</div>'; // .owned-set-wizard-footer
+
     $html .= '</div>'; // .owned-set-wizard-body
+    $html .= $footerHtml;
     $html .= '</div></div>';
 
     $labelsJson = json_encode([
@@ -1282,6 +1316,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   }
 
   var steps = Array.prototype.slice.call(modal.querySelectorAll('.owned-set-wizard-step'));
+  var footerSteps = Array.prototype.slice.call(modal.querySelectorAll('.owned-set-wizard-footer-step'));
   var totalSteps = QUESTION_STEP;
   var createdOwnedSetId = null;
   // Nothing is persisted until the final "Speichern" click (see the
@@ -1356,6 +1391,9 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   function showStep(n) {
     steps.forEach(function(step) {
       step.style.display = (parseInt(step.dataset.step, 10) === n) ? 'flex' : 'none';
+    });
+    footerSteps.forEach(function(footerStep) {
+      footerStep.style.display = (parseInt(footerStep.dataset.step, 10) === n) ? 'flex' : 'none';
     });
     progress.textContent = texts.stepLabel.replace('{current}', n).replace('{total}', totalSteps);
     if (n !== INVENTORY_STEP) {

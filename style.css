@@ -2497,38 +2497,36 @@ footer {
 }
 
 /* Only the step content scrolls, within the box's fixed height — the header
-   row and progress label stay put above it. Also a flex container itself
-   now (column, same direction as .modal-box) so the one visible step can
-   be a flex item with flex:1 below — that's what actually gives it a
-   reliable, definite height to fill. A plain height:100% on the step was
-   tried first and silently failed to resolve on some steps (the nav row's
-   margin-top:auto below had nothing to push against, so it just sat right
-   after the content instead of at the bottom) — percentage heights through
-   a flex-item chain are notoriously unreliable; flex-grow doesn't have
-   that problem, since it's not a percentage calculation at all. */
+   row and progress label stay put above it. */
 .owned-set-wizard-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding-right: 0.5rem;
-  display: flex;
-  flex-direction: column;
 }
 
-/* The active step is toggled to display:flex (not :block) by showStep() in
-   JS specifically so this takes effect as a flex item of
-   .owned-set-wizard-body above — fills the remaining height, so the
-   trailing nav row's margin-top:auto has something to actually push
-   against and lands at the true bottom of the modal. */
 .owned-set-wizard-step {
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
 }
 
-.owned-set-wizard-nav,
-.owned-set-inventory-nav {
-  margin-top: auto;
+/* Two earlier attempts to pin the nav buttons to the bottom (height:100% on
+   the step, then flex:1 through a nested flex-item chain) both turned out
+   to depend on the step's own content height in practice, so the buttons
+   ended up at a different height on every step instead of a consistent
+   one. Restructured instead: the nav row (+ its error line) now lives
+   outside .owned-set-wizard-body entirely, in its own always-visible
+   .owned-set-wizard-footer — a real header/content/footer split, not a
+   layout trick, so "always at the bottom" is just where it sits in the
+   DOM, not something that has to be computed. */
+.owned-set-wizard-footer {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.3);
+  padding-top: 1rem;
+  margin-top: 1rem;
+}
+
+.owned-set-wizard-footer-step {
+  flex-direction: column;
 }
 
 /* Compact sub-headings for the overview step's two tables — the browser
@@ -2613,7 +2611,6 @@ footer {
   align-items: center;
   justify-content: flex-end;
   gap: 0.6rem;
-  margin-top: 1rem;
 }
 
 .owned-set-wizard-nav button {
