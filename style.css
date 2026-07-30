@@ -2945,6 +2945,26 @@ footer {
   justify-content: center;
 }
 
+/* Icon replacing the "Vorhanden"/"Defekt" stepper text label (wizard only —
+   see getPartStatusIcon() in src/icons.php) — overrides the muted gray text
+   color inherited from .owned-set-inventory-tile-inputs label /
+   .owned-set-minifig-part-col-label with a color that itself signals status,
+   since there's no label text doing that anymore. */
+.owned-set-stepper-icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  display: block;
+  margin: 0 auto;
+}
+
+.owned-set-stepper-icon-owned {
+  color: #16a34a;
+}
+
+.owned-set-stepper-icon-damaged {
+  color: #dc2626;
+}
+
 .owned-set-minifig-nominal-line {
   margin: 0.2rem 0 0;
   color: #64748b;

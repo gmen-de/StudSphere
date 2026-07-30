@@ -20,6 +20,23 @@ function getNavIcon(string $key): string
     return $icons[$key] ?? '';
 }
 
+/**
+ * Compact brick+checkmark / brick+cross glyphs replacing the "Vorhanden"/
+ * "Defekt" stepper text labels in the add-to-collection wizard (space
+ * saving — see renderAddOwnedSetWizardModal() in src/owned_sets.php) —
+ * same brick shape (rect + two studs) as getNavIcon()'s 'bricks' icon, so
+ * it still reads as "this is about a brick" even without the label text.
+ */
+function getPartStatusIcon(string $status): string
+{
+    $icons = [
+        'owned' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="14" height="7" rx="1.3"/><circle cx="6" cy="7" r="1.3" fill="currentColor" stroke="none"/><circle cx="11" cy="7" r="1.3" fill="currentColor" stroke="none"/><path d="M15.5 16.5l3 3L23 12" stroke-width="2.3"/></svg>',
+        'damaged' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="14" height="7" rx="1.3"/><circle cx="6" cy="7" r="1.3" fill="currentColor" stroke="none"/><circle cx="11" cy="7" r="1.3" fill="currentColor" stroke="none"/><path d="M16.5 12.5l6 6M22.5 12.5l-6 6" stroke-width="2.3"/></svg>',
+    ];
+
+    return $icons[$status] ?? '';
+}
+
 function getFlagIcon(string $locale): string
 {
     $flags = [

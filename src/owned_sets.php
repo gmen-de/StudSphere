@@ -1108,6 +1108,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         'noChildren' => t('add_stock_no_children'),
         'ownedLabel' => t('owned_set_inventory_owned_label'),
         'damagedLabel' => t('owned_set_wizard_damaged_label'),
+        'ownedIcon' => getPartStatusIcon('owned'),
+        'damagedIcon' => getPartStatusIcon('damaged'),
         'inventorySummary' => t('owned_set_inventory_summary'),
         'partProgress' => t('owned_set_inventory_part_progress'),
         'categoryParts' => t('owned_set_wizard_category_parts'),
@@ -1601,8 +1603,9 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         var ownedCol = document.createElement('div');
         ownedCol.className = 'owned-set-minifig-part-col';
         var ownedColLabel = document.createElement('span');
-        ownedColLabel.className = 'owned-set-minifig-part-col-label';
-        ownedColLabel.textContent = texts.ownedLabel;
+        ownedColLabel.className = 'owned-set-minifig-part-col-label owned-set-stepper-icon owned-set-stepper-icon-owned';
+        ownedColLabel.innerHTML = texts.ownedIcon;
+        ownedColLabel.title = texts.ownedLabel;
         var ownedStepper = buildStepper(0, p.nominal, p.owned);
         ownedCol.appendChild(ownedColLabel);
         ownedCol.appendChild(ownedStepper.wrap);
@@ -1610,8 +1613,9 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         var damagedCol = document.createElement('div');
         damagedCol.className = 'owned-set-minifig-part-col';
         var damagedColLabel = document.createElement('span');
-        damagedColLabel.className = 'owned-set-minifig-part-col-label';
-        damagedColLabel.textContent = texts.damagedLabel;
+        damagedColLabel.className = 'owned-set-minifig-part-col-label owned-set-stepper-icon owned-set-stepper-icon-damaged';
+        damagedColLabel.innerHTML = texts.damagedIcon;
+        damagedColLabel.title = texts.damagedLabel;
         var damagedStepper = buildStepper(0, p.owned, p.damaged);
         damagedCol.appendChild(damagedColLabel);
         damagedCol.appendChild(damagedStepper.wrap);
@@ -1702,14 +1706,18 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     inputsWrap.className = 'owned-set-inventory-tile-inputs';
 
     var ownedLabel = document.createElement('label');
-    ownedLabel.appendChild(document.createTextNode(texts.ownedLabel));
+    ownedLabel.className = 'owned-set-stepper-icon owned-set-stepper-icon-owned';
+    ownedLabel.setAttribute('aria-label', texts.ownedLabel);
+    ownedLabel.innerHTML = texts.ownedIcon;
     var ownedStepper = buildStepper(0, item.nominal_quantity, s.owned);
     var ownedInput = ownedStepper.input;
     ownedLabel.appendChild(ownedStepper.wrap);
     inputsWrap.appendChild(ownedLabel);
 
     var damagedLabel = document.createElement('label');
-    damagedLabel.appendChild(document.createTextNode(texts.damagedLabel));
+    damagedLabel.className = 'owned-set-stepper-icon owned-set-stepper-icon-damaged';
+    damagedLabel.setAttribute('aria-label', texts.damagedLabel);
+    damagedLabel.innerHTML = texts.damagedIcon;
     var damagedStepper = buildStepper(0, s.owned, s.damaged);
     var damagedInput = damagedStepper.input;
     damagedLabel.appendChild(damagedStepper.wrap);
