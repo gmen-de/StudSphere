@@ -1844,17 +1844,14 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         var row = document.createElement('div');
         row.className = 'owned-set-minifig-part-row';
 
+        var partNameText = p.name + (p.colorName ? ' \\u00b7 ' + p.colorName : '');
         var partImg = document.createElement('span');
         partImg.className = 'part-card-image';
+        partImg.title = partNameText;
         if (p.thumbnail) {
-          partImg.innerHTML = '<img src="' + p.thumbnail + '" alt="">';
+          partImg.innerHTML = '<img src="' + p.thumbnail + '" alt="' + partNameText.replace(/"/g, '&quot;') + '">';
         }
         row.appendChild(partImg);
-
-        var partName = document.createElement('span');
-        partName.className = 'owned-set-minifig-part-name';
-        partName.textContent = p.name + (p.colorName ? ' \\u00b7 ' + p.colorName : '');
-        row.appendChild(partName);
 
         var ownedStepper = buildStepper(0, p.nominal, p.owned);
         var ownedIcon = document.createElement('span');
