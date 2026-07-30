@@ -2687,7 +2687,7 @@ footer {
   flex-direction: column;
   gap: 0.35rem;
   width: 100%;
-  margin-top: 0.4rem;
+  margin-top: auto;
 }
 
 /* "Beschädigt/Fehlend" tab tiles — same look as the editable tiles, minus

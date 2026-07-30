@@ -1658,6 +1658,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   var state = { parts: {}, spares: {}, stickers: {}, minifigs: {} };
   var pageIndex = 0;
   var invList = document.getElementById('owned-set-wizard-parts-list');
+  var wizardBody = modal.querySelector('.owned-set-wizard-body');
   var invProgress = document.getElementById('owned-set-wizard-inventory-progress');
   var invBackBtn = document.getElementById('owned-set-wizard-inventory-back');
   var invNextBtn = document.getElementById('owned-set-wizard-inventory-next');
@@ -2002,6 +2003,16 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
 
   function renderPage() {
     invList.innerHTML = '';
+    // Measured directly rather than left to CSS percentage-height (see the
+    // .owned-set-wizard-footer restructuring's doc comment for why that
+    // doesn't reliably propagate through nested containers) — the tiles
+    // grid is the step's only content, so it can just take all of
+    // .owned-set-wizard-body's available height. Grid's own default
+    // align-items:stretch then fills each tile to match, and each tile's
+    // own margin-top:auto (on .owned-set-inventory-tile-inputs) pushes its
+    // steppers+summary to the tile's bottom — same size every page,
+    // regardless of name length or how many tiles share the row.
+    invList.style.height = wizardBody.clientHeight + 'px';
     if (pages.length === 0) {
       invProgress.textContent = '';
       invBackBtn.disabled = true;
