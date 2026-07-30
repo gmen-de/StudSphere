@@ -1013,7 +1013,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     $html .= '<h2>' . htmlspecialchars(t('owned_set_wizard_title')) . '</h2>';
     $html .= '<button type="button" class="modal-close" id="add-owned-set-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
     $html .= '</div>';
-    $html .= '<p class="owned-set-wizard-progress" id="owned-set-wizard-progress"></p>';
+    $html .= '<p class="owned-set-wizard-progress"><span id="owned-set-wizard-progress"></span><span class="owned-set-wizard-progress-sub" id="owned-set-wizard-inventory-progress"></span></p>';
     $html .= '<div class="owned-set-wizard-body">';
 
     if ($hasVersionStep) {
@@ -1088,7 +1088,6 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     $html .= '</div>';
 
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['inventory'] . '" data-step="' . $stepNames['inventory'] . '" style="display:none;">';
-    $html .= '<p class="owned-set-inventory-progress" id="owned-set-wizard-inventory-progress"></p>';
     $html .= '<div class="owned-set-inventory-tiles" id="owned-set-wizard-parts-list"></div>';
     $html .= '<div class="owned-set-inventory-nav">';
     $html .= '<button type="button" id="owned-set-wizard-inventory-back">' . htmlspecialchars(t('owned_set_wizard_back')) . '</button>';
@@ -1205,6 +1204,12 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       step.style.display = (parseInt(step.dataset.step, 10) === n) ? 'block' : 'none';
     });
     progress.textContent = texts.stepLabel.replace('{current}', n).replace('{total}', totalSteps);
+    if (n !== INVENTORY_STEP) {
+      // Only the inventory step has a sub-progress ("» Teil 8 / 12") — leaving
+      // it must clear that span too, or it'd show stale leftovers from the
+      // last time the inventory step was open on every other step's line.
+      invProgress.textContent = '';
+    }
   }
 
   function resetWizard() {
@@ -1745,9 +1750,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       return;
     }
     var page = pages[pageIndex];
-    invProgress.textContent = page.categoryTotal > 1
-      ? page.label + ' \\u2014 ' + texts.partProgress.replace('{current}', page.categoryIndex).replace('{total}', page.categoryTotal)
-      : page.label;
+    invProgress.textContent = ' \\u00bb ' + texts.partProgress.replace('{current}', page.categoryIndex).replace('{total}', page.categoryTotal);
     invBackBtn.disabled = pageIndex === 0;
     invNextBtn.disabled = pageIndex >= pages.length - 1;
 
