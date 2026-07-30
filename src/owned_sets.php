@@ -1108,7 +1108,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         'selectPlaceholder' => t('add_stock_select_placeholder'),
         'noChildren' => t('add_stock_no_children'),
         'ownedLabel' => t('owned_set_inventory_owned_label'),
-        'damagedLabel' => t('owned_set_inventory_damaged_label'),
+        'damagedLabel' => t('owned_set_wizard_damaged_label'),
         'inventorySummary' => t('owned_set_inventory_summary'),
         'partProgress' => t('owned_set_inventory_part_progress'),
         'categoryParts' => t('owned_set_wizard_category_parts'),

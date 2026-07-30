@@ -374,6 +374,7 @@ return [
     'owned_set_open_confirm' => 'Der Zustand kann nur einmal von "Neu" auf "Gebraucht" geändert werden — das lässt sich danach nicht mehr rückgängig machen. Set jetzt öffnen und mit der Inventur fortfahren?',
     'owned_set_inventory_owned_label' => 'Vorhanden',
     'owned_set_inventory_damaged_label' => 'davon beschädigt',
+    'owned_set_wizard_damaged_label' => 'Defekt',
     'owned_set_inventory_summary' => '{intact} intakt · {damaged} beschädigt · {missing} fehlen',
     'owned_set_inventory_part_progress' => 'Teil {current} von {total}',
     'owned_set_wizard_version_heading' => 'Welche Version hast du?',

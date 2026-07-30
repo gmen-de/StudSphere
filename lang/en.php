@@ -374,6 +374,7 @@ return [
     'owned_set_open_confirm' => 'The condition can only be changed once, from "New" to "Used" — this cannot be undone afterwards. Open the set now and continue with the inventory?',
     'owned_set_inventory_owned_label' => 'Owned',
     'owned_set_inventory_damaged_label' => 'of which damaged',
+    'owned_set_wizard_damaged_label' => 'Defective',
     'owned_set_inventory_summary' => '{intact} intact · {damaged} damaged · {missing} missing',
     'owned_set_inventory_part_progress' => 'Part {current} of {total}',
     'owned_set_wizard_version_heading' => 'Which version do you have?',
