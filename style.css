@@ -2520,7 +2520,7 @@ footer {
    DOM, not something that has to be computed. */
 .owned-set-wizard-footer {
   flex-shrink: 0;
-  padding: 1rem 0;
+  padding: 0.5rem 0;
 }
 
 .owned-set-wizard-footer-step {
@@ -2600,8 +2600,8 @@ footer {
 .owned-set-wizard-error {
   font-size: 0.85rem;
   color: #dc2626;
-  margin: 0 0 0.5rem;
-  min-height: 1.1em;
+  margin: 0 0 0.25rem;
+  min-height: 0.9em;
 }
 
 .owned-set-wizard-nav {
@@ -2613,7 +2613,7 @@ footer {
 
 .owned-set-wizard-nav button {
   width: auto;
-  padding: 0.6rem 1.1rem;
+  padding: 0.45rem 1.1rem;
 }
 
 .owned-set-wizard-nav .owned-set-wizard-back {
@@ -2784,12 +2784,11 @@ footer {
   align-items: center;
   justify-content: flex-end;
   gap: 0.6rem;
-  margin-bottom: 0.5rem;
 }
 
 .owned-set-inventory-nav button {
   width: auto;
-  padding: 0.6rem 1.1rem;
+  padding: 0.45rem 1.1rem;
 }
 
 /* Same fixed width on both — "Weiter" and "Speichern" sit in the same nav
