@@ -1461,6 +1461,192 @@ SCRIPT;
 }
 
 /**
+ * "Bricklink XML" trigger + fallback modal — the plain download link alone
+ * isn't enough once a whole-missing minifig needs a BrickLink id
+ * (getOrFetchBricklinkMinifigId() in this file) that the automatic
+ * moykubik.ru lookup couldn't resolve. Clicking the button first checks
+ * (action=owned_set_bricklink_xml_check) instead of navigating straight to
+ * the download: if nothing needs manual input, it downloads immediately;
+ * otherwise this modal opens, one row per minifig still missing an id,
+ * each with a Rebrickable link (a human has to find the BrickLink link on
+ * that page themselves — see the session's own research on why neither
+ * Rebrickable's nor BrickLink's API exposes this mapping) and a free-text
+ * input that accepts either a bare id or a pasted catalog URL
+ * (parseBricklinkMinifigIdInput() extracts the id either way). Saving
+ * caches whatever was entered (action=save_minifig_bricklink_id) so this
+ * never asks about the same minifig twice; "ohne diese Angaben
+ * herunterladen" downloads anyway, just skipping whatever's still unknown
+ * (same best-effort convention as the color-mapping gaps in
+ * buildOwnedSetBricklinkXml()).
+ */
+function renderOwnedSetBricklinkModal(array $ownedSet): string
+{
+    $html = '<div class="modal-overlay" id="owned-set-bricklink-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<button type="button" class="modal-close" id="owned-set-bricklink-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<h2>' . htmlspecialchars(t('owned_set_bricklink_manual_heading')) . '</h2>';
+    $html .= '<p class="hint">' . htmlspecialchars(t('owned_set_bricklink_manual_intro')) . '</p>';
+    $html .= '<form id="owned-set-bricklink-form">';
+    $html .= '<div id="owned-set-bricklink-list"></div>';
+    $html .= '<p class="owned-set-wizard-error" id="owned-set-bricklink-error"></p>';
+    $html .= '<div class="owned-set-bricklink-modal-actions">';
+    $html .= '<button type="button" id="owned-set-bricklink-skip">' . htmlspecialchars(t('owned_set_bricklink_manual_skip_button')) . '</button>';
+    $html .= '<button type="submit">' . htmlspecialchars(t('owned_set_bricklink_manual_save_button')) . '</button>';
+    $html .= '</div>';
+    $html .= '</form>';
+    $html .= '</div></div>';
+
+    $ownedSetId = (int) $ownedSet['id'];
+    $labelsJson = json_encode([
+        'errorRetry' => t('import_error_retry'),
+        'rebrickableLinkLabel' => t('owned_set_bricklink_manual_rebrickable_link'),
+        'inputPlaceholder' => t('owned_set_bricklink_manual_input_placeholder'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $labelsJson;
+  var ownedSetId = $ownedSetId;
+  var openBtn = document.getElementById('owned-set-bricklink-open');
+  var modal = document.getElementById('owned-set-bricklink-modal');
+  var closeBtn = document.getElementById('owned-set-bricklink-modal-close');
+  var listEl = document.getElementById('owned-set-bricklink-list');
+  var form = document.getElementById('owned-set-bricklink-form');
+  var errorEl = document.getElementById('owned-set-bricklink-error');
+  var skipBtn = document.getElementById('owned-set-bricklink-skip');
+  if (!openBtn || !modal || !closeBtn || !listEl || !form || !errorEl || !skipBtn) {
+    return;
+  }
+
+  function openModal() {
+    modal.style.display = 'flex';
+  }
+  function closeModal() {
+    modal.style.display = 'none';
+  }
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.style.display !== 'none') {
+      closeModal();
+    }
+  });
+
+  function downloadXml() {
+    window.location.href = '?action=owned_set_bricklink_xml&owned_set_id=' + ownedSetId;
+  }
+
+  function renderManualList(items) {
+    listEl.innerHTML = '';
+    items.forEach(function(item) {
+      var row = document.createElement('div');
+      row.className = 'owned-set-bricklink-manual-row';
+
+      var img = document.createElement('span');
+      img.className = 'part-card-image';
+      if (item.thumbnail) {
+        img.innerHTML = '<img src="' + item.thumbnail + '" alt="">';
+      }
+      row.appendChild(img);
+
+      var info = document.createElement('div');
+      info.className = 'owned-set-bricklink-manual-info';
+      var name = document.createElement('p');
+      name.textContent = item.name;
+      info.appendChild(name);
+      var link = document.createElement('a');
+      link.href = 'https://rebrickable.com/minifigs/' + encodeURIComponent(item.fig_num) + '/';
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = texts.rebrickableLinkLabel;
+      info.appendChild(link);
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = texts.inputPlaceholder;
+      input.dataset.minifigId = item.minifig_id;
+      info.appendChild(input);
+      row.appendChild(info);
+
+      listEl.appendChild(row);
+    });
+  }
+
+  function checkAndProceed() {
+    var params = new URLSearchParams();
+    params.set('action', 'owned_set_bricklink_xml_check');
+    params.set('owned_set_id', String(ownedSetId));
+    fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (!res.success) {
+          throw new Error(res.message || texts.errorRetry);
+        }
+        if (res.ready) {
+          downloadXml();
+          return;
+        }
+        renderManualList(res.needsManualId);
+        errorEl.textContent = '';
+        openModal();
+      })
+      .catch(function() {
+        // Best-effort check — if it fails outright, just try the actual
+        // download; that endpoint degrades gracefully on its own anyway.
+        downloadXml();
+      });
+  }
+
+  openBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    checkAndProceed();
+  });
+
+  skipBtn.addEventListener('click', function() {
+    closeModal();
+    downloadXml();
+  });
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    errorEl.textContent = '';
+    var inputs = listEl.querySelectorAll('input[data-minifig-id]');
+    var saves = [];
+    inputs.forEach(function(input) {
+      var value = input.value.trim();
+      if (!value) {
+        return;
+      }
+      var formData = new FormData();
+      formData.set('action', 'save_minifig_bricklink_id');
+      formData.set('minifig_id', input.dataset.minifigId);
+      formData.set('bricklink_id_input', value);
+      saves.push(fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' }).then(function(r) { return r.json(); }));
+    });
+    Promise.all(saves).then(function(results) {
+      var failed = results.find(function(r) { return !r.success; });
+      if (failed) {
+        errorEl.textContent = failed.message || texts.errorRetry;
+        return;
+      }
+      closeModal();
+      downloadXml();
+    }).catch(function() {
+      errorEl.textContent = texts.errorRetry;
+    });
+  });
+})();
+</script>
+SCRIPT;
+
+    return $html;
+}
+
+/**
  * @return array<int, array{id:int, caption:?string, original_filename:string, stored_path:string, file_size:int, uploaded_at:string}>
  */
 function getOwnedSetPhotos(PDO $pdo, int $ownedSetId): array
@@ -2559,19 +2745,74 @@ function renderOwnedSetMinifigInventoryGrid(PDO $pdo, array $ownedSet, array $mi
 }
 
 /**
+ * Accepts either a bare BrickLink item id (e.g. "trn045") or a full
+ * catalog URL copy-pasted from BrickLink/Rebrickable (e.g.
+ * ".../catalogitem.page?M=trn045") and extracts just the id — the manual-
+ * entry fallback modal tells the user to paste whatever they found rather
+ * than asking them to identify the bare id themselves. Returns null for
+ * anything that's neither (empty, or doesn't look like either shape).
+ */
+function parseBricklinkMinifigIdInput(string $input): ?string
+{
+    $input = trim($input);
+    if ($input === '') {
+        return null;
+    }
+    if (preg_match('/[?&]M=([A-Za-z0-9]+)/', $input, $matches)) {
+        return $matches[1];
+    }
+    if (preg_match('/^[A-Za-z0-9]+$/', $input)) {
+        return $input;
+    }
+    return null;
+}
+
+/**
+ * minifigs.bricklink_id, populated at most once per minifig — checks the
+ * stored column first and only ever calls out to
+ * fetchBricklinkMinifigIdFromMoykubik() (src/rebrickable.php) when it's
+ * still NULL, caching whatever comes back (including a manually-entered
+ * id, via action=save_minifig_bricklink_id) so no minifig is ever looked
+ * up more than once across the lifetime of this install.
+ */
+function getOrFetchBricklinkMinifigId(PDO $pdo, int $minifigId, string $figNum): ?string
+{
+    $stmt = $pdo->prepare('SELECT bricklink_id FROM minifigs WHERE id = ?');
+    $stmt->execute([$minifigId]);
+    $existing = $stmt->fetchColumn();
+    if (is_string($existing) && $existing !== '') {
+        return $existing;
+    }
+
+    $found = fetchBricklinkMinifigIdFromMoykubik($figNum);
+    if ($found !== null) {
+        $pdo->prepare('UPDATE minifigs SET bricklink_id = ? WHERE id = ?')->execute([$found, $minifigId]);
+    }
+    return $found;
+}
+
+/**
  * BrickLink Wanted-List XML for exactly the rows the "Beschädigt/Fehlend"
  * tab currently shows — same category filtering via
  * damaged_missing_show_spares/_stickers (see
  * renderOwnedSetDamagedMissingSection()'s doc comment). Missing + damaged
  * quantity are combined into one wanted count per line, since both need a
- * replacement part either way. Minifigs are left out entirely: BrickLink
- * identifies minifigs through its own id scheme, not one this app maps
- * from Rebrickable anywhere, so there's no reliable <ITEMID> to fill in
- * for them. A part/sticker line with no bricklink_color_id mapping (see
- * syncExternalColorIds()) is skipped too — listed in a trailing XML
- * comment instead of just silently vanishing from the export.
+ * replacement part either way. A part/sticker line with no
+ * bricklink_color_id mapping (see syncExternalColorIds()) is skipped —
+ * listed in a trailing XML comment instead of just silently vanishing.
  *
- * @return array{xml: string, skipped: array<int, string>}
+ * A minifig that's entirely missing (not just some of its own parts) gets
+ * its own ITEMTYPE M line via getOrFetchBricklinkMinifigId() — a minifig
+ * with only some damaged/missing constituent parts (present, but broken)
+ * still only contributes those parts as ITEMTYPE P lines, same as before
+ * (see renderOwnedSetDamagedMissingSection()'s doc comment for why that
+ * split lines up cleanly with the existing bottleneck/present/damaged
+ * model). If a whole-minifig lookup fails, that minifig is reported back
+ * via 'needsManualId' instead of silently being left out — the caller
+ * (action=owned_set_bricklink_xml) uses that to prompt for a manually
+ * entered id rather than serving an incomplete file.
+ *
+ * @return array{xml: string, skipped: array<int, string>, needsManualId: array<int, array{minifig_id:int, fig_num:string, name:string, thumbnail:?string}>}
  */
 function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
 {
@@ -2620,12 +2861,32 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
         }
     }
 
+    $needsManualId = [];
+    foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSet) as $fig) {
+        $figMissing = $fig['nominal_quantity'] - $fig['actual_quantity'];
+        if ($figMissing <= 0) {
+            continue;
+        }
+        $bricklinkId = getOrFetchBricklinkMinifigId($pdo, $fig['minifig_id'], $fig['fig_num']);
+        if ($bricklinkId === null) {
+            $needsManualId[] = [
+                'minifig_id' => $fig['minifig_id'],
+                'fig_num' => $fig['fig_num'],
+                'name' => $fig['name'],
+                'thumbnail' => $fig['thumbnail'],
+            ];
+            continue;
+        }
+        $lines[] = '  <ITEM><ITEMTYPE>M</ITEMTYPE><ITEMID>' . htmlspecialchars($bricklinkId, ENT_XML1)
+            . '</ITEMID><MINQTY>' . $figMissing . '</MINQTY><CONDITION>N</CONDITION></ITEM>';
+    }
+
     $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<INVENTORY>' . "\n" . implode("\n", $lines) . "\n" . '</INVENTORY>';
     if (!empty($skipped)) {
         $xml .= "\n" . '<!-- Ohne BrickLink-Farbzuordnung ausgelassen: ' . htmlspecialchars(implode(', ', $skipped), ENT_XML1) . ' -->';
     }
 
-    return ['xml' => $xml, 'skipped' => $skipped];
+    return ['xml' => $xml, 'skipped' => $skipped, 'needsManualId' => $needsManualId];
 }
 
 /**
@@ -2680,23 +2941,43 @@ function renderOwnedSetDamagedMissingSection(PDO $pdo, array $ownedSet): string
         if ($fig['damaged_quantity'] <= 0 && $figMissing <= 0) {
             continue;
         }
-        // A minifig showing any damage/missing here means at least one of
-        // its own constituent parts does — break it down to that part
-        // level instead of one aggregate "Minifigur X" row, since "1
-        // beschädigt" alone doesn't say whether that's a missing head or a
-        // damaged hip piece.
-        foreach (getOwnedSetMinifigPartsWithStatus($pdo, $ownedSet, $fig['minifig_id'], $fig['fig_num'], $fig['nominal_quantity'], getLocale()) as $part) {
-            $partMissing = $part['nominal_quantity'] - $part['actual_quantity'];
-            if ($part['damaged_quantity'] <= 0 && $partMissing <= 0) {
-                continue;
-            }
+
+        // A whole copy simply not being there ("present" via
+        // getOwnedSetMinifigsWithStatus()'s bottleneck, which is generous —
+        // see ownedSetMinifigBottleneckStatus()'s doc comment) gets its own
+        // row for the whole figure — that's what a BrickLink order for it
+        // needs (a minifig line, not its parts). Doesn't overlap with the
+        // per-part breakdown below: an individually missing/damaged part on
+        // an otherwise-present copy only ever reduces "complete", i.e. only
+        // ever shows up as $fig['damaged_quantity'], never as $figMissing.
+        if ($figMissing > 0) {
             $rows[] = [
                 'category' => t('owned_set_tab_minifigs'),
-                'thumbnail' => $part['thumbnail'],
-                'name' => $fig['name'] . ' · ' . $part['name'] . ($part['color_name'] !== null ? ' · ' . $part['color_name'] : ''),
-                'damaged' => $part['damaged_quantity'],
-                'missing' => max(0, $partMissing),
+                'thumbnail' => $fig['thumbnail'],
+                'name' => $fig['name'],
+                'damaged' => 0,
+                'missing' => $figMissing,
             ];
+        }
+
+        // Present copies with a damaged/incomplete constituent part — break
+        // that down to the part level instead of one aggregate "Minifigur
+        // X: 1 beschädigt" row, since that alone doesn't say whether it's a
+        // missing head or a damaged hip piece.
+        if ($fig['damaged_quantity'] > 0) {
+            foreach (getOwnedSetMinifigPartsWithStatus($pdo, $ownedSet, $fig['minifig_id'], $fig['fig_num'], $fig['nominal_quantity'], getLocale()) as $part) {
+                $partMissing = $part['nominal_quantity'] - $part['actual_quantity'];
+                if ($part['damaged_quantity'] <= 0 && $partMissing <= 0) {
+                    continue;
+                }
+                $rows[] = [
+                    'category' => t('owned_set_tab_minifigs'),
+                    'thumbnail' => $part['thumbnail'],
+                    'name' => $fig['name'] . ' · ' . $part['name'] . ($part['color_name'] !== null ? ' · ' . $part['color_name'] : ''),
+                    'damaged' => $part['damaged_quantity'],
+                    'missing' => max(0, $partMissing),
+                ];
+            }
         }
     }
 

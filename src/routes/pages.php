@@ -1581,7 +1581,8 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= '<button type="submit" class="owned-set-action-pill owned-set-action-pill-danger" title="' . htmlspecialchars(t('owned_set_remove_button')) . '" aria-label="' . htmlspecialchars(t('owned_set_remove_button')) . '">' . getActionIcon('delete') . '</button>';
     $content .= '</form>';
 
-    $content .= '<a class="owned-set-action-pill" href="?action=owned_set_bricklink_xml&amp;owned_set_id=' . (int) $ownedSet['id'] . '" title="' . htmlspecialchars(t('owned_set_bricklink_xml_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_bricklink_xml_label')) . '">' . getActionIcon('bricklink_xml') . '</a>';
+    $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-bricklink-open" title="' . htmlspecialchars(t('owned_set_bricklink_xml_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_bricklink_xml_label')) . '">' . getActionIcon('bricklink_xml') . '</button>';
+    $content .= renderOwnedSetBricklinkModal($ownedSet);
     $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-sell-open" title="' . htmlspecialchars(t('owned_set_sell_heading')) . '" aria-label="' . htmlspecialchars(t('owned_set_sell_heading')) . '">' . getActionIcon('sell') . '</button>';
     $removeConfirmJson = json_encode(t('owned_set_remove_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $content .= <<<SCRIPT

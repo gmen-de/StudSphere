@@ -113,7 +113,8 @@ function installDatabase(): void
             name VARCHAR(255) DEFAULT NULL,
             num_parts INT DEFAULT NULL,
             image_url VARCHAR(512) DEFAULT NULL,
-            local_image_path VARCHAR(512) DEFAULT NULL
+            local_image_path VARCHAR(512) DEFAULT NULL,
+            bricklink_id VARCHAR(20) DEFAULT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
         'CREATE TABLE IF NOT EXISTS rebrickable_inventories (
             id INT AUTO_INCREMENT PRIMARY KEY,

@@ -371,6 +371,15 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        24 => function (PDO $pdo): void {
+            // Rebrickable has no BrickLink minifig-ID mapping at all (confirmed
+            // admitted omission — see the Rebrickable forum thread linked in
+            // fetchBricklinkMinifigId()'s doc comment in src/rebrickable.php).
+            // Looked up (best-effort, cached forever once found — that's the
+            // whole point of a dedicated column instead of a live call every
+            // time) via a third-party site, or entered manually as a fallback.
+            addColumnIfMissing($pdo, 'minifigs', 'bricklink_id', 'VARCHAR(20) DEFAULT NULL');
+        },
     ];
 }
 
@@ -433,7 +442,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 23;
+const CURRENT_SCHEMA_VERSION = 24;
 
 function getInstalledSchemaVersion(): int
 {

@@ -644,6 +644,47 @@ if (isset($_GET['action']) && $_GET['action'] === 'owned_set_bricklink_xml') {
     exit;
 }
 
+// Run before the actual download (see the "Bricklink XML" button's own
+// script in renderOwnedSetBricklinkModal()) so a whole-missing minifig
+// with no resolvable BrickLink id can be asked about via a modal instead
+// of just silently missing from the file — this also happens to be what
+// actually triggers/caches the moykubik.ru lookup (buildOwnedSetBricklinkXml()
+// -> getOrFetchBricklinkMinifigId()), so by the time the real download
+// request runs right after, everything resolvable here is already cached.
+if (isset($_GET['action']) && $_GET['action'] === 'owned_set_bricklink_xml_check') {
+    header('Content-Type: application/json');
+    $checkOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));
+    if ($checkOwnedSet === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $checkExport = buildOwnedSetBricklinkXml($pdo, $checkOwnedSet);
+    echo json_encode([
+        'success' => true,
+        'ready' => empty($checkExport['needsManualId']),
+        'needsManualId' => $checkExport['needsManualId'],
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_minifig_bricklink_id') {
+    header('Content-Type: application/json');
+    try {
+        $manualMinifigId = (int) ($_POST['minifig_id'] ?? 0);
+        $parsedBricklinkId = parseBricklinkMinifigIdInput((string) ($_POST['bricklink_id_input'] ?? ''));
+        if ($manualMinifigId <= 0 || $parsedBricklinkId === null) {
+            throw new RuntimeException(t('owned_set_bricklink_manual_id_invalid'));
+        }
+        $pdo->prepare('UPDATE minifigs SET bricklink_id = ? WHERE id = ?')->execute([$parsedBricklinkId, $manualMinifigId]);
+        echo json_encode(['success' => true, 'bricklinkId' => $parsedBricklinkId], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 /**
  * Catalog-only inventory preview for the add-to-collection wizard's review
  * steps — used before any owned_sets row exists (the wizard now defers

@@ -5,6 +5,50 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/settings.php';
 
+/**
+ * Best-effort lookup of a minifig's BrickLink item number from moykubik.ru
+ * (a Russian LEGO parts shop whose own SKUs happen to follow BrickLink's
+ * numbering, shown on each minifig's page as "Артикул: {id}") —
+ * Rebrickable's API has no BrickLink minifig mapping at all, a confirmed,
+ * admitted omission (see
+ * https://forum.rebrickable.com/t/how-do-i-map-bricklink-id-to-rebrickable-id-for-minifigs-via-api-and-in-bulk-operations/172669),
+ * and BrickLink's own API doesn't accept a Rebrickable figure number as a
+ * lookup key either.
+ *
+ * Deliberately NOT called for every minifig up front, or on a schedule —
+ * only ever from getOrFetchBricklinkMinifigId(), which checks
+ * minifigs.bricklink_id first and only reaches this when that column is
+ * still NULL. A self-hosted install of this app therefore makes at most
+ * one request per minifig it actually ever needs (i.e. one that shows up
+ * fully missing in someone's own collection), never a bulk scrape of the
+ * whole catalog — moykubik.ru is a small shop, not a dedicated API, and
+ * that distinction matters.
+ *
+ * Returns null on any failure (network, not found, unexpected page shape)
+ * — the caller falls back to asking the user to paste the id in manually.
+ */
+function fetchBricklinkMinifigIdFromMoykubik(string $figNum): ?string
+{
+    $ch = curl_init('https://moykubik.ru/minifigs/' . urlencode($figNum));
+    if ($ch === false) {
+        return null;
+    }
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+    curl_setopt($ch, CURLOPT_ENCODING, ''); // accept + auto-decode gzip/deflate
+    $html = curl_exec($ch);
+    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if (!is_string($html) || $status >= 400) {
+        return null;
+    }
+    if (preg_match('/Артикул:\s*([A-Za-z0-9]+)/u', $html, $matches)) {
+        return $matches[1];
+    }
+    return null;
+}
+
 function callRebrickableApi(string $path): array
 {
     $apiKey = trim((string) getAppSetting('rebrickable_api_key'));

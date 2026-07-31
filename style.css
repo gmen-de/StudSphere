@@ -2770,6 +2770,50 @@ footer {
   color: #475569;
 }
 
+.owned-set-bricklink-manual-row {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(148,163,184,0.25);
+}
+
+.owned-set-bricklink-manual-row:last-child {
+  border-bottom: none;
+}
+
+.owned-set-bricklink-manual-row .part-card-image {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+}
+
+.owned-set-bricklink-manual-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.owned-set-bricklink-manual-info p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.owned-set-bricklink-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.owned-set-bricklink-modal-actions button[type='button'] {
+  width: auto;
+  background: transparent;
+  color: #475569;
+  border: 1px solid rgba(148,163,184,0.35);
+}
+
 .owned-set-inventory-tile-inputs label {
   display: flex;
   flex-direction: column;
