@@ -7,6 +7,14 @@ require_once __DIR__ . '/settings.php';
 require_once __DIR__ . '/rebrickable.php';
 require_once __DIR__ . '/i18n.php';
 
+// set_parts.csv used to be here too, but Rebrickable's CDN now 404s on it
+// (confirmed by the user, not just this one server) — the set_parts table
+// itself was already unused by the app's own read paths even before that
+// (see getPartDetail()'s doc comment in src/parts.php: set-appearance
+// stats come from inventory_parts, not set_parts), so dropping it from the
+// bulk sync costs nothing. Manually uploading a set_parts CSV from
+// elsewhere via the "Datei importieren" form still works (action=import,
+// import_type=set_parts) — only the automatic bulk download is gone.
 const REBRICKABLE_DOWNLOAD_ORDER = [
     'themes',
     'colors',
@@ -20,7 +28,6 @@ const REBRICKABLE_DOWNLOAD_ORDER = [
     'inventory_parts',
     'inventory_sets',
     'inventory_minifigs',
-    'set_parts',
 ];
 
 // Bounded work per tick, so a single HTTP request never runs long enough to hit

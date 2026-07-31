@@ -5,6 +5,7 @@ declare(strict_types=1);
 session_start();
 require_once __DIR__ . '/src/config_writer.php';
 require_once __DIR__ . '/src/i18n.php';
+require_once __DIR__ . '/src/download.php';
 
 // calculateFileProgressFraction()/buildImportProgressPayload() now live in
 // src/download.php (required inside the import_tick handler below) — the
@@ -430,11 +431,11 @@ switch ($step) {
         $content .= '<form method="post" id="import-form">';
         $content .= '<input type="hidden" name="action" value="import_tick">';
         $content .= '<label>' . htmlspecialchars(t('import_api_key')) . '<input name="api_key" value="' . htmlspecialchars($apiKey) . '"></label>';
-        $downloadFileNames = [
-            'themes.csv', 'colors.csv', 'part_categories.csv', 'parts.csv', 'part_relationships.csv',
-            'elements.csv', 'sets.csv', 'minifigs.csv', 'inventories.csv', 'inventory_parts.csv',
-            'inventory_sets.csv', 'inventory_minifigs.csv', 'set_parts.csv',
-        ];
+        // Derived from REBRICKABLE_DOWNLOAD_ORDER (src/download.php) instead
+        // of a separately hardcoded list, so the two can't drift apart again
+        // (that's exactly how set_parts.csv — since removed, Rebrickable's
+        // CDN 404s on it — ended up listed here after it was already gone).
+        $downloadFileNames = array_map(fn (string $type): string => $type . '.csv', REBRICKABLE_DOWNLOAD_ORDER);
         $content .= '<p>' . htmlspecialchars(t('import_files_list', ['files' => implode(', ', $downloadFileNames)])) . '</p>';
         $content .= '<p>' . htmlspecialchars(t('import_support')) . '</p>';
         $content .= '<div class="import-status" id="importStatus">';

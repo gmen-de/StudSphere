@@ -121,7 +121,6 @@ return [
     'settings_last_update_all' => 'Last full update: {value}',
     'settings_last_update_parts' => 'Last parts update: {value}',
     'settings_last_update_sets' => 'Last sets update: {value}',
-    'settings_last_update_set_parts' => 'Last set parts update: {value}',
     'not_available' => 'not available',
     'login_title' => 'Login',
     'login_username' => 'Username',

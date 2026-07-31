@@ -26,7 +26,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'settings') {
     $content .= '<li>' . htmlspecialchars(t('settings_last_update_all', ['value' => getAppSetting('last_update_all', t('not_available'))])) . '</li>';
     $content .= '<li>' . htmlspecialchars(t('settings_last_update_parts', ['value' => getAppSetting('last_update_parts', t('not_available'))])) . '</li>';
     $content .= '<li>' . htmlspecialchars(t('settings_last_update_sets', ['value' => getAppSetting('last_update_sets', t('not_available'))])) . '</li>';
-    $content .= '<li>' . htmlspecialchars(t('settings_last_update_set_parts', ['value' => getAppSetting('last_update_set_parts', t('not_available'))])) . '</li>';
     $content .= '</ul>';
 
     $content .= '<h2>' . htmlspecialchars(t('settings_rebrickable_title')) . '</h2>';

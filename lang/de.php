@@ -121,7 +121,6 @@ return [
     'settings_last_update_all' => 'Letzte Gesamt-Aktualisierung: {value}',
     'settings_last_update_parts' => 'Letzte Teile-Aktualisierung: {value}',
     'settings_last_update_sets' => 'Letzte Sets-Aktualisierung: {value}',
-    'settings_last_update_set_parts' => 'Letzte Set-Teile-Aktualisierung: {value}',
     'not_available' => 'nicht vorhanden',
     'login_title' => 'Anmeldung',
     'login_username' => 'Benutzername',
