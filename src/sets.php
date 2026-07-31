@@ -72,6 +72,15 @@ function attachOwnedCounts(PDO $pdo, array $items): array
  * used to decide which tiles are worth showing (a theme with 0 sets
  * anywhere in its subtree isn't) and to label tiles with a total.
  *
+ * The CAST(th.theme_id AS CHAR) is load-bearing, not decoration: sets.theme
+ * is VARCHAR while themes.theme_id is INT, and comparing them directly
+ * silently defeats idx_sets_theme (migration 20) — MariaDB can't use a
+ * VARCHAR index for an implicit INT->VARCHAR comparison per outer row, so it
+ * falls back to "Range checked for each record", which is actually *worse*
+ * than the pre-index full scan (measured ~13.7M rows examined vs. ~27k).
+ * Casting the INT side to match the indexed column's type is what lets
+ * MariaDB do a real per-row index lookup (measured 3.1s -> 0.03s).
+ *
  * @return array{byId: array<int, array{theme_id:int, name:string, parent_theme_id:?int, direct_count:int, recursive_count:int, children: array}>, roots: array}
  */
 function getSetThemeTree(PDO $pdo): array
@@ -79,7 +88,7 @@ function getSetThemeTree(PDO $pdo): array
     $rows = $pdo->query(
         'SELECT th.theme_id, th.name, th.parent_theme_id, COUNT(s.id) AS direct_count
          FROM themes th
-         LEFT JOIN sets s ON s.theme = th.theme_id
+         LEFT JOIN sets s ON s.theme = CAST(th.theme_id AS CHAR)
          GROUP BY th.theme_id, th.name, th.parent_theme_id'
     )->fetchAll();
     return buildThemeTree($rows);
@@ -94,7 +103,7 @@ function getOwnedSetThemeTree(PDO $pdo): array
     $rows = $pdo->query(
         'SELECT th.theme_id, th.name, th.parent_theme_id, COUNT(os.id) AS direct_count
          FROM themes th
-         LEFT JOIN sets s ON s.theme = th.theme_id
+         LEFT JOIN sets s ON s.theme = CAST(th.theme_id AS CHAR)
          LEFT JOIN owned_sets os ON os.set_id = s.id
          GROUP BY th.theme_id, th.name, th.parent_theme_id'
     )->fetchAll();
