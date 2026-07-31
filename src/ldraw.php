@@ -445,25 +445,32 @@ function getMissingLdrawRenderPairs(PDO $pdo, array $items): array
     $ldrawIdStmt->execute($partIds);
     $ldrawIdByPart = array_column($ldrawIdStmt->fetchAll(), 'ldraw_id', 'id');
 
-    // getSetPartsList()'s rows carry color_rgb but not is_trans — needed so
-    // matchLdrawColorCode() only matches within the correct
-    // opaque/transparent LDraw color group (see its doc comment).
+    // getSetPartsList()'s rows carry color_rgb but not is_trans/ldraw_color_id
+    // — is_trans is needed so matchLdrawColorCode() only matches within the
+    // correct opaque/transparent LDraw color group (see its doc comment);
+    // ldraw_color_id (see syncExternalColorIds() in src/rebrickable.php) is
+    // Rebrickable's own authoritative color mapping, preferred over
+    // matchLdrawColorCode()'s RGB-nearest-neighbor guess wherever it's set.
     $colorIds = array_values(array_unique(array_column($candidates, 'color_id')));
     $colorIdPlaceholders = implode(',', array_fill(0, count($colorIds), '?'));
-    $transStmt = $pdo->prepare("SELECT color_id, is_trans FROM colors WHERE color_id IN ($colorIdPlaceholders)");
+    $transStmt = $pdo->prepare("SELECT color_id, is_trans, ldraw_color_id FROM colors WHERE color_id IN ($colorIdPlaceholders)");
     $transStmt->execute($colorIds);
-    $isTransByColor = array_column($transStmt->fetchAll(), 'is_trans', 'color_id');
+    $colorRows = $transStmt->fetchAll();
+    $isTransByColor = array_column($colorRows, 'is_trans', 'color_id');
+    $ldrawColorIdByColor = array_column($colorRows, 'ldraw_color_id', 'color_id');
 
     foreach ($candidates as $key => $c) {
         $candidates[$key]['ldraw_id'] = $ldrawIdByPart[$c['part_id']] ?? null;
         $candidates[$key]['is_trans'] = !empty($isTransByColor[$c['color_id']] ?? 0);
+        $storedLdrawColorId = $ldrawColorIdByColor[$c['color_id']] ?? null;
+        $candidates[$key]['ldraw_color_id'] = $storedLdrawColorId !== null ? (int) $storedLdrawColorId : null;
     }
 
     return array_values($candidates);
 }
 
 /**
- * @param array<int, array{part_id:int, color_id:int, part_num:string, ldraw_id:?string, rgb:?string, is_trans:bool}> $pairs
+ * @param array<int, array{part_id:int, color_id:int, part_num:string, ldraw_id:?string, rgb:?string, is_trans:bool, ldraw_color_id:?int}> $pairs
  * @return array{pairs:array, index:int, stats:array{processed:int, rendered:int, skipped:int, errors:int}}
  */
 function initLdrawSetRenderState(array $pairs): array
@@ -564,7 +571,12 @@ function stepLdrawSetRenderBatch(array &$state): array
             $state['index']++;
             $state['stats']['processed']++;
 
-            $ldrawColorCode = $pair['rgb'] !== null ? matchLdrawColorCode($pair['rgb'], $pair['is_trans']) : null;
+            // Rebrickable's own mapping (synced by syncExternalColorIds())
+            // is authoritative where it exists; matchLdrawColorCode()'s
+            // RGB-nearest-neighbor guess only kicks in for the ~39% of
+            // colors Rebrickable doesn't map to an LDraw color at all.
+            $ldrawColorCode = $pair['ldraw_color_id']
+                ?? ($pair['rgb'] !== null ? matchLdrawColorCode($pair['rgb'], $pair['is_trans']) : null);
 
             if ($ldrawId === null || $ldrawColorCode === null) {
                 // Definitively resolved either way (confirmed no LDraw mapping,

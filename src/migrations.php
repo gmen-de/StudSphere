@@ -323,12 +323,16 @@ function getSchemaMigrations(): array
         21 => function (PDO $pdo): void {
             // Rebrickable's own colors.csv (the bulk-import file
             // downloadAndImportRebrickableData() already uses) has no
-            // BrickLink/BrickOwl mapping — only the REST API's
+            // BrickLink/BrickOwl/LDraw mapping — only the REST API's
             // lego/colors/ endpoint does, via each color's external_ids.
             // See syncExternalColorIds() in src/rebrickable.php, called
             // once at the end of every Rebrickable data update.
+            // ldraw_color_id additionally replaces matchLdrawColorCode()'s
+            // RGB-nearest-neighbor guess (src/ldraw.php) with Rebrickable's
+            // authoritative mapping wherever one exists.
             addColumnIfMissing($pdo, 'colors', 'bricklink_color_id', 'INT DEFAULT NULL');
             addColumnIfMissing($pdo, 'colors', 'brickowl_color_id', 'INT DEFAULT NULL');
+            addColumnIfMissing($pdo, 'colors', 'ldraw_color_id', 'INT DEFAULT NULL');
         },
     ];
 }

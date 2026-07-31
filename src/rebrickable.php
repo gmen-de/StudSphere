@@ -53,19 +53,26 @@ function callRebrickableApi(string $path): array
 }
 
 /**
- * Fills colors.bricklink_color_id/brickowl_color_id from Rebrickable's own
- * external_ids mapping — not available in the bulk CSV downloads the main
- * import uses (downloadAndImportRebrickableData()), only via this REST
- * endpoint. Called once at the end of every Rebrickable data update rather
- * than driven by its own tick: all ~275 colors fit in a single API page
- * and the whole call completes in well under a second (measured).
+ * Fills colors.bricklink_color_id/brickowl_color_id/ldraw_color_id from
+ * Rebrickable's own external_ids mapping — not available in the bulk CSV
+ * downloads the main import uses (downloadAndImportRebrickableData()), only
+ * via this REST endpoint. Called once at the end of every Rebrickable data
+ * update rather than driven by its own tick: all ~275 colors fit in a
+ * single API page and the whole call completes in well under a second
+ * (measured). ldraw_color_id in particular replaces
+ * matchLdrawColorCode()'s RGB-nearest-neighbor guess (src/ldraw.php) with
+ * an authoritative mapping wherever Rebrickable has one — see that
+ * function's doc comment for why it still has to stay as a fallback.
  *
  * A color can have at most one BrickLink id and, among real (non-sentinel)
  * colors, at most one BrickOwl id (verified against a full color dump
- * before building this) — a plain nullable INT column each is enough, no
- * need for a list. Many niche colors (Duplo/Fabuland/HO-scale/...)
- * legitimately have no BrickLink/BrickOwl counterpart at all; those stay
- * NULL, which is correct, not a failure.
+ * before building this). LDraw is the one exception: a handful of colors
+ * list a second, material-variant id after the real one (e.g. Black's
+ * ext_ids are [0, 256], where 256 is "Rubber_Black") — the first id is
+ * consistently the actual color, which is why only ext_ids[0] is ever
+ * taken for any of the three, not just LDraw. Many niche colors (Duplo/
+ * Fabuland/HO-scale/...) legitimately have no BrickLink/BrickOwl/LDraw
+ * counterpart at all; those stay NULL, which is correct, not a failure.
  *
  * Best-effort: no API key configured, or the API call itself fails, just
  * means this optional enrichment is skipped — it must never fail the
@@ -86,19 +93,21 @@ function syncExternalColorIds(): array
     }
 
     $pdo = getPDO();
-    $stmt = $pdo->prepare('UPDATE colors SET bricklink_color_id = ?, brickowl_color_id = ? WHERE color_id = ?');
+    $stmt = $pdo->prepare('UPDATE colors SET bricklink_color_id = ?, brickowl_color_id = ?, ldraw_color_id = ? WHERE color_id = ?');
 
     $updated = 0;
     foreach ($response['results'] ?? [] as $color) {
         $externalIds = $color['external_ids'] ?? [];
         $brickLinkIds = $externalIds['BrickLink']['ext_ids'] ?? [];
         $brickOwlIds = $externalIds['BrickOwl']['ext_ids'] ?? [];
+        $ldrawIds = $externalIds['LDraw']['ext_ids'] ?? [];
         $brickLinkId = !empty($brickLinkIds) ? (int) $brickLinkIds[0] : null;
         $brickOwlId = !empty($brickOwlIds) ? (int) $brickOwlIds[0] : null;
-        if ($brickLinkId === null && $brickOwlId === null) {
+        $ldrawColorId = !empty($ldrawIds) ? (int) $ldrawIds[0] : null;
+        if ($brickLinkId === null && $brickOwlId === null && $ldrawColorId === null) {
             continue;
         }
-        $stmt->execute([$brickLinkId, $brickOwlId, $color['id']]);
+        $stmt->execute([$brickLinkId, $brickOwlId, $ldrawColorId, $color['id']]);
         if ($stmt->rowCount() > 0) {
             $updated++;
         }
