@@ -1546,7 +1546,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     };
 
     $content .= '<div class="set-detail-table-wrap">';
-    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
     $content .= '<table class="set-detail-table">';
     $content .= '<tr class="owned-set-total-row"><td colspan="2">' . renderOwnedSetTotalRing($completeness['percent'], $completeness['actual'], $completeness['nominal']) . '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_location')) . '</th><td>';
@@ -1572,7 +1571,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= '</div>';
 
     $content .= '<div class="set-detail-table-wrap">';
-    $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('owned_set_remove_heading')) . '</span>';
     $content .= '<form method="post" id="remove-owned-set-form">';
     $content .= '<input type="hidden" name="action" value="remove_owned_set">';
     $content .= '<input type="hidden" name="owned_set_id" value="' . $ownedSet['id'] . '">';

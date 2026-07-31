@@ -362,7 +362,6 @@ return [
     'owned_set_field_location' => 'Lagerort',
     'owned_set_completeness_value' => '{percent}% ({actual} von {nominal} Teilen)',
     'owned_set_num_parts_actual' => '{actual} / {nominal}',
-    'owned_set_remove_heading' => 'Entfernen',
     'owned_set_remove_button' => 'Aus Sammlung entfernen',
     'owned_set_remove_confirm' => 'Dieses Set-Exemplar wirklich aus der Sammlung entfernen? Der zugehörige Lagerort und alle Fotos werden ebenfalls gelöscht.',
     'owned_set_field_condition' => 'Zustand',
