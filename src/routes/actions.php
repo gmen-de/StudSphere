@@ -15,7 +15,53 @@ declare(strict_types=1);
  * findOwnedSetMinifig()) are only used by the owned-set-minifig handlers
  * around them, not general library code, which is why they live here
  * rather than in src/owned_sets.php.
+ *
+ * import/update_data/update_rebrickable_settings/update_ldraw_settings
+ * lead the file (rather than sitting with the other tick handlers further
+ * down, matching their original position) because they used to live in
+ * src/routes/pre_auth.php, reachable by an unauthenticated POST — moved
+ * here, behind the login gate, to close that gap.
  */
+
+$importMessage = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'import') {
+    try {
+        $type = $_POST['import_type'] ?? '';
+        if (!isset($_FILES['import_file']) || $_FILES['import_file']['error'] !== UPLOAD_ERR_OK) {
+            throw new RuntimeException(t('error_import_file_required'));
+        }
+        $result = importCsv($_FILES['import_file']['tmp_name'], $type);
+        $importMessage = t('import_success_rows', ['count' => $result['rows'] ?? 0]);
+    } catch (Throwable $e) {
+        $importMessage = t('import_failure_message', ['message' => $e->getMessage()]);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_data') {
+    try {
+        $result = downloadAndImportRebrickableData();
+        $summaryText = implode(', ', array_map(function ($type, $rows) { return "$type=$rows"; }, array_keys($result['summary']), $result['summary']));
+        if (!empty($result['errors'])) {
+            $errorsText = implode(', ', array_map(function ($type, $msg) { return "$type: $msg"; }, array_keys($result['errors']), $result['errors']));
+            $importMessage = t('update_partial_message', ['summary' => $summaryText, 'errors' => $errorsText]);
+        } else {
+            $importMessage = t('update_success_message', ['summary' => $summaryText]);
+        }
+    } catch (Throwable $e) {
+        $importMessage = t('update_failure_message', ['message' => $e->getMessage()]);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_rebrickable_settings') {
+    setAppSetting('rebrickable_download_base_url', trim($_POST['download_base_url'] ?? ''));
+    setAppSetting('rebrickable_api_url', trim($_POST['api_url'] ?? ''));
+    setAppSetting('rebrickable_api_key', trim($_POST['api_key'] ?? ''));
+    $importMessage = t('settings_rebrickable_saved');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_ldraw_settings') {
+    setAppSetting('ldraw_rendering_enabled', ($_POST['ldraw_enabled'] ?? '') === '1' ? '1' : '0');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'image_tick') {
     header('Content-Type: application/json');
