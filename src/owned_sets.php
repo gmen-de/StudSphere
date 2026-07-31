@@ -1177,6 +1177,26 @@ function ownedSetMinifigBottleneckStatus(array $parts, int $minifigNominalCount)
 }
 
 /**
+ * Traffic-light class for the completeness ring's stroke color — red below
+ * 75%, yellow/orange from 75% up to (not including) 100%, green only at a
+ * full 100%. Mirrored in JS by ringColorClass() in both
+ * renderOwnedSetQuantityModalScript() and
+ * renderOwnedSetMinifigQuantityModalScript() (percent updates after a save
+ * without a full page reload, so the ring's color has to be re-derived
+ * there too instead of just here).
+ */
+function ownedSetCompletenessRingClass(float $percent): string
+{
+    if ($percent >= 100.0) {
+        return 'owned-set-total-ring-fg-complete';
+    }
+    if ($percent >= 75.0) {
+        return 'owned-set-total-ring-fg-partial';
+    }
+    return 'owned-set-total-ring-fg-low';
+}
+
+/**
  * owned_set_detail sidebar's "Gesamt" row — a compact version of
  * renderLdrawRenderOverlay()'s SVG progress ring (src/ldraw.php): same
  * stroke-dasharray/stroke-dashoffset technique, but sized for a table row
@@ -1192,11 +1212,12 @@ function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal): str
     $circumference = 2 * M_PI * 45;
     $offset = $circumference * (1 - min(100.0, $percent) / 100);
     $label = number_format($actual) . ' / ' . number_format($nominal);
+    $ringClass = ownedSetCompletenessRingClass($percent);
 
     $html = '<div class="owned-set-total-ring-wrap">';
     $html .= '<svg class="owned-set-total-ring" viewBox="0 0 100 100" aria-hidden="true">';
     $html .= '<circle class="owned-set-total-ring-bg" cx="50" cy="50" r="45"></circle>';
-    $html .= '<circle class="owned-set-total-ring-fg" id="owned-set-total-ring-fg" cx="50" cy="50" r="45" style="stroke-dasharray: ' . sprintf('%.2f', $circumference) . '; stroke-dashoffset: ' . sprintf('%.2f', $offset) . ';"></circle>';
+    $html .= '<circle class="owned-set-total-ring-fg ' . $ringClass . '" id="owned-set-total-ring-fg" cx="50" cy="50" r="45" style="stroke-dasharray: ' . sprintf('%.2f', $circumference) . '; stroke-dashoffset: ' . sprintf('%.2f', $offset) . ';"></circle>';
     $html .= '</svg>';
     $html .= '<span class="owned-set-total-ring-label" id="owned-set-total-ring-label">' . htmlspecialchars($label) . '</span>';
     $html .= '</div>';
@@ -1357,6 +1378,19 @@ function renderOwnedSetQuantityModalScript(array $ownedSet, string $ownedField, 
     return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
 
+  // Mirrors ownedSetCompletenessRingClass() in src/owned_sets.php (PHP) —
+  // the initial page render uses that one, this re-derives the same class
+  // after a live save patches the ring in place.
+  function ringColorClass(percent) {
+    if (percent >= 100) {
+      return 'owned-set-total-ring-fg-complete';
+    }
+    if (percent >= 75) {
+      return 'owned-set-total-ring-fg-partial';
+    }
+    return 'owned-set-total-ring-fg-low';
+  }
+
   // Patches the top status bar in place (see renderApp()'s
   // id="status-stat-{key}" spans) — shared by every AJAX action on this
   // page that returns fresh stats, duplicated per script per this
@@ -1395,6 +1429,8 @@ function renderOwnedSetQuantityModalScript(array $ownedSet, string $ownedField, 
       var circumference = 2 * Math.PI * 45;
       var percent = Math.min(100, total.percent);
       ringFg.style.strokeDashoffset = (circumference * (1 - percent / 100)).toFixed(2);
+      ringFg.classList.remove('owned-set-total-ring-fg-complete', 'owned-set-total-ring-fg-partial', 'owned-set-total-ring-fg-low');
+      ringFg.classList.add(ringColorClass(percent));
       ringLabel.textContent = formatNumber(total.actual) + ' / ' + formatNumber(total.nominal);
     }
   }
@@ -1609,6 +1645,19 @@ function renderOwnedSetMinifigQuantityModalScript(array $ownedSet): string
     return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
   }
 
+  // Mirrors ownedSetCompletenessRingClass() in src/owned_sets.php (PHP) —
+  // the initial page render uses that one, this re-derives the same class
+  // after a live save patches the ring in place.
+  function ringColorClass(percent) {
+    if (percent >= 100) {
+      return 'owned-set-total-ring-fg-complete';
+    }
+    if (percent >= 75) {
+      return 'owned-set-total-ring-fg-partial';
+    }
+    return 'owned-set-total-ring-fg-low';
+  }
+
   function applyStats(stats) {
     if (!stats) {
       return;
@@ -1640,6 +1689,8 @@ function renderOwnedSetMinifigQuantityModalScript(array $ownedSet): string
       var circumference = 2 * Math.PI * 45;
       var percent = Math.min(100, total.percent);
       ringFg.style.strokeDashoffset = (circumference * (1 - percent / 100)).toFixed(2);
+      ringFg.classList.remove('owned-set-total-ring-fg-complete', 'owned-set-total-ring-fg-partial', 'owned-set-total-ring-fg-low');
+      ringFg.classList.add(ringColorClass(percent));
       ringLabel.textContent = formatNumber(total.actual) + ' / ' + formatNumber(total.nominal);
     }
   }

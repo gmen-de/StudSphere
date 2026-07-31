@@ -2896,10 +2896,23 @@ footer {
 
 .owned-set-total-ring-fg {
   fill: none;
-  stroke: #2563eb;
   stroke-width: 8;
   stroke-linecap: round;
-  transition: stroke-dashoffset 0.2s ease;
+  transition: stroke-dashoffset 0.2s ease, stroke 0.2s ease;
+}
+
+/* Traffic-light coloring by completeness percent — see
+   ownedSetCompletenessRingClass() in src/owned_sets.php. */
+.owned-set-total-ring-fg-low {
+  stroke: #dc2626;
+}
+
+.owned-set-total-ring-fg-partial {
+  stroke: #f59e0b;
+}
+
+.owned-set-total-ring-fg-complete {
+  stroke: #16a34a;
 }
 
 .owned-set-total-ring-label {
