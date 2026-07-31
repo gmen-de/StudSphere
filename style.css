@@ -2422,42 +2422,47 @@ footer {
   display: contents;
 }
 
-.owned-set-action-pill {
+/* Extra .owned-set-actionbar prefix on every rule below is load-bearing,
+   not decoration: the delete button is a <button type="submit"> (it lives
+   in the remove-owned-set form), which the global button[type='submit']
+   rule (width:100%, big blue fill) outweighs on a plain single-class
+   selector — the delete button rendered full-width and solid blue before
+   this. Two classes' worth of specificity is what actually wins. */
+.owned-set-actionbar .owned-set-action-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: auto;
   padding: 0.6rem;
   border-radius: 0.75rem;
-  border: 1px solid rgba(148,163,184,0.35);
-  background: #f8fafc;
+  border: 1px solid rgba(37,99,235,0.25);
+  background: #eff6ff;
   color: #111827;
+  box-shadow: none;
   cursor: pointer;
 }
 
-.owned-set-action-pill svg {
+.owned-set-actionbar .owned-set-action-pill svg {
   width: 32px;
   height: 32px;
-  color: #64748b;
+  color: #2563eb;
   flex-shrink: 0;
 }
 
-.owned-set-action-pill:hover {
-  background: #eef2f7;
+.owned-set-actionbar .owned-set-action-pill:hover {
+  background: #dbeafe;
+  transform: none;
 }
 
-.owned-set-action-pill-danger {
+/* Delete stays visually identical to the other four at rest — the red
+   warning only shows up on hover, right before it'd actually be clicked. */
+.owned-set-actionbar .owned-set-action-pill-danger:hover {
   background: #fee2e2;
-  color: #991b1b;
-  border-color: rgba(153,27,27,0.2);
+  border-color: rgba(153,27,27,0.3);
 }
 
-.owned-set-action-pill-danger svg {
+.owned-set-actionbar .owned-set-action-pill-danger:hover svg {
   color: #991b1b;
-}
-
-.owned-set-action-pill-danger:hover {
-  background: #fecaca;
 }
 
 .owned-set-parts-list {
