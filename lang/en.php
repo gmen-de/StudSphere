@@ -362,7 +362,7 @@ return [
     'owned_set_field_location' => 'Storage location',
     'owned_set_completeness_value' => '{percent}% ({actual} of {nominal} parts)',
     'owned_set_num_parts_actual' => '{actual} / {nominal}',
-    'owned_set_remove_button' => 'Remove from collection',
+    'owned_set_remove_button' => 'Delete',
     'owned_set_remove_confirm' => 'Really remove this set instance from your collection? Its storage location and all photos will be deleted too.',
     'owned_set_move_heading' => 'Move',
     'owned_set_move_current' => 'Current storage location: {path}',
