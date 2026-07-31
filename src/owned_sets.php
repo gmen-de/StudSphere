@@ -195,6 +195,13 @@ function getOwnedSetMinifigPartsTotal(PDO $pdo, array $ownedSet): array
  * this set", computed on the fly rather than stored, since actual quantity
  * already lives in storage_items/owned_set_minifig_parts.
  *
+ * Sticker sheets are excluded from both sides of the ratio (same part_ids
+ * as getStickerPartIds(), reused by every other sticker-aware view in this
+ * file) — they're still tracked and shown in their own bucket (see
+ * getOwnedSetInventorySummary()), just don't affect the completeness
+ * percent/ring anymore, since a set with all its bricks but an unapplied
+ * sticker sheet used to read as incomplete.
+ *
  * @return array{nominal:int, actual:int, percent:float}
  */
 function getOwnedSetCompleteness(PDO $pdo, array $ownedSet): array
@@ -204,12 +211,18 @@ function getOwnedSetCompleteness(PDO $pdo, array $ownedSet): array
         return ['nominal' => 0, 'actual' => 0, 'percent' => 100.0];
     }
 
-    $nominalStmt = $pdo->prepare('SELECT COALESCE(SUM(quantity), 0) FROM inventory_parts WHERE inventory_id = ? AND is_spare = 0');
-    $nominalStmt->execute([$inventoryId]);
+    $stickerPartIds = array_keys(getStickerPartIds($pdo, $inventoryId));
+    $stickerExclusion = '';
+    if (!empty($stickerPartIds)) {
+        $stickerExclusion = ' AND part_id NOT IN (' . implode(',', array_fill(0, count($stickerPartIds), '?')) . ')';
+    }
+
+    $nominalStmt = $pdo->prepare('SELECT COALESCE(SUM(quantity), 0) FROM inventory_parts WHERE inventory_id = ? AND is_spare = 0' . $stickerExclusion);
+    $nominalStmt->execute(array_merge([$inventoryId], $stickerPartIds));
     $nominal = (int) $nominalStmt->fetchColumn();
 
-    $actualStmt = $pdo->prepare('SELECT COALESCE(SUM(quantity), 0) FROM storage_items WHERE location_id = ?');
-    $actualStmt->execute([$ownedSet['location_id']]);
+    $actualStmt = $pdo->prepare('SELECT COALESCE(SUM(quantity), 0) FROM storage_items WHERE location_id = ?' . $stickerExclusion);
+    $actualStmt->execute(array_merge([$ownedSet['location_id']], $stickerPartIds));
     $actual = (int) $actualStmt->fetchColumn();
 
     $minifigParts = getOwnedSetMinifigPartsTotal($pdo, $ownedSet);
