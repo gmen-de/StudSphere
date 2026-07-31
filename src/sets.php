@@ -304,8 +304,15 @@ function getSetById(PDO $pdo, int $id): ?array
  * genuinely belongs to the catalog set (not any one owned instance), so
  * editing it from either page updates the same row via the same
  * save_set_retired_year action. $set is a getSetById() result.
+ *
+ * $themeTree lets a caller that already built one (set_detail's own
+ * breadcrumbs, via getSetThemeTree()) pass it in instead of this function
+ * loading its own — getSetThemeTree() isn't free (a full-table join across
+ * every set for every theme), so building it twice on the same page render
+ * was measurably wasteful. Callers without one already (owned_set_detail)
+ * just leave it null and this loads it as before.
  */
-function renderSetGeneralInfoTable(PDO $pdo, array $set): string
+function renderSetGeneralInfoTable(PDO $pdo, array $set, ?array $themeTree = null): string
 {
     $content = '<div class="set-detail-table-wrap">';
     $content .= '<table class="set-detail-table">';
@@ -323,7 +330,7 @@ function renderSetGeneralInfoTable(PDO $pdo, array $set): string
     $content .= '</form>';
     $content .= '</td></tr>';
     if ($set['theme_id'] !== null) {
-        $themeTree = getSetThemeTree($pdo);
+        $themeTree ??= getSetThemeTree($pdo);
         $themePath = implode(' » ', array_column(getThemeAncestors($themeTree, $set['theme_id']), 'name'));
         $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_theme')) . '</th><td>' . htmlspecialchars($themePath) . '</td></tr>';
     }

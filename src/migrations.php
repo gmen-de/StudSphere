@@ -311,6 +311,15 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'owned_sets', 'stickers_applied', 'TINYINT(1) NOT NULL DEFAULT 0');
             addColumnIfMissing($pdo, 'owned_sets', 'stickers_notes', 'TEXT DEFAULT NULL');
         },
+        20 => function (PDO $pdo): void {
+            // getSetThemeTree()/getOwnedSetThemeTree() (src/sets.php) LEFT
+            // JOIN sets ON sets.theme = themes.theme_id for every one of the
+            // ~500 theme rows — with no index on sets.theme that's a full
+            // table scan per theme row (measured ~1.5s per call on ~27k
+            // sets), and getOwnedSetThemeTree() alone runs on every single
+            // page via getNavMenu()'s "Meine Sets" dropdown.
+            addIndexIfMissing($pdo, 'sets', 'idx_sets_theme', 'theme');
+        },
     ];
 }
 
@@ -373,7 +382,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 19;
+const CURRENT_SCHEMA_VERSION = 20;
 
 function getInstalledSchemaVersion(): int
 {

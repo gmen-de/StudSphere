@@ -1103,7 +1103,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
         : '<span></span>';
     $content .= '</div>';
 
-    $content .= renderSetGeneralInfoTable($pdo, $set);
+    $content .= renderSetGeneralInfoTable($pdo, $set, $themeTree ?? null);
 
     $content .= '<div class="set-detail-table-wrap">';
     $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';

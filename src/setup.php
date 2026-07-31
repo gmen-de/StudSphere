@@ -30,7 +30,8 @@ function installDatabase(): void
             num_parts INT DEFAULT NULL,
             image_url VARCHAR(512) DEFAULT NULL,
             local_image_path VARCHAR(512) DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_sets_theme (theme)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
 
         'CREATE TABLE IF NOT EXISTS parts (
