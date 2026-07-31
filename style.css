@@ -2425,20 +2425,19 @@ footer {
 .owned-set-action-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
   width: auto;
-  padding: 0.55rem 1rem;
-  border-radius: 0.6rem;
+  padding: 0.6rem;
+  border-radius: 0.75rem;
   border: 1px solid rgba(148,163,184,0.35);
   background: #f8fafc;
   color: #111827;
-  font-size: 0.92rem;
   cursor: pointer;
 }
 
 .owned-set-action-pill svg {
-  width: 18px;
-  height: 18px;
+  width: 32px;
+  height: 32px;
   color: #64748b;
   flex-shrink: 0;
 }
