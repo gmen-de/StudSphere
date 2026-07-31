@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/import.php';
 require_once __DIR__ . '/settings.php';
 require_once __DIR__ . '/rebrickable.php';
+require_once __DIR__ . '/i18n.php';
 
 const REBRICKABLE_DOWNLOAD_ORDER = [
     'themes',
@@ -530,6 +531,72 @@ function stepRebrickableImport(array &$state): array
 }
 
 /**
+ * Weight (0..1) representing how far a single file has progressed, used to compute
+ * the overall progress bar across all files. Shared by setup.php's first-run install
+ * wizard and the settings page's "Update jetzt" modal (src/routes/actions.php) — both
+ * drive the same stepRebrickableImport() tick machine and want the same progress feel.
+ */
+function calculateFileProgressFraction(array $file): float
+{
+    switch ($file['stage']) {
+        case 'downloading':
+            if (!empty($file['totalBytes'])) {
+                return 0.45 * min(1.0, $file['bytes'] / $file['totalBytes']);
+            }
+            return $file['bytes'] > 0 ? 0.2 : 0.05;
+        case 'extracting':
+            return 0.5;
+        case 'importing':
+            // No reliable total row count without an extra full-file pass, so importing
+            // is shown as a fixed midpoint; the row counter itself still updates live.
+            return 0.75;
+        case 'done':
+        case 'error':
+            return 1.0;
+        default:
+            return 0.0;
+    }
+}
+
+/**
+ * JSON progress payload for a rebrickable-import tick action — see
+ * calculateFileProgressFraction()'s doc comment for who shares this.
+ */
+function buildImportProgressPayload(array $state, bool $done): array
+{
+    $files = [];
+    $sum = 0.0;
+    $hasErrors = false;
+
+    foreach ($state['files'] as $type => $file) {
+        $sum += calculateFileProgressFraction($file);
+        if ($file['stage'] === 'error') {
+            $hasErrors = true;
+        }
+        $files[$type] = [
+            'label' => $file['label'],
+            'stage' => $file['stage'],
+            'message' => $file['message'],
+            'bytes' => $file['bytes'],
+            'totalBytes' => $file['totalBytes'],
+            'rows' => $file['rows'],
+        ];
+    }
+
+    $total = count($state['files']);
+    $percent = $total > 0 ? (int) round(($sum / $total) * 100) : 0;
+
+    return [
+        'status' => $done ? 'done' : 'running',
+        'percent' => $percent,
+        'message' => $done
+            ? ($hasErrors ? t('import_completed_with_errors') : t('import_completed'))
+            : t('import_running'),
+        'files' => $files,
+    ];
+}
+
+/**
  * Synchronous convenience wrapper around the chunked step machine, for callers that
  * don't drive it via repeated AJAX requests (e.g. the first-run install and the
  * dashboard's manual "update now" button). Runs every tick in a loop within a single
@@ -593,4 +660,235 @@ function downloadAndImportRebrickableData(?callable $progressCallback = null): a
     syncExternalColorIds();
 
     return ['summary' => $summary, 'errors' => $errors];
+}
+
+/**
+ * The settings page's "Update jetzt" modal — same tick machine
+ * (stepRebrickableImport(), via action=rebrickable_update_tick in
+ * src/routes/actions.php) and the same progress-bar/file-list look as
+ * setup.php's first-run install wizard, just in a modal instead of a full
+ * page, since the settings page already has the surrounding UI a fresh
+ * install doesn't. Self-contained (own markup + own <script>, reuses the
+ * generic .modal-overlay/.modal-box shell) — same pattern as
+ * renderPartDetailModal() in src/part_modal.php.
+ *
+ * Closing the modal only hides it; the tick loop keeps running (same
+ * session-stored state setup.php's version relies on for resumability), so
+ * reopening it — or just waiting — doesn't lose progress. Only a page
+ * reload actually stops the client-side polling, and even then the next
+ * "Update jetzt" click resumes from whatever file was in progress.
+ */
+function renderRebrickableUpdateModal(): string
+{
+    $html = '<div class="modal-overlay" id="rebrickable-update-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<button type="button" class="modal-close" id="rebrickable-update-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<h2>' . htmlspecialchars(t('settings_update_button')) . '</h2>';
+    $html .= '<div class="import-status" id="rebrickableUpdateStatus">';
+    $html .= '<div class="progress-message idle" id="rebrickableUpdateMessage">' . htmlspecialchars(t('import_not_started')) . '</div>';
+    $html .= '<div class="progress-track" id="rebrickableUpdateProgress"><div class="progress-fill"></div></div>';
+    $html .= '<ul class="import-file-list" id="rebrickableUpdateFileList">';
+    foreach (REBRICKABLE_DOWNLOAD_ORDER as $type) {
+        $html .= '<li class="import-file import-file-pending"><span class="import-file-name">' . htmlspecialchars($type . '.csv') . '</span><span class="import-file-status">' . htmlspecialchars(t('import_stage_pending')) . '</span></li>';
+    }
+    $html .= '</ul>';
+    $html .= '</div>';
+    $html .= '<button type="button" id="rebrickable-update-start">' . htmlspecialchars(t('settings_update_button')) . '</button>';
+    $html .= '</div></div>';
+
+    $labelsJson = json_encode([
+        'running' => t('import_running'),
+        'button' => t('settings_update_button'),
+        'resume_button' => t('import_resume_button'),
+        'error_retry' => t('import_error_retry'),
+        'started' => t('import_started'),
+        'stage_pending' => t('import_stage_pending'),
+        'stage_downloading' => t('import_stage_downloading'),
+        'stage_extracting' => t('import_stage_extracting'),
+        'stage_importing' => t('import_stage_importing'),
+        'stage_done' => t('import_stage_done'),
+        'stage_error' => t('import_stage_error_label'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $labelsJson;
+  var stageLabels = {
+    pending: texts.stage_pending,
+    downloading: texts.stage_downloading,
+    extracting: texts.stage_extracting,
+    importing: texts.stage_importing,
+    done: texts.stage_done,
+    error: texts.stage_error
+  };
+  var openBtn = document.getElementById('rebrickable-update-open');
+  var modal = document.getElementById('rebrickable-update-modal');
+  var closeBtn = document.getElementById('rebrickable-update-modal-close');
+  var startBtn = document.getElementById('rebrickable-update-start');
+  var track = document.getElementById('rebrickableUpdateProgress');
+  var fill = track ? track.querySelector('.progress-fill') : null;
+  var msg = document.getElementById('rebrickableUpdateMessage');
+  var fileList = document.getElementById('rebrickableUpdateFileList');
+  if (!openBtn || !modal || !closeBtn || !startBtn || !track || !fill || !msg || !fileList) {
+    return;
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === null || bytes === undefined) {
+      return null;
+    }
+    var units = ['B', 'KB', 'MB', 'GB'];
+    var value = bytes;
+    var unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex++;
+    }
+    return value.toFixed(unitIndex === 0 ? 0 : 1) + ' ' + units[unitIndex];
+  }
+
+  function formatNumber(n) {
+    if (n === null || n === undefined) {
+      return null;
+    }
+    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.');
+  }
+
+  function renderFiles(files) {
+    fileList.innerHTML = '';
+    Object.keys(files).forEach(function(type) {
+      var file = files[type];
+      var li = document.createElement('li');
+      li.className = 'import-file import-file-' + file.stage;
+
+      var name = document.createElement('span');
+      name.className = 'import-file-name';
+      name.textContent = file.label;
+
+      var status = document.createElement('span');
+      status.className = 'import-file-status';
+      var text = stageLabels[file.stage] || file.stage;
+      if (file.stage === 'downloading') {
+        if (file.totalBytes) {
+          var pct = Math.round((file.bytes / file.totalBytes) * 100);
+          text += ' ' + pct + '% (' + formatBytes(file.bytes) + ' / ' + formatBytes(file.totalBytes) + ')';
+        } else if (file.bytes) {
+          text += ' (' + formatBytes(file.bytes) + ')';
+        }
+      }
+      if (file.stage === 'importing' && (file.rows || file.rows === 0)) {
+        text += ' (' + formatNumber(file.rows) + ')';
+      }
+      if (file.stage === 'error' && file.message) {
+        text += ': ' + file.message;
+      }
+      if (file.stage === 'done' && (file.rows || file.rows === 0)) {
+        text += ' (' + formatNumber(file.rows) + ')';
+      }
+      status.textContent = text;
+
+      li.appendChild(name);
+      li.appendChild(status);
+      fileList.appendChild(li);
+    });
+  }
+
+  function updateStatus(data) {
+    msg.classList.remove('idle');
+    msg.textContent = data.message || texts.running;
+    fill.style.width = (data.percent || 0) + '%';
+    renderFiles(data.files || {});
+  }
+
+  async function tick() {
+    var formData = new FormData();
+    formData.set('action', 'rebrickable_update_tick');
+    var response = await fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' });
+    if (!response.ok && response.status !== 500) {
+      throw new Error('tick failed with status ' + response.status);
+    }
+    return await response.json();
+  }
+
+  var hasStarted = false;
+  var isRunning = false;
+  var consecutiveFailures = 0;
+  var maxAutoRetries = 4;
+
+  function openModal() {
+    modal.style.display = 'flex';
+  }
+  function closeModal() {
+    modal.style.display = 'none';
+  }
+  openBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    openModal();
+  });
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.style.display !== 'none') {
+      closeModal();
+    }
+  });
+
+  function pauseWithMessage(message) {
+    isRunning = false;
+    startBtn.disabled = false;
+    startBtn.textContent = texts.resume_button;
+    msg.textContent = message || texts.error_retry;
+  }
+
+  function loop() {
+    tick().then(function(data) {
+      consecutiveFailures = 0;
+      updateStatus(data);
+      if (data.status === 'done') {
+        isRunning = false;
+        startBtn.disabled = false;
+        startBtn.textContent = texts.button;
+        return;
+      }
+      if (data.status === 'error') {
+        pauseWithMessage(data.message);
+        return;
+      }
+      setTimeout(loop, 50);
+    }).catch(function() {
+      consecutiveFailures++;
+      if (consecutiveFailures <= maxAutoRetries) {
+        msg.textContent = texts.error_retry + ' (' + consecutiveFailures + '/' + maxAutoRetries + ')';
+        setTimeout(loop, 1000 * consecutiveFailures);
+        return;
+      }
+      pauseWithMessage(texts.error_retry);
+    });
+  }
+
+  startBtn.addEventListener('click', function() {
+    if (isRunning) {
+      return;
+    }
+    isRunning = true;
+    startBtn.disabled = true;
+    startBtn.textContent = texts.running;
+    if (!hasStarted) {
+      updateStatus({ percent: 0, message: texts.started, files: {} });
+      hasStarted = true;
+    } else {
+      msg.textContent = texts.running;
+    }
+    loop();
+  });
+})();
+</script>
+SCRIPT;
+
+    return $html;
 }

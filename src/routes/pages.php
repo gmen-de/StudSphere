@@ -18,8 +18,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'settings') {
     if ($importMessage !== '') {
         $content .= '<p><strong>' . htmlspecialchars($importMessage) . '</strong></p>';
     }
-    $content .= '<form method="post"><input type="hidden" name="action" value="update_data"><button type="submit">' . htmlspecialchars(t('settings_update_button')) . '</button></form>';
+    $content .= '<button type="button" id="rebrickable-update-open">' . htmlspecialchars(t('settings_update_button')) . '</button>';
     $content .= '<p>' . htmlspecialchars(t('settings_update_help')) . '</p>';
+    $content .= renderRebrickableUpdateModal();
     $content .= '<h2>' . htmlspecialchars(t('settings_recent_updates')) . '</h2>';
     $content .= '<ul>';
     $content .= '<li>' . htmlspecialchars(t('settings_last_update_all', ['value' => getAppSetting('last_update_all', t('not_available'))])) . '</li>';

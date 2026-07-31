@@ -6,65 +6,11 @@ session_start();
 require_once __DIR__ . '/src/config_writer.php';
 require_once __DIR__ . '/src/i18n.php';
 
-/**
- * Weight (0..1) representing how far a single file has progressed, used to compute
- * the overall progress bar across all files.
- */
-function calculateFileProgressFraction(array $file): float
-{
-    switch ($file['stage']) {
-        case 'downloading':
-            if (!empty($file['totalBytes'])) {
-                return 0.45 * min(1.0, $file['bytes'] / $file['totalBytes']);
-            }
-            return $file['bytes'] > 0 ? 0.2 : 0.05;
-        case 'extracting':
-            return 0.5;
-        case 'importing':
-            // No reliable total row count without an extra full-file pass, so importing
-            // is shown as a fixed midpoint; the row counter itself still updates live.
-            return 0.75;
-        case 'done':
-        case 'error':
-            return 1.0;
-        default:
-            return 0.0;
-    }
-}
-
-function buildImportProgressPayload(array $state, bool $done): array
-{
-    $files = [];
-    $sum = 0.0;
-    $hasErrors = false;
-
-    foreach ($state['files'] as $type => $file) {
-        $sum += calculateFileProgressFraction($file);
-        if ($file['stage'] === 'error') {
-            $hasErrors = true;
-        }
-        $files[$type] = [
-            'label' => $file['label'],
-            'stage' => $file['stage'],
-            'message' => $file['message'],
-            'bytes' => $file['bytes'],
-            'totalBytes' => $file['totalBytes'],
-            'rows' => $file['rows'],
-        ];
-    }
-
-    $total = count($state['files']);
-    $percent = $total > 0 ? (int) round(($sum / $total) * 100) : 0;
-
-    return [
-        'status' => $done ? 'done' : 'running',
-        'percent' => $percent,
-        'message' => $done
-            ? ($hasErrors ? t('import_completed_with_errors') : t('import_completed'))
-            : t('import_running'),
-        'files' => $files,
-    ];
-}
+// calculateFileProgressFraction()/buildImportProgressPayload() now live in
+// src/download.php (required inside the import_tick handler below) — the
+// settings page's "Update jetzt" modal (src/routes/actions.php) drives the
+// same stepRebrickableImport() tick machine and shares them, instead of a
+// third near-duplicate copy.
 
 function render(string $title, string $content): void
 {

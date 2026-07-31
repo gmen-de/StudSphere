@@ -37,19 +37,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_data') {
+// Replaces the old synchronous "update_data" action, which ran
+// downloadAndImportRebrickableData() start-to-finish in one HTTP request —
+// measured 455s against a real Rebrickable export (1.5M+ inventory_parts
+// rows alone), reliably past both PHP's own max_execution_time and the
+// SSL offloader's timeout, with zero progress shown while it ran. Drives
+// the same stepRebrickableImport() tick machine setup.php's first-run
+// install already uses (see calculateFileProgressFraction()'s doc comment
+// in src/download.php for why the two share their payload builder), one
+// bounded chunk per request, polled by the settings page's "Update jetzt"
+// modal.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rebrickable_update_tick') {
+    header('Content-Type: application/json');
+    $state = null;
     try {
-        $result = downloadAndImportRebrickableData();
-        $summaryText = implode(', ', array_map(function ($type, $rows) { return "$type=$rows"; }, array_keys($result['summary']), $result['summary']));
-        if (!empty($result['errors'])) {
-            $errorsText = implode(', ', array_map(function ($type, $msg) { return "$type: $msg"; }, array_keys($result['errors']), $result['errors']));
-            $importMessage = t('update_partial_message', ['summary' => $summaryText, 'errors' => $errorsText]);
-        } else {
-            $importMessage = t('update_success_message', ['summary' => $summaryText]);
+        $state = $_SESSION['rebrickable_update_state'] ?? null;
+        if (!is_array($state)) {
+            $state = initRebrickableImportState();
         }
+
+        $result = stepRebrickableImport($state);
+        $_SESSION['rebrickable_update_state'] = $state;
+
+        $payload = buildImportProgressPayload($state, $result['done']);
+
+        if ($result['done']) {
+            // Mirrors downloadAndImportRebrickableData()'s own tail —
+            // one-shot cleanup/enrichment stepRebrickableImport() itself
+            // doesn't do per-tick, only once every file has settled.
+            try {
+                $pdo->exec('TRUNCATE TABLE part_set_counts');
+            } catch (Throwable $e) {
+                // Table may not exist yet on a pre-migration install.
+            }
+            syncExternalColorIds();
+            unset($_SESSION['rebrickable_update_state']);
+        }
+
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
-        $importMessage = t('update_failure_message', ['message' => $e->getMessage()]);
+        // Keep whatever state exists so the next tick resumes instead of
+        // restarting from file #1 (mirrors setup.php's import_tick).
+        $payload = is_array($state)
+            ? array_merge(buildImportProgressPayload($state, false), [
+                'status' => 'error',
+                'message' => t('import_error', ['message' => $e->getMessage()]),
+            ])
+            : ['status' => 'error', 'percent' => 0, 'message' => t('import_error', ['message' => $e->getMessage()]), 'files' => []];
+        http_response_code(500);
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     }
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_rebrickable_settings') {
