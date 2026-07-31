@@ -2676,17 +2676,28 @@ function renderOwnedSetDamagedMissingSection(PDO $pdo, array $ownedSet): string
         }
     }
     foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSet) as $fig) {
-        $missing = $fig['nominal_quantity'] - $fig['actual_quantity'];
-        if ($fig['damaged_quantity'] <= 0 && $missing <= 0) {
+        $figMissing = $fig['nominal_quantity'] - $fig['actual_quantity'];
+        if ($fig['damaged_quantity'] <= 0 && $figMissing <= 0) {
             continue;
         }
-        $rows[] = [
-            'category' => t('owned_set_tab_minifigs'),
-            'thumbnail' => $fig['thumbnail'],
-            'name' => $fig['name'],
-            'damaged' => $fig['damaged_quantity'],
-            'missing' => max(0, $missing),
-        ];
+        // A minifig showing any damage/missing here means at least one of
+        // its own constituent parts does — break it down to that part
+        // level instead of one aggregate "Minifigur X" row, since "1
+        // beschädigt" alone doesn't say whether that's a missing head or a
+        // damaged hip piece.
+        foreach (getOwnedSetMinifigPartsWithStatus($pdo, $ownedSet, $fig['minifig_id'], $fig['fig_num'], $fig['nominal_quantity'], getLocale()) as $part) {
+            $partMissing = $part['nominal_quantity'] - $part['actual_quantity'];
+            if ($part['damaged_quantity'] <= 0 && $partMissing <= 0) {
+                continue;
+            }
+            $rows[] = [
+                'category' => t('owned_set_tab_minifigs'),
+                'thumbnail' => $part['thumbnail'],
+                'name' => $fig['name'] . ' · ' . $part['name'] . ($part['color_name'] !== null ? ' · ' . $part['color_name'] : ''),
+                'damaged' => $part['damaged_quantity'],
+                'missing' => max(0, $partMissing),
+            ];
+        }
     }
 
     $html = '<div class="owned-set-damaged-missing-filters">';
