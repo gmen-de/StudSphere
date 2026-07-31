@@ -921,10 +921,14 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
       var damaged = Math.max(0, Math.min(parseInt(damagedInput.value, 10) || 0, owned));
       var intact = owned - damaged;
       var missing = item.nominal_quantity - owned;
-      summary.textContent = texts.inventorySummary
+      var summaryText = texts.inventorySummary
         .replace('{intact}', intact)
         .replace('{damaged}', damaged)
         .replace('{missing}', missing);
+      // Only the first " · " (between intact and damaged) becomes a line
+      // break — the second one (between damaged and missing) stays inline,
+      // per the user's request to keep the tile more compact vertically.
+      summary.innerHTML = summaryText.replace(' · ', '<br>');
       state[category][key].owned = owned;
       state[category][key].damaged = damaged;
     }
