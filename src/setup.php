@@ -265,6 +265,8 @@ function installDatabase(): void
             box_complete_notes TEXT DEFAULT NULL,
             stickers_applied TINYINT(1) NOT NULL DEFAULT 0,
             stickers_notes TEXT DEFAULT NULL,
+            damaged_missing_show_spares TINYINT(1) NOT NULL DEFAULT 0,
+            damaged_missing_show_stickers TINYINT(1) NOT NULL DEFAULT 0,
             added_by INT DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

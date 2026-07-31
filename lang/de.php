@@ -392,6 +392,8 @@ return [
     'owned_set_minifig_nominal_label' => '{count}x im Set enthalten',
     'owned_set_damaged_missing_empty' => 'Keine beschädigten oder fehlenden Teile.',
     'owned_set_damaged_missing_row' => '{damaged} beschädigt · {missing} fehlen',
+    'owned_set_damaged_missing_show_spares' => 'Ersatzteile anzeigen',
+    'owned_set_damaged_missing_show_stickers' => 'Stickerbögen anzeigen',
     'owned_set_missing_parts_heading' => 'Fehlende Teile',
     'owned_set_missing_label' => 'fehlend',
     'owned_set_nominal_of' => 'von {count}',

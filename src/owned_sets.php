@@ -66,13 +66,14 @@ function getNextOwnedSetInstanceNumber(PDO $pdo, int $setId): int
 }
 
 /**
- * @return array{id:int, set_id:int, inventory_id:?int, location_id:int, condition_type:string, has_instructions:bool, has_box:bool, box_complete:bool, notes:?string, instructions_notes:?string, box_notes:?string, box_complete_notes:?string, stickers_applied:bool, stickers_notes:?string, created_at:string, rebrickable_set_num:string, name:string, thumbnail:?string}|null
+ * @return array{id:int, set_id:int, inventory_id:?int, location_id:int, condition_type:string, has_instructions:bool, has_box:bool, box_complete:bool, notes:?string, instructions_notes:?string, box_notes:?string, box_complete_notes:?string, stickers_applied:bool, stickers_notes:?string, damaged_missing_show_spares:bool, damaged_missing_show_stickers:bool, created_at:string, rebrickable_set_num:string, name:string, thumbnail:?string}|null
  */
 function getOwnedSetById(PDO $pdo, int $id): ?array
 {
     $stmt = $pdo->prepare(
         'SELECT os.id, os.set_id, os.inventory_id, os.location_id, os.condition_type, os.has_instructions, os.has_box, os.box_complete,
-                os.notes, os.instructions_notes, os.box_notes, os.box_complete_notes, os.stickers_applied, os.stickers_notes, os.created_at,
+                os.notes, os.instructions_notes, os.box_notes, os.box_complete_notes, os.stickers_applied, os.stickers_notes,
+                os.damaged_missing_show_spares, os.damaged_missing_show_stickers, os.created_at,
                 s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
          FROM owned_sets os
          INNER JOIN sets s ON s.id = os.set_id
@@ -91,6 +92,8 @@ function getOwnedSetById(PDO $pdo, int $id): ?array
     $row['has_box'] = (bool) $row['has_box'];
     $row['box_complete'] = (bool) $row['box_complete'];
     $row['stickers_applied'] = (bool) $row['stickers_applied'];
+    $row['damaged_missing_show_spares'] = (bool) $row['damaged_missing_show_spares'];
+    $row['damaged_missing_show_stickers'] = (bool) $row['damaged_missing_show_stickers'];
     return $row;
 }
 
@@ -2114,14 +2117,29 @@ function renderOwnedSetMinifigInventoryGrid(PDO $pdo, array $ownedSet, array $mi
  * let a missing/damaged row here be filled in directly from loose stock
  * (with a stock transfer into this instance's location), but that's a
  * separate, not-yet-built feature; this only ever displays.
+ *
+ * Spares and stickers are excluded by default (most sets don't track
+ * either closely, and both categories tend to be the noisiest — a
+ * near-complete spares/sticker count reads as "damaged/missing" here just
+ * as loudly as an actually-incomplete model) — two checkboxes let the
+ * owner opt either back in, per instance (owned_sets.damaged_missing_show_*,
+ * migration 22), not globally. Regular inventory and minifigs always show;
+ * only these two are ever gated.
  */
 function renderOwnedSetDamagedMissingSection(PDO $pdo, array $ownedSet): string
 {
+    $showSpares = $ownedSet['damaged_missing_show_spares'];
+    $showStickers = $ownedSet['damaged_missing_show_stickers'];
+
     $categories = [
         'owned_set_tab_inventory' => getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale()),
-        'owned_set_tab_spares' => getOwnedSetSparePartsWithStatus($pdo, $ownedSet, getLocale()),
-        'owned_set_tab_stickers' => getOwnedSetStickerPartsWithStatus($pdo, $ownedSet, getLocale()),
     ];
+    if ($showSpares) {
+        $categories['owned_set_tab_spares'] = getOwnedSetSparePartsWithStatus($pdo, $ownedSet, getLocale());
+    }
+    if ($showStickers) {
+        $categories['owned_set_tab_stickers'] = getOwnedSetStickerPartsWithStatus($pdo, $ownedSet, getLocale());
+    }
 
     $rows = [];
     foreach ($categories as $labelKey => $items) {
@@ -2153,20 +2171,87 @@ function renderOwnedSetDamagedMissingSection(PDO $pdo, array $ownedSet): string
         ];
     }
 
-    if (empty($rows)) {
-        return '<section class="card"><p>' . htmlspecialchars(t('owned_set_damaged_missing_empty')) . '</p></section>';
-    }
+    $html = '<div class="owned-set-damaged-missing-filters">';
+    $html .= '<label class="checkbox-label"><input type="checkbox" id="owned-set-damaged-missing-spares"' . ($showSpares ? ' checked' : '') . '> ' . htmlspecialchars(t('owned_set_damaged_missing_show_spares')) . '</label>';
+    $html .= '<label class="checkbox-label"><input type="checkbox" id="owned-set-damaged-missing-stickers"' . ($showStickers ? ' checked' : '') . '> ' . htmlspecialchars(t('owned_set_damaged_missing_show_stickers')) . '</label>';
+    $html .= '</div>';
 
-    $html = '<div class="owned-set-inventory-tiles">';
-    foreach ($rows as $row) {
-        $html .= '<div class="owned-set-inventory-tile owned-set-inventory-tile-readonly">';
-        $html .= '<span class="part-card-image">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('bricks')) . '</span>';
-        $html .= '<span class="part-card-num">' . htmlspecialchars($row['category']) . '</span>';
-        $html .= '<span class="part-card-name">' . htmlspecialchars($row['name']) . '</span>';
-        $html .= '<p class="owned-set-inventory-summary">' . htmlspecialchars(t('owned_set_damaged_missing_row', ['damaged' => (string) $row['damaged'], 'missing' => (string) $row['missing']])) . '</p>';
+    if (empty($rows)) {
+        $html .= '<section class="card"><p>' . htmlspecialchars(t('owned_set_damaged_missing_empty')) . '</p></section>';
+    } else {
+        $html .= '<div class="owned-set-inventory-tiles">';
+        foreach ($rows as $row) {
+            $html .= '<div class="owned-set-inventory-tile owned-set-inventory-tile-readonly">';
+            $html .= '<span class="part-card-image">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('bricks')) . '</span>';
+            $html .= '<span class="part-card-num">' . htmlspecialchars($row['category']) . '</span>';
+            $html .= '<span class="part-card-name">' . htmlspecialchars($row['name']) . '</span>';
+            $html .= '<p class="owned-set-inventory-summary">' . htmlspecialchars(t('owned_set_damaged_missing_row', ['damaged' => (string) $row['damaged'], 'missing' => (string) $row['missing']])) . '</p>';
+            $html .= '</div>';
+        }
         $html .= '</div>';
     }
-    $html .= '</div>';
+
+    $ownedSetId = (int) $ownedSet['id'];
+    $filterLabelsJson = json_encode([
+        'errorRetry' => t('import_error_retry'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $filterLabelsJson;
+  var ownedSetId = $ownedSetId;
+  var sparesBox = document.getElementById('owned-set-damaged-missing-spares');
+  var stickersBox = document.getElementById('owned-set-damaged-missing-stickers');
+  var container = document.getElementById('owned-set-tab-content');
+  if (!sparesBox || !stickersBox || !container) {
+    return;
+  }
+
+  function reloadTab() {
+    container.innerHTML = '';
+    var params = new URLSearchParams(window.location.search);
+    params.set('page', 'owned_set_detail');
+    params.set('id', String(ownedSetId));
+    params.set('tab', 'damaged_missing');
+    params.set('ajax', '1');
+    fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (!res.success) {
+          container.textContent = res.message || texts.errorRetry;
+          return;
+        }
+        container.innerHTML = res.html;
+        var scripts = container.querySelectorAll('script');
+        for (var i = 0; i < scripts.length; i++) {
+          var oldScript = scripts[i];
+          var freshScript = document.createElement('script');
+          freshScript.textContent = oldScript.textContent;
+          oldScript.parentNode.replaceChild(freshScript, oldScript);
+        }
+      })
+      .catch(function() {
+        container.textContent = texts.errorRetry;
+      });
+  }
+
+  function saveAndReload() {
+    var formData = new FormData();
+    formData.set('action', 'save_owned_set_damaged_missing_settings');
+    formData.set('owned_set_id', String(ownedSetId));
+    formData.set('show_spares', sparesBox.checked ? '1' : '');
+    formData.set('show_stickers', stickersBox.checked ? '1' : '');
+    fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+      .then(function() { reloadTab(); })
+      .catch(function() { reloadTab(); });
+  }
+
+  sparesBox.addEventListener('change', saveAndReload);
+  stickersBox.addEventListener('change', saveAndReload);
+})();
+</script>
+SCRIPT;
 
     return $html;
 }

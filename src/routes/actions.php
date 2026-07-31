@@ -797,6 +797,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'open_
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_owned_set_damaged_missing_settings') {
+    header('Content-Type: application/json');
+    try {
+        $filterOwnedSetId = (int) ($_POST['owned_set_id'] ?? 0);
+        if (getOwnedSetById($pdo, $filterOwnedSetId) === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        $showSpares = ($_POST['show_spares'] ?? '') === '1';
+        $showStickers = ($_POST['show_stickers'] ?? '') === '1';
+        $stmt = $pdo->prepare('UPDATE owned_sets SET damaged_missing_show_spares = ?, damaged_missing_show_stickers = ? WHERE id = ?');
+        $stmt->execute([$showSpares ? 1 : 0, $showStickers ? 1 : 0, $filterOwnedSetId]);
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remove_owned_set') {
     $removeOwnedSetId = (int) ($_POST['owned_set_id'] ?? 0);
     $removeOwnedSetSetId = (int) ($_POST['set_id'] ?? 0);

@@ -334,6 +334,15 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'colors', 'brickowl_color_id', 'INT DEFAULT NULL');
             addColumnIfMissing($pdo, 'colors', 'ldraw_color_id', 'INT DEFAULT NULL');
         },
+        22 => function (PDO $pdo): void {
+            // Per-instance toggles for the "Beschädigt/Fehlend" tab — spares
+            // and stickers are excluded from that list by default (most
+            // sets don't track either closely), only shown once the owner
+            // explicitly opts in for this one owned_sets row. See
+            // renderOwnedSetDamagedMissingSection() in src/owned_sets.php.
+            addColumnIfMissing($pdo, 'owned_sets', 'damaged_missing_show_spares', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'owned_sets', 'damaged_missing_show_stickers', 'TINYINT(1) NOT NULL DEFAULT 0');
+        },
     ];
 }
 
@@ -396,7 +405,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 21;
+const CURRENT_SCHEMA_VERSION = 22;
 
 function getInstalledSchemaVersion(): int
 {
