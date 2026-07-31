@@ -320,6 +320,16 @@ function getSchemaMigrations(): array
             // page via getNavMenu()'s "Meine Sets" dropdown.
             addIndexIfMissing($pdo, 'sets', 'idx_sets_theme', 'theme');
         },
+        21 => function (PDO $pdo): void {
+            // Rebrickable's own colors.csv (the bulk-import file
+            // downloadAndImportRebrickableData() already uses) has no
+            // BrickLink/BrickOwl mapping — only the REST API's
+            // lego/colors/ endpoint does, via each color's external_ids.
+            // See syncExternalColorIds() in src/rebrickable.php, called
+            // once at the end of every Rebrickable data update.
+            addColumnIfMissing($pdo, 'colors', 'bricklink_color_id', 'INT DEFAULT NULL');
+            addColumnIfMissing($pdo, 'colors', 'brickowl_color_id', 'INT DEFAULT NULL');
+        },
     ];
 }
 
@@ -382,7 +392,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 20;
+const CURRENT_SCHEMA_VERSION = 21;
 
 function getInstalledSchemaVersion(): int
 {

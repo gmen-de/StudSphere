@@ -52,6 +52,61 @@ function callRebrickableApi(string $path): array
     return $data;
 }
 
+/**
+ * Fills colors.bricklink_color_id/brickowl_color_id from Rebrickable's own
+ * external_ids mapping — not available in the bulk CSV downloads the main
+ * import uses (downloadAndImportRebrickableData()), only via this REST
+ * endpoint. Called once at the end of every Rebrickable data update rather
+ * than driven by its own tick: all ~275 colors fit in a single API page
+ * and the whole call completes in well under a second (measured).
+ *
+ * A color can have at most one BrickLink id and, among real (non-sentinel)
+ * colors, at most one BrickOwl id (verified against a full color dump
+ * before building this) — a plain nullable INT column each is enough, no
+ * need for a list. Many niche colors (Duplo/Fabuland/HO-scale/...)
+ * legitimately have no BrickLink/BrickOwl counterpart at all; those stay
+ * NULL, which is correct, not a failure.
+ *
+ * Best-effort: no API key configured, or the API call itself fails, just
+ * means this optional enrichment is skipped — it must never fail the
+ * surrounding Rebrickable CSV update, which doesn't need an API key at all.
+ *
+ * @return array{updated: int, skipped: bool}
+ */
+function syncExternalColorIds(): array
+{
+    if (trim((string) getAppSetting('rebrickable_api_key')) === '') {
+        return ['updated' => 0, 'skipped' => true];
+    }
+
+    try {
+        $response = callRebrickableApi('lego/colors/?page_size=1000');
+    } catch (Throwable $e) {
+        return ['updated' => 0, 'skipped' => true];
+    }
+
+    $pdo = getPDO();
+    $stmt = $pdo->prepare('UPDATE colors SET bricklink_color_id = ?, brickowl_color_id = ? WHERE color_id = ?');
+
+    $updated = 0;
+    foreach ($response['results'] ?? [] as $color) {
+        $externalIds = $color['external_ids'] ?? [];
+        $brickLinkIds = $externalIds['BrickLink']['ext_ids'] ?? [];
+        $brickOwlIds = $externalIds['BrickOwl']['ext_ids'] ?? [];
+        $brickLinkId = !empty($brickLinkIds) ? (int) $brickLinkIds[0] : null;
+        $brickOwlId = !empty($brickOwlIds) ? (int) $brickOwlIds[0] : null;
+        if ($brickLinkId === null && $brickOwlId === null) {
+            continue;
+        }
+        $stmt->execute([$brickLinkId, $brickOwlId, $color['id']]);
+        if ($stmt->rowCount() > 0) {
+            $updated++;
+        }
+    }
+
+    return ['updated' => $updated, 'skipped' => false];
+}
+
 function importPartByPartNum(string $partNum): int
 {
     $partNum = trim($partNum);

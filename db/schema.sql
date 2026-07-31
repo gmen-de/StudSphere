@@ -75,7 +75,9 @@ CREATE TABLE IF NOT EXISTS colors (
     color_id INT NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
     rgb VARCHAR(20) DEFAULT NULL,
-    is_trans TINYINT(1) DEFAULT 0
+    is_trans TINYINT(1) DEFAULT 0,
+    bricklink_color_id INT DEFAULT NULL,
+    brickowl_color_id INT DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS part_categories (

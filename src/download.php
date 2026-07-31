@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/import.php';
 require_once __DIR__ . '/settings.php';
+require_once __DIR__ . '/rebrickable.php';
 
 const REBRICKABLE_DOWNLOAD_ORDER = [
     'themes',
@@ -585,6 +586,11 @@ function downloadAndImportRebrickableData(?callable $progressCallback = null): a
         // Table may not exist yet on a pre-migration install — the next
         // migration run creates it and there's nothing to invalidate anyway.
     }
+
+    // Best-effort (see its own doc comment) — an update with no API key
+    // configured, or a failed API call, must not turn into a failed
+    // Rebrickable update overall, so any error is already swallowed inside.
+    syncExternalColorIds();
 
     return ['summary' => $summary, 'errors' => $errors];
 }
