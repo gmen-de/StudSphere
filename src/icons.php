@@ -51,6 +51,27 @@ function getBooleanStatusIcon(bool $value): string
     return '<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" fill="none" stroke="#dc2626" stroke-width="1.8"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7" stroke="#dc2626" stroke-width="2.2"/></svg>';
 }
 
+/**
+ * Action-row icons (edit/delete/move/sell/BrickLink-export) — owned_set_detail's
+ * action bar, replacing the old plain-text "Aus Sammlung entfernen" button.
+ * Same 24x24/stroke-1.8/currentColor convention as getNavIcon(). 'bricklink_xml'
+ * is deliberately generic (file + code brackets) rather than any BrickLink
+ * branding — see the brand-assets decision to stay clear of LEGO/third-party
+ * trademarks.
+ */
+function getActionIcon(string $key): string
+{
+    $icons = [
+        'edit' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+        'delete' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M18 7v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7"/><path d="M9 7V4.5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 4.5V7"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>',
+        'move' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M9 6l3-3 3 3"/><path d="M9 18l3 3 3-3"/><path d="M6 9l-3 3 3 3"/><path d="M18 9l3 3-3 3"/></svg>',
+        'bricklink_xml' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M13 3v5h5"/><path d="M9.5 13l-2 2 2 2"/><path d="M14.5 13l2 2-2 2"/></svg>',
+        'sell' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 13.5l-7.2 7.2a1.8 1.8 0 0 1-2.55 0L2.5 12.45V3h9.45l8.55 8.55a1.8 1.8 0 0 1 0 2.55z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none"/></svg>',
+    ];
+
+    return $icons[$key] ?? '';
+}
+
 function getFlagIcon(string $locale): string
 {
     $flags = [

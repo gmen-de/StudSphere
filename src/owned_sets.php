@@ -1013,6 +1013,454 @@ function removeOwnedSet(PDO $pdo, int $ownedSetId): void
 }
 
 /**
+ * "Verkaufen": records a sale (owned_set_sales — the only place this
+ * survives, since the instance itself is gone right after) and then does
+ * exactly what removeOwnedSet() does. Just a thin wrapper, not a variant of
+ * removal — the actual per-listing-template generation (Kleinanzeigen,
+ * eBay, ...) the user described is a separate, not-yet-built feature; this
+ * only captures the basic sale facts (price/date/platform/notes) that
+ * feature will eventually need.
+ */
+function sellOwnedSet(PDO $pdo, int $ownedSetId, ?float $price, ?string $soldAt, ?string $platform, ?string $notes, ?int $userId): void
+{
+    $ownedSet = getOwnedSetById($pdo, $ownedSetId);
+    if ($ownedSet === null) {
+        throw new RuntimeException('Set-Exemplar nicht gefunden.');
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO owned_set_sales (set_id, rebrickable_set_num, set_name, price, sold_at, platform, notes, sold_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $stmt->execute([
+        $ownedSet['set_id'],
+        $ownedSet['rebrickable_set_num'],
+        $ownedSet['name'],
+        $price,
+        $soldAt,
+        $platform,
+        $notes,
+        $userId,
+    ]);
+
+    removeOwnedSet($pdo, $ownedSetId);
+}
+
+/**
+ * "Bearbeiten": updates the same fields the add-wizard's step 2 captures at
+ * creation time, after the fact. $markAsUsed can only ever move condition
+ * new -> used here, never back — same one-way rule openOwnedSet() already
+ * enforces via the dedicated "Set öffnen" button; this just gives that
+ * same transition a second entry point, going through openOwnedSet() so
+ * storage_items' own condition_type stays in sync too, not just this row.
+ * The same "a sealed set trivially has everything, no stickers yet"
+ * server-side forcing addOwnedSet() applies at creation applies again here
+ * (still evaluated against the row's condition *after* any transition
+ * above), for the same reason — a direct POST could otherwise bypass the
+ * edit modal's own disabled checkboxes.
+ */
+function updateOwnedSetDetails(
+    PDO $pdo,
+    int $ownedSetId,
+    bool $markAsUsed,
+    bool $hasInstructions,
+    bool $hasBox,
+    bool $boxComplete,
+    bool $stickersApplied,
+    ?string $notes,
+    ?string $instructionsNotes,
+    ?string $boxNotes,
+    ?string $boxCompleteNotes,
+    ?string $stickersNotes
+): void {
+    $ownedSet = getOwnedSetById($pdo, $ownedSetId);
+    if ($ownedSet === null) {
+        throw new RuntimeException('Set-Exemplar nicht gefunden.');
+    }
+
+    if ($markAsUsed && $ownedSet['condition_type'] === 'new') {
+        openOwnedSet($pdo, $ownedSet);
+        $ownedSet['condition_type'] = 'used';
+    }
+
+    if ($ownedSet['condition_type'] === 'new') {
+        $hasInstructions = true;
+        $hasBox = true;
+        $boxComplete = true;
+        $stickersApplied = false;
+    }
+
+    $stmt = $pdo->prepare(
+        'UPDATE owned_sets SET has_instructions = ?, has_box = ?, box_complete = ?, stickers_applied = ?,
+                notes = ?, instructions_notes = ?, box_notes = ?, box_complete_notes = ?, stickers_notes = ?
+         WHERE id = ?'
+    );
+    $stmt->execute([
+        $hasInstructions ? 1 : 0,
+        $hasBox ? 1 : 0,
+        $boxComplete ? 1 : 0,
+        $stickersApplied ? 1 : 0,
+        $notes,
+        $instructionsNotes,
+        $boxNotes,
+        $boxCompleteNotes,
+        $stickersNotes,
+        $ownedSetId,
+    ]);
+}
+
+/**
+ * "Bearbeiten" modal — same fields as the add-wizard's step 2, prefilled
+ * with the instance's current values, but no version/location/inventory
+ * steps (those are separate actions — "Verschieben" for location, the
+ * inventory tabs themselves for stock). Reuses the wizard's own
+ * .owned-set-wizard-detail-group markup/JS forcing behavior (see
+ * renderAddOwnedSetWizardModal() in src/owned_set_wizard.php) so a still-
+ * sealed instance's fields behave identically here — force-checked/
+ * disabled while "Neu" is selected, same reasoning as there. Only shown as
+ * editable at all when the instance is still 'new'; once opened, "Zustand"
+ * is a fixed label — condition_type has no supported used -> new path
+ * anywhere else in the app, so this modal doesn't invent one either.
+ */
+function renderOwnedSetEditModal(array $ownedSet): string
+{
+    $isNew = $ownedSet['condition_type'] === 'new';
+
+    $html = '<div class="modal-overlay" id="owned-set-edit-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<button type="button" class="modal-close" id="owned-set-edit-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<h2>' . htmlspecialchars(t('owned_set_edit_heading')) . '</h2>';
+    $html .= '<form method="post" id="owned-set-edit-form">';
+    $html .= '<input type="hidden" name="action" value="save_owned_set_details">';
+    $html .= '<input type="hidden" name="owned_set_id" value="' . (int) $ownedSet['id'] . '">';
+
+    if ($isNew) {
+        $html .= '<label class="checkbox-label"><input type="radio" name="owned-set-edit-condition" value="new" checked> ' . htmlspecialchars(t('owned_set_condition_new')) . '</label>';
+        $html .= '<label class="checkbox-label"><input type="radio" name="owned-set-edit-condition" value="used"> ' . htmlspecialchars(t('owned_set_condition_used')) . '</label>';
+    } else {
+        $html .= '<p>' . htmlspecialchars(t('owned_set_field_condition')) . ': <strong>' . htmlspecialchars(t('owned_set_condition_used')) . '</strong></p>';
+    }
+
+    $detailFields = [
+        ['has-instructions', 'owned_set_has_instructions', 'instructions-notes', 'owned_set_instructions_notes_label', $ownedSet['has_instructions'], $ownedSet['instructions_notes']],
+        ['has-box', 'owned_set_has_box', 'box-notes', 'owned_set_box_notes_label', $ownedSet['has_box'], $ownedSet['box_notes']],
+        ['has-box-complete', 'owned_set_box_complete', 'box-complete-notes', 'owned_set_box_complete_notes_label', $ownedSet['box_complete'], $ownedSet['box_complete_notes']],
+        ['stickers-applied', 'owned_set_stickers_applied', 'stickers-notes', 'owned_set_stickers_notes_label', $ownedSet['stickers_applied'], $ownedSet['stickers_notes']],
+    ];
+    foreach ($detailFields as [$checkboxId, $checkboxLabelKey, $notesId, $notesLabelKey, $checked, $noteValue]) {
+        $html .= '<div class="owned-set-wizard-detail-group">';
+        $html .= '<label class="checkbox-label"><input type="checkbox" id="owned-set-edit-' . $checkboxId . '" name="' . str_replace('-', '_', $checkboxId) . '" value="1"' . ($checked ? ' checked' : '') . '' . ($isNew ? ' disabled' : '') . '> ' . htmlspecialchars(t($checkboxLabelKey)) . '</label>';
+        $html .= '<textarea class="owned-set-wizard-subnote" id="owned-set-edit-' . $notesId . '" name="' . str_replace('-', '_', $notesId) . '" rows="2" placeholder="' . htmlspecialchars(t($notesLabelKey)) . '" style="' . ($checked ? '' : 'display:none;') . '">' . htmlspecialchars((string) $noteValue) . '</textarea>';
+        $html .= '</div>';
+    }
+
+    $html .= '<label>' . htmlspecialchars(t('owned_set_notes_label')) . '<textarea name="notes" rows="4">' . htmlspecialchars((string) $ownedSet['notes']) . '</textarea></label>';
+    $html .= '<p class="owned-set-wizard-error" id="owned-set-edit-error"></p>';
+    $html .= '<button type="submit">' . htmlspecialchars(t('owned_set_save_button')) . '</button>';
+    $html .= '</form>';
+    $html .= '</div></div>';
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var openBtn = document.getElementById('owned-set-edit-open');
+  var modal = document.getElementById('owned-set-edit-modal');
+  var closeBtn = document.getElementById('owned-set-edit-modal-close');
+  if (!openBtn || !modal || !closeBtn) {
+    return;
+  }
+
+  function openModal() {
+    modal.style.display = 'flex';
+  }
+  function closeModal() {
+    modal.style.display = 'none';
+  }
+  openBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    openModal();
+  });
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.style.display !== 'none') {
+      closeModal();
+    }
+  });
+
+  var detailPairs = [
+    ['instructions', 'owned-set-edit-has-instructions', true],
+    ['box', 'owned-set-edit-has-box', true],
+    ['box-complete', 'owned-set-edit-has-box-complete', true],
+    ['stickers', 'owned-set-edit-stickers-applied', false]
+  ];
+  detailPairs.forEach(function(pair) {
+    var checkbox = document.getElementById(pair[1]);
+    var notes = document.getElementById('owned-set-edit-' + pair[0] + '-notes');
+    if (checkbox && notes) {
+      checkbox.addEventListener('change', function() {
+        notes.style.display = checkbox.checked ? 'block' : 'none';
+      });
+    }
+  });
+
+  modal.querySelectorAll('input[name="owned-set-edit-condition"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      if (!radio.checked) {
+        return;
+      }
+      var isNew = radio.value === 'new';
+      detailPairs.forEach(function(pair) {
+        var checkbox = document.getElementById(pair[1]);
+        var notes = document.getElementById('owned-set-edit-' + pair[0] + '-notes');
+        checkbox.disabled = isNew;
+        if (isNew) {
+          checkbox.checked = pair[2];
+          notes.style.display = checkbox.checked ? 'block' : 'none';
+        }
+      });
+    });
+  });
+})();
+</script>
+SCRIPT;
+
+    return $html;
+}
+
+/**
+ * "Verschieben" modal — the same 3-level cascading location picker as the
+ * add-wizard's own location step (renderAddOwnedSetWizardModal() in
+ * src/owned_set_wizard.php), duplicated rather than shared (self-contained
+ * per-modal script, same convention as everywhere else in this file), but
+ * re-parenting the instance's *existing* storage node (moveStorageLocation()
+ * in src/storage.php) instead of picking a parent for a brand-new one.
+ */
+function renderOwnedSetMoveModal(array $ownedSet): string
+{
+    $currentPath = implode(' » ', array_column(getStorageLocationAncestors($ownedSet['location_id']), 'name'));
+
+    $html = '<div class="modal-overlay" id="owned-set-move-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<button type="button" class="modal-close" id="owned-set-move-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<h2>' . htmlspecialchars(t('owned_set_move_heading')) . '</h2>';
+    $html .= '<p class="hint">' . htmlspecialchars(t('owned_set_move_current', ['path' => $currentPath])) . '</p>';
+    $html .= '<form method="post" id="owned-set-move-form">';
+    $html .= '<input type="hidden" name="action" value="move_owned_set">';
+    $html .= '<input type="hidden" name="owned_set_id" value="' . (int) $ownedSet['id'] . '">';
+    $html .= '<input type="hidden" name="parent_location_id" id="owned-set-move-parent-id">';
+
+    $locationLevels = [
+        [1, 'add_stock_level1_label'],
+        [2, 'add_stock_level2_label'],
+        [3, 'add_stock_level3_label'],
+    ];
+    foreach ($locationLevels as [$level, $labelKey]) {
+        $html .= '<div class="location-level">';
+        $html .= '<span class="location-level-label">' . htmlspecialchars(t($labelKey)) . '</span>';
+        $html .= '<select id="owned-set-move-location-' . $level . '"' . ($level > 1 ? ' disabled' : '') . '>';
+        $html .= '<option value="">' . htmlspecialchars(t('add_stock_select_placeholder')) . '</option>';
+        if ($level === 1) {
+            foreach (getChildLocations(null) as $loc) {
+                $html .= '<option value="' . (int) $loc['id'] . '">' . htmlspecialchars($loc['name']) . '</option>';
+            }
+        }
+        $html .= '</select>';
+        $html .= '<span class="location-hint" id="owned-set-move-location-' . $level . '-hint"></span>';
+        $html .= '</div>';
+    }
+
+    $html .= '<p class="owned-set-wizard-error" id="owned-set-move-error"></p>';
+    $html .= '<button type="submit">' . htmlspecialchars(t('owned_set_move_button')) . '</button>';
+    $html .= '</form>';
+    $html .= '</div></div>';
+
+    $labelsJson = json_encode([
+        'selectPlaceholder' => t('add_stock_select_placeholder'),
+        'noChildren' => t('add_stock_no_children'),
+        'locationRequired' => t('owned_set_wizard_location_required'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $labelsJson;
+  var openBtn = document.getElementById('owned-set-move-open');
+  var modal = document.getElementById('owned-set-move-modal');
+  var closeBtn = document.getElementById('owned-set-move-modal-close');
+  var form = document.getElementById('owned-set-move-form');
+  var loc1 = document.getElementById('owned-set-move-location-1');
+  var loc2 = document.getElementById('owned-set-move-location-2');
+  var loc3 = document.getElementById('owned-set-move-location-3');
+  var loc2Hint = document.getElementById('owned-set-move-location-2-hint');
+  var loc3Hint = document.getElementById('owned-set-move-location-3-hint');
+  var parentIdField = document.getElementById('owned-set-move-parent-id');
+  var errorEl = document.getElementById('owned-set-move-error');
+  if (!openBtn || !modal || !closeBtn || !form || !loc1 || !loc2 || !loc3) {
+    return;
+  }
+
+  function fillLocationSelect(select, hint, parentId) {
+    hint.textContent = '';
+    var params = new URLSearchParams();
+    params.set('action', 'location_children');
+    params.set('parent_id', parentId);
+    return fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+        (data.children || []).forEach(function(loc) {
+          var opt = document.createElement('option');
+          opt.value = loc.id;
+          opt.textContent = loc.name;
+          select.appendChild(opt);
+        });
+        var hasChildren = (data.children || []).length > 0;
+        select.disabled = !hasChildren;
+        if (!hasChildren) {
+          hint.textContent = texts.noChildren;
+        }
+      });
+  }
+
+  loc1.addEventListener('change', function() {
+    loc2.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+    loc2.disabled = true;
+    loc3.disabled = true;
+    loc2Hint.textContent = '';
+    loc3Hint.textContent = '';
+    if (loc1.value) {
+      fillLocationSelect(loc2, loc2Hint, loc1.value);
+    }
+  });
+  loc2.addEventListener('change', function() {
+    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
+    loc3.disabled = true;
+    loc3Hint.textContent = '';
+    if (loc2.value) {
+      fillLocationSelect(loc3, loc3Hint, loc2.value);
+    }
+  });
+
+  function openModal() {
+    modal.style.display = 'flex';
+  }
+  function closeModal() {
+    modal.style.display = 'none';
+  }
+  openBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    openModal();
+  });
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.style.display !== 'none') {
+      closeModal();
+    }
+  });
+
+  form.addEventListener('submit', function(e) {
+    var selected = loc3.value || loc2.value || loc1.value;
+    if (!selected) {
+      e.preventDefault();
+      errorEl.textContent = texts.locationRequired;
+      return;
+    }
+    parentIdField.value = selected;
+  });
+})();
+</script>
+SCRIPT;
+
+    return $html;
+}
+
+/**
+ * "Verkaufen" modal — captures the basic facts a future listing-template
+ * feature (Kleinanzeigen/eBay/... — not built yet, per the user) will
+ * eventually need, then removes the instance exactly like "Löschen" does
+ * (sellOwnedSet() records the sale first, then calls removeOwnedSet()).
+ * A plain form submit + confirm(), same as the existing remove-owned-set
+ * form, not AJAX — the page navigates away either way once it succeeds.
+ */
+function renderOwnedSetSellModal(array $ownedSet): string
+{
+    $today = date('Y-m-d');
+
+    $html = '<div class="modal-overlay" id="owned-set-sell-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<button type="button" class="modal-close" id="owned-set-sell-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<h2>' . htmlspecialchars(t('owned_set_sell_heading')) . '</h2>';
+    $html .= '<form method="post" id="owned-set-sell-form">';
+    $html .= '<input type="hidden" name="action" value="sell_owned_set">';
+    $html .= '<input type="hidden" name="owned_set_id" value="' . (int) $ownedSet['id'] . '">';
+    $html .= '<input type="hidden" name="set_id" value="' . (int) $ownedSet['set_id'] . '">';
+    $html .= '<label>' . htmlspecialchars(t('owned_set_sell_price_label')) . '<input type="number" name="price" step="0.01" min="0"></label>';
+    $html .= '<label>' . htmlspecialchars(t('owned_set_sell_date_label')) . '<input type="date" name="sold_at" value="' . htmlspecialchars($today) . '"></label>';
+    $html .= '<label>' . htmlspecialchars(t('owned_set_sell_platform_label')) . '<input type="text" name="platform" placeholder="' . htmlspecialchars(t('owned_set_sell_platform_placeholder')) . '"></label>';
+    $html .= '<label>' . htmlspecialchars(t('owned_set_notes_label')) . '<textarea name="notes" rows="3"></textarea></label>';
+    $html .= '<button type="submit" class="owned-set-remove-button">' . htmlspecialchars(t('owned_set_sell_button')) . '</button>';
+    $html .= '</form>';
+    $html .= '</div></div>';
+
+    $confirmJson = json_encode(t('owned_set_sell_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var openBtn = document.getElementById('owned-set-sell-open');
+  var modal = document.getElementById('owned-set-sell-modal');
+  var closeBtn = document.getElementById('owned-set-sell-modal-close');
+  var form = document.getElementById('owned-set-sell-form');
+  if (!openBtn || !modal || !closeBtn || !form) {
+    return;
+  }
+
+  function openModal() {
+    modal.style.display = 'flex';
+  }
+  function closeModal() {
+    modal.style.display = 'none';
+  }
+  openBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    openModal();
+  });
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.style.display !== 'none') {
+      closeModal();
+    }
+  });
+
+  form.addEventListener('submit', function(e) {
+    if (!window.confirm($confirmJson)) {
+      e.preventDefault();
+    }
+  });
+})();
+</script>
+SCRIPT;
+
+    return $html;
+}
+
+/**
  * @return array<int, array{id:int, caption:?string, original_filename:string, stored_path:string, file_size:int, uploaded_at:string}>
  */
 function getOwnedSetPhotos(PDO $pdo, int $ownedSetId): array
@@ -2108,6 +2556,76 @@ function renderOwnedSetMinifigInventoryGrid(PDO $pdo, array $ownedSet, array $mi
     $html .= renderOwnedSetMinifigQuantityModalScript($ownedSet);
 
     return $html;
+}
+
+/**
+ * BrickLink Wanted-List XML for exactly the rows the "Beschädigt/Fehlend"
+ * tab currently shows — same category filtering via
+ * damaged_missing_show_spares/_stickers (see
+ * renderOwnedSetDamagedMissingSection()'s doc comment). Missing + damaged
+ * quantity are combined into one wanted count per line, since both need a
+ * replacement part either way. Minifigs are left out entirely: BrickLink
+ * identifies minifigs through its own id scheme, not one this app maps
+ * from Rebrickable anywhere, so there's no reliable <ITEMID> to fill in
+ * for them. A part/sticker line with no bricklink_color_id mapping (see
+ * syncExternalColorIds()) is skipped too — listed in a trailing XML
+ * comment instead of just silently vanishing from the export.
+ *
+ * @return array{xml: string, skipped: array<int, string>}
+ */
+function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
+{
+    $categories = [getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale())];
+    if ($ownedSet['damaged_missing_show_spares']) {
+        $categories[] = getOwnedSetSparePartsWithStatus($pdo, $ownedSet, getLocale());
+    }
+    if ($ownedSet['damaged_missing_show_stickers']) {
+        $categories[] = getOwnedSetStickerPartsWithStatus($pdo, $ownedSet, getLocale());
+    }
+
+    $colorIds = [];
+    foreach ($categories as $items) {
+        foreach ($items as $item) {
+            if ($item['rebrickable_color_id'] !== null) {
+                $colorIds[$item['rebrickable_color_id']] = true;
+            }
+        }
+    }
+    $bricklinkColorByRebrickableId = [];
+    if (!empty($colorIds)) {
+        $placeholders = implode(',', array_fill(0, count($colorIds), '?'));
+        $stmt = $pdo->prepare("SELECT color_id, bricklink_color_id FROM colors WHERE color_id IN ($placeholders)");
+        $stmt->execute(array_keys($colorIds));
+        foreach ($stmt->fetchAll() as $row) {
+            $bricklinkColorByRebrickableId[(int) $row['color_id']] = $row['bricklink_color_id'] !== null ? (int) $row['bricklink_color_id'] : null;
+        }
+    }
+
+    $lines = [];
+    $skipped = [];
+    foreach ($categories as $items) {
+        foreach ($items as $item) {
+            $wantedQty = max(0, $item['nominal_quantity'] - $item['actual_quantity']) + $item['damaged_quantity'];
+            if ($wantedQty <= 0) {
+                continue;
+            }
+            $bricklinkColorId = $item['rebrickable_color_id'] !== null ? ($bricklinkColorByRebrickableId[$item['rebrickable_color_id']] ?? null) : null;
+            if ($bricklinkColorId === null) {
+                $skipped[] = $item['part_num'] . ' (' . $item['name'] . ($item['color_name'] !== null ? ' · ' . $item['color_name'] : '') . ')';
+                continue;
+            }
+            $lines[] = '  <ITEM><ITEMTYPE>P</ITEMTYPE><ITEMID>' . htmlspecialchars($item['part_num'], ENT_XML1)
+                . '</ITEMID><COLOR>' . $bricklinkColorId . '</COLOR><MINQTY>' . $wantedQty
+                . '</MINQTY><CONDITION>N</CONDITION></ITEM>';
+        }
+    }
+
+    $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<INVENTORY>' . "\n" . implode("\n", $lines) . "\n" . '</INVENTORY>';
+    if (!empty($skipped)) {
+        $xml .= "\n" . '<!-- Ohne BrickLink-Farbzuordnung ausgelassen: ' . htmlspecialchars(implode(', ', $skipped), ENT_XML1) . ' -->';
+    }
+
+    return ['xml' => $xml, 'skipped' => $skipped];
 }
 
 /**

@@ -2412,6 +2412,55 @@ footer {
   background: #fecaca;
 }
 
+.owned-set-actionbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.owned-set-action-pill-form {
+  display: contents;
+}
+
+.owned-set-action-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: auto;
+  padding: 0.55rem 1rem;
+  border-radius: 0.6rem;
+  border: 1px solid rgba(148,163,184,0.35);
+  background: #f8fafc;
+  color: #111827;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.owned-set-action-pill svg {
+  width: 18px;
+  height: 18px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.owned-set-action-pill:hover {
+  background: #eef2f7;
+}
+
+.owned-set-action-pill-danger {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: rgba(153,27,27,0.2);
+}
+
+.owned-set-action-pill-danger svg {
+  color: #991b1b;
+}
+
+.owned-set-action-pill-danger:hover {
+  background: #fecaca;
+}
+
 .owned-set-parts-list {
   display: grid;
   gap: 0.5rem;

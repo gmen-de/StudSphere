@@ -1570,12 +1570,17 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= '</table>';
     $content .= '</div>';
 
-    $content .= '<div class="set-detail-table-wrap">';
-    $content .= '<form method="post" id="remove-owned-set-form">';
+    $content .= '<div class="set-detail-table-wrap owned-set-actionbar">';
+    $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-edit-open">' . getActionIcon('edit') . '<span>' . htmlspecialchars(t('owned_set_edit_heading')) . '</span></button>';
+    $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-move-open">' . getActionIcon('move') . '<span>' . htmlspecialchars(t('owned_set_move_heading')) . '</span></button>';
+    $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-sell-open">' . getActionIcon('sell') . '<span>' . htmlspecialchars(t('owned_set_sell_heading')) . '</span></button>';
+    $content .= '<a class="owned-set-action-pill" href="?action=owned_set_bricklink_xml&amp;owned_set_id=' . (int) $ownedSet['id'] . '">' . getActionIcon('bricklink_xml') . '<span>' . htmlspecialchars(t('owned_set_bricklink_xml_label')) . '</span></a>';
+
+    $content .= '<form method="post" id="remove-owned-set-form" class="owned-set-action-pill-form">';
     $content .= '<input type="hidden" name="action" value="remove_owned_set">';
     $content .= '<input type="hidden" name="owned_set_id" value="' . $ownedSet['id'] . '">';
     $content .= '<input type="hidden" name="set_id" value="' . $ownedSet['set_id'] . '">';
-    $content .= '<button type="submit" class="owned-set-remove-button">' . htmlspecialchars(t('owned_set_remove_button')) . '</button>';
+    $content .= '<button type="submit" class="owned-set-action-pill owned-set-action-pill-danger">' . getActionIcon('delete') . '<span>' . htmlspecialchars(t('owned_set_remove_button')) . '</span></button>';
     $content .= '</form>';
     $removeConfirmJson = json_encode(t('owned_set_remove_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $content .= <<<SCRIPT
@@ -1592,6 +1597,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
 </script>
 SCRIPT;
     $content .= '</div>';
+
+    $content .= renderOwnedSetEditModal($ownedSet);
+    $content .= renderOwnedSetMoveModal($ownedSet);
+    $content .= renderOwnedSetSellModal($ownedSet);
 
     $content .= '</div>'; // .owned-set-sidebar
 

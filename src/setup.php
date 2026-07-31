@@ -288,6 +288,21 @@ function installDatabase(): void
             CONSTRAINT fk_ownedsetphoto_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
 
+        'CREATE TABLE IF NOT EXISTS owned_set_sales (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            set_id INT DEFAULT NULL,
+            rebrickable_set_num VARCHAR(50) NOT NULL,
+            set_name VARCHAR(255) NOT NULL,
+            price DECIMAL(10,2) DEFAULT NULL,
+            sold_at DATE DEFAULT NULL,
+            platform VARCHAR(255) DEFAULT NULL,
+            notes TEXT DEFAULT NULL,
+            sold_by INT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_ownedsetsale_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE SET NULL,
+            CONSTRAINT fk_ownedsetsale_user FOREIGN KEY (sold_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
         'CREATE TABLE IF NOT EXISTS owned_set_minifigs (
             id INT AUTO_INCREMENT PRIMARY KEY,
             owned_set_id INT NOT NULL,

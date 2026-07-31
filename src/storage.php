@@ -68,6 +68,32 @@ function renameStorageLocation(int $id, string $name, ?string $type): void
     $stmt->execute([$name, $type, $id]);
 }
 
+/**
+ * Re-parents a location node — used by owned_set_detail's "Verschieben"
+ * action to move a set instance's storage node to a different place in the
+ * tree (the node itself, its stock, and its parts stay exactly as they are;
+ * only where it hangs in the hierarchy changes). Refuses a move into the
+ * node itself or into one of its own descendants (walks $newParentId's
+ * ancestors via getStorageLocationAncestors() — a cycle would make the
+ * tree unwalkable everywhere else that assumes it's acyclic).
+ */
+function moveStorageLocation(int $id, ?int $newParentId): void
+{
+    if ($newParentId === $id) {
+        throw new RuntimeException('Ein Lagerort kann nicht in sich selbst verschoben werden.');
+    }
+    if ($newParentId !== null) {
+        foreach (getStorageLocationAncestors($newParentId) as $ancestor) {
+            if ($ancestor['id'] === $id) {
+                throw new RuntimeException('Ein Lagerort kann nicht in einen seiner eigenen Unterordner verschoben werden.');
+            }
+        }
+    }
+    $pdo = getPDO();
+    $stmt = $pdo->prepare('UPDATE storage_locations SET parent_id = ? WHERE id = ?');
+    $stmt->execute([$newParentId, $id]);
+}
+
 function deleteStorageLocation(int $id): void
 {
     $pdo = getPDO();

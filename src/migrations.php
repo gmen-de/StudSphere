@@ -343,6 +343,34 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'owned_sets', 'damaged_missing_show_spares', 'TINYINT(1) NOT NULL DEFAULT 0');
             addColumnIfMissing($pdo, 'owned_sets', 'damaged_missing_show_stickers', 'TINYINT(1) NOT NULL DEFAULT 0');
         },
+        23 => function (PDO $pdo): void {
+            // Records a sale at the moment an owned-set instance is removed
+            // via the new "Verkaufen" action (sellOwnedSet() in
+            // src/owned_sets.php) — the owned_sets row itself is gone right
+            // after (same removeOwnedSet() the plain "Löschen" action uses),
+            // so this is the only place that history survives. Denormalized
+            // rebrickable_set_num/name so a future sales-history view
+            // doesn't need the set to still exist in any particular shape;
+            // set_id is kept too (ON DELETE SET NULL — the catalog itself is
+            // never deleted in practice, but this must never be the reason a
+            // sale record disappears if that ever changes).
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS owned_set_sales (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    set_id INT DEFAULT NULL,
+                    rebrickable_set_num VARCHAR(50) NOT NULL,
+                    set_name VARCHAR(255) NOT NULL,
+                    price DECIMAL(10,2) DEFAULT NULL,
+                    sold_at DATE DEFAULT NULL,
+                    platform VARCHAR(255) DEFAULT NULL,
+                    notes TEXT DEFAULT NULL,
+                    sold_by INT DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_ownedsetsale_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE SET NULL,
+                    CONSTRAINT fk_ownedsetsale_user FOREIGN KEY (sold_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -405,7 +433,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 22;
+const CURRENT_SCHEMA_VERSION = 23;
 
 function getInstalledSchemaVersion(): int
 {

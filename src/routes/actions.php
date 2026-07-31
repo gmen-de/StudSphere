@@ -628,6 +628,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 
 $ownedSetDetailMessage = '';
 
+// "Bricklink XML" action — a file download, not JSON, so this exits with a
+// non-JSON response unlike every other GET action around it.
+if (isset($_GET['action']) && $_GET['action'] === 'owned_set_bricklink_xml') {
+    $xmlOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));
+    if ($xmlOwnedSet === null) {
+        http_response_code(404);
+        exit;
+    }
+    $export = buildOwnedSetBricklinkXml($pdo, $xmlOwnedSet);
+    $xmlFilename = 'bricklink-' . preg_replace('/[^A-Za-z0-9._-]/', '_', $xmlOwnedSet['rebrickable_set_num']) . '.xml';
+    header('Content-Type: application/xml; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $xmlFilename . '"');
+    echo $export['xml'];
+    exit;
+}
+
 /**
  * Catalog-only inventory preview for the add-to-collection wizard's review
  * steps — used before any owned_sets row exists (the wizard now defers
@@ -814,6 +830,89 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
     exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_owned_set_details') {
+    $editOwnedSetId = (int) ($_POST['owned_set_id'] ?? 0);
+    try {
+        $markAsUsed = ($_POST['owned-set-edit-condition'] ?? '') === 'used';
+        $editNotes = trim((string) ($_POST['notes'] ?? ''));
+        $editInstructionsNotes = trim((string) ($_POST['instructions_notes'] ?? ''));
+        $editBoxNotes = trim((string) ($_POST['box_notes'] ?? ''));
+        $editBoxCompleteNotes = trim((string) ($_POST['box_complete_notes'] ?? ''));
+        $editStickersNotes = trim((string) ($_POST['stickers_notes'] ?? ''));
+        updateOwnedSetDetails(
+            $pdo,
+            $editOwnedSetId,
+            $markAsUsed,
+            ($_POST['has_instructions'] ?? '') === '1',
+            ($_POST['has_box'] ?? '') === '1',
+            ($_POST['has_box_complete'] ?? '') === '1',
+            ($_POST['stickers_applied'] ?? '') === '1',
+            $editNotes !== '' ? $editNotes : null,
+            $editInstructionsNotes !== '' ? $editInstructionsNotes : null,
+            $editBoxNotes !== '' ? $editBoxNotes : null,
+            $editBoxCompleteNotes !== '' ? $editBoxCompleteNotes : null,
+            $editStickersNotes !== '' ? $editStickersNotes : null
+        );
+        refreshAppStatsCache($pdo);
+        header('Location: ?page=owned_set_detail&id=' . $editOwnedSetId);
+        exit;
+    } catch (Throwable $e) {
+        $ownedSetDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'move_owned_set') {
+    $moveOwnedSetId = (int) ($_POST['owned_set_id'] ?? 0);
+    try {
+        $moveOwnedSet = getOwnedSetById($pdo, $moveOwnedSetId);
+        if ($moveOwnedSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        $moveParentLocationRaw = trim((string) ($_POST['parent_location_id'] ?? ''));
+        if ($moveParentLocationRaw === '') {
+            throw new RuntimeException(t('owned_set_wizard_location_required'));
+        }
+        moveStorageLocation($moveOwnedSet['location_id'], (int) $moveParentLocationRaw);
+        header('Location: ?page=owned_set_detail&id=' . $moveOwnedSetId);
+        exit;
+    } catch (Throwable $e) {
+        $ownedSetDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'sell_owned_set') {
+    $sellOwnedSetId = (int) ($_POST['owned_set_id'] ?? 0);
+    try {
+        $sellPriceRaw = trim((string) ($_POST['price'] ?? ''));
+        $sellPrice = $sellPriceRaw !== '' ? (float) str_replace(',', '.', $sellPriceRaw) : null;
+        $sellDateRaw = trim((string) ($_POST['sold_at'] ?? ''));
+        $sellDate = $sellDateRaw !== '' ? $sellDateRaw : null;
+        $sellPlatform = trim((string) ($_POST['platform'] ?? ''));
+        $sellNotes = trim((string) ($_POST['notes'] ?? ''));
+        $sellSet = getOwnedSetById($pdo, $sellOwnedSetId);
+        if ($sellSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        $sellSetId = $sellSet['set_id'];
+        sellOwnedSet(
+            $pdo,
+            $sellOwnedSetId,
+            $sellPrice,
+            $sellDate,
+            $sellPlatform !== '' ? $sellPlatform : null,
+            $sellNotes !== '' ? $sellNotes : null,
+            (int) $_SESSION['user_id']
+        );
+        refreshAppStatsCache($pdo);
+        $soldSet = getSetById($pdo, $sellSetId);
+        $redirectUrl = resolveOwnedSetRemovalRedirect(getOwnedSetThemeTree($pdo), $soldSet['theme_id'] ?? null);
+        header('Location: ' . $redirectUrl);
+        exit;
+    } catch (Throwable $e) {
+        $ownedSetDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remove_owned_set') {
