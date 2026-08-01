@@ -517,7 +517,7 @@ function getOwnedSetMinifigsWithStatus(PDO $pdo, array $ownedSet): array
  * actual/damaged come from the dedicated owned_set_minifig_parts table (see
  * migration 18).
  *
- * @return array<int, array{part_id:int, part_num:string, name:string, color_id:int, color_name:?string, color_rgb:?string, thumbnail:?string, nominal_quantity:int, actual_quantity:int, damaged_quantity:int}>
+ * @return array<int, array{part_id:int, part_num:string, name:string, color_id:int, rebrickable_color_id:?int, color_name:?string, color_rgb:?string, thumbnail:?string, nominal_quantity:int, actual_quantity:int, damaged_quantity:int}>
  */
 function getOwnedSetMinifigPartsWithStatus(PDO $pdo, array $ownedSet, int $minifigId, string $figNum, int $minifigNominalCount, string $locale = 'en'): array
 {
@@ -549,6 +549,14 @@ function getOwnedSetMinifigPartsWithStatus(PDO $pdo, array $ownedSet, int $minif
             'part_num' => $item['part_num'],
             'name' => $item['name'],
             'color_id' => $item['color_id'],
+            // getSetPartsList() already fetches both — colors.id (the surrogate
+            // PK, what 'color_id' above is) and Rebrickable's own numeric
+            // color_id (what the colors.bricklink_color_id lookup in
+            // buildOwnedSetBricklinkXml() actually keys on) are NOT the same
+            // value, see that function's own doc comment. Exposing both here
+            // instead of just 'color_id' avoids silently looking up the wrong
+            // color's BrickLink id downstream.
+            'rebrickable_color_id' => $item['rebrickable_color_id'],
             'color_name' => $item['color_name'],
             'color_rgb' => $item['color_rgb'],
             'thumbnail' => $item['ldraw_thumbnail'] ?? $item['thumbnail'] ?? $item['remote_thumbnail'] ?? null,
@@ -3054,11 +3062,7 @@ function getOwnedSetBricklinkCategories(PDO $pdo, array $ownedSet): array
                 'part_id' => $part['part_id'],
                 'part_num' => $part['part_num'],
                 'name' => $fig['name'] . ' · ' . $part['name'],
-                // getOwnedSetMinifigPartsWithStatus() calls this 'color_id', not
-                // 'rebrickable_color_id' like every other category here — kept
-                // as-is there since applyOwnedSetMinifigPartInventory() builds
-                // storage keys from it, just renamed on the way in here instead.
-                'rebrickable_color_id' => $part['color_id'],
+                'rebrickable_color_id' => $part['rebrickable_color_id'],
                 'color_name' => $part['color_name'],
                 'thumbnail' => $part['thumbnail'],
                 'nominal_quantity' => $part['nominal_quantity'],
