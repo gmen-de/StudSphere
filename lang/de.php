@@ -406,6 +406,7 @@ return [
     'owned_set_wizard_category_stickers' => 'Stickerbögen',
     'owned_set_wizard_category_minifigs' => 'Minifiguren',
     'owned_set_tab_inventory' => 'Inventar',
+    'owned_set_damaged_missing_category_parts' => 'Bauteil',
     'owned_set_tab_spares' => 'Ersatzteile',
     'owned_set_tab_stickers' => 'Stickerbögen',
     'owned_set_tab_minifigs' => 'Minifiguren',

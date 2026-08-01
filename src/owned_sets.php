@@ -3217,7 +3217,7 @@ function renderOwnedSetDamagedMissingSection(PDO $pdo, array $ownedSet): string
     $showStickers = $ownedSet['damaged_missing_show_stickers'];
 
     $categories = [
-        'owned_set_tab_inventory' => getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale()),
+        'owned_set_damaged_missing_category_parts' => getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale()),
     ];
     if ($showSpares) {
         $categories['owned_set_tab_spares'] = getOwnedSetSparePartsWithStatus($pdo, $ownedSet, getLocale());

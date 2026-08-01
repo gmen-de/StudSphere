@@ -406,6 +406,7 @@ return [
     'owned_set_wizard_category_stickers' => 'Sticker sheets',
     'owned_set_wizard_category_minifigs' => 'Minifigs',
     'owned_set_tab_inventory' => 'Inventory',
+    'owned_set_damaged_missing_category_parts' => 'Part',
     'owned_set_tab_spares' => 'Spare parts',
     'owned_set_tab_stickers' => 'Sticker sheets',
     'owned_set_tab_minifigs' => 'Minifigs',
