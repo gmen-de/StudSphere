@@ -2814,6 +2814,36 @@ footer {
   border: 1px solid rgba(148,163,184,0.35);
 }
 
+.owned-set-bricklink-xml-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding: 0.75rem;
+  border: 1px solid rgba(148,163,184,0.35);
+  border-radius: 0.5rem;
+  resize: vertical;
+}
+
+.owned-set-bricklink-result-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.owned-set-bricklink-result-btn svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.owned-set-bricklink-modal-actions .owned-set-bricklink-result-btn-primary {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
 .owned-set-inventory-tile-inputs label {
   display: flex;
   flex-direction: column;

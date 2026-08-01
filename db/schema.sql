@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS parts (
     part_category VARCHAR(255) DEFAULT NULL,
     part_url VARCHAR(512) DEFAULT NULL,
     ldraw_id VARCHAR(50) DEFAULT NULL,
+    bricklink_part_id VARCHAR(20) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_parts_category (part_category)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

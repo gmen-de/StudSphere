@@ -1461,23 +1461,27 @@ SCRIPT;
 }
 
 /**
- * "Bricklink XML" trigger + fallback modal — the plain download link alone
- * isn't enough once a whole-missing minifig needs a BrickLink id
- * (getOrFetchBricklinkMinifigId() in this file) that the automatic
- * moykubik.ru lookup couldn't resolve. Clicking the button first checks
- * (action=owned_set_bricklink_xml_check) instead of navigating straight to
- * the download: if nothing needs manual input, it downloads immediately;
- * otherwise this modal opens, one row per minifig still missing an id,
- * each with a Rebrickable link (a human has to find the BrickLink link on
- * that page themselves — see the session's own research on why neither
- * Rebrickable's nor BrickLink's API exposes this mapping) and a free-text
- * input that accepts either a bare id or a pasted catalog URL
- * (parseBricklinkMinifigIdInput() extracts the id either way). Saving
- * caches whatever was entered (action=save_minifig_bricklink_id) so this
- * never asks about the same minifig twice; "ohne diese Angaben
- * herunterladen" downloads anyway, just skipping whatever's still unknown
- * (same best-effort convention as the color-mapping gaps in
- * buildOwnedSetBricklinkXml()).
+ * "Bricklink XML" trigger + two modals — the export is shown for copying
+ * rather than downloaded straight away, since BrickLink's own "Wanted List
+ * XML Upload" also just accepts pasted text. Clicking the button first
+ * checks (action=owned_set_bricklink_xml_check) whether every whole-missing
+ * minifig has a resolvable BrickLink id (getOrFetchBricklinkMinifigId() in
+ * this file): if so, the result modal opens straight away with the XML text;
+ * otherwise the manual-entry modal opens first, one row per minifig still
+ * missing an id, each with a Rebrickable link (a human has to find the
+ * BrickLink link on that page themselves — see the session's own research on
+ * why neither Rebrickable's nor BrickLink's API exposes this mapping) and a
+ * free-text input that accepts either a bare id or a pasted catalog URL
+ * (parseBricklinkMinifigIdInput() extracts the id either way). Saving caches
+ * whatever was entered (action=save_minifig_bricklink_id) so this never asks
+ * about the same minifig twice, then opens the result modal with a freshly
+ * rebuilt XML; "ohne diese Angaben anzeigen" opens it right away instead,
+ * just skipping whatever's still unknown (same best-effort convention as the
+ * color-mapping gaps in buildOwnedSetBricklinkXml()).
+ *
+ * The result modal's Download button builds the file client-side from the
+ * same text shown in the textarea (Blob + temporary <a download>) instead of
+ * hitting the server again, so copy and download can never drift apart.
  */
 function renderOwnedSetBricklinkModal(array $ownedSet): string
 {
@@ -1496,11 +1500,27 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
     $html .= '</form>';
     $html .= '</div></div>';
 
+    $html .= '<div class="modal-overlay" id="owned-set-bricklink-result-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<button type="button" class="modal-close" id="owned-set-bricklink-result-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<h2>' . htmlspecialchars(t('owned_set_bricklink_result_heading')) . '</h2>';
+    $html .= '<p class="hint">' . htmlspecialchars(t('owned_set_bricklink_result_intro')) . '</p>';
+    $html .= '<textarea id="owned-set-bricklink-xml-content" class="owned-set-bricklink-xml-textarea" rows="14" readonly></textarea>';
+    $html .= '<div class="owned-set-bricklink-modal-actions">';
+    $html .= '<button type="button" class="owned-set-bricklink-result-btn" id="owned-set-bricklink-copy">' . getActionIcon('copy') . '<span>' . htmlspecialchars(t('owned_set_bricklink_copy_button')) . '</span></button>';
+    $html .= '<button type="button" class="owned-set-bricklink-result-btn owned-set-bricklink-result-btn-primary" id="owned-set-bricklink-download">' . getActionIcon('download') . '<span>' . htmlspecialchars(t('owned_set_bricklink_download_button')) . '</span></button>';
+    $html .= '</div>';
+    $html .= '</div></div>';
+
     $ownedSetId = (int) $ownedSet['id'];
+    $xmlFilename = 'bricklink-' . preg_replace('/[^A-Za-z0-9._-]/', '_', $ownedSet['rebrickable_set_num']) . '.xml';
     $labelsJson = json_encode([
         'errorRetry' => t('import_error_retry'),
         'rebrickableLinkLabel' => t('owned_set_bricklink_manual_rebrickable_link'),
         'inputPlaceholder' => t('owned_set_bricklink_manual_input_placeholder'),
+        'copyLabel' => t('owned_set_bricklink_copy_button'),
+        'copySuccess' => t('owned_set_bricklink_copy_success'),
+        'xmlFilename' => $xmlFilename,
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $html .= <<<SCRIPT
@@ -1515,7 +1535,13 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
   var form = document.getElementById('owned-set-bricklink-form');
   var errorEl = document.getElementById('owned-set-bricklink-error');
   var skipBtn = document.getElementById('owned-set-bricklink-skip');
-  if (!openBtn || !modal || !closeBtn || !listEl || !form || !errorEl || !skipBtn) {
+  var resultModal = document.getElementById('owned-set-bricklink-result-modal');
+  var resultCloseBtn = document.getElementById('owned-set-bricklink-result-modal-close');
+  var xmlTextarea = document.getElementById('owned-set-bricklink-xml-content');
+  var copyBtn = document.getElementById('owned-set-bricklink-copy');
+  var downloadBtn = document.getElementById('owned-set-bricklink-download');
+  if (!openBtn || !modal || !closeBtn || !listEl || !form || !errorEl || !skipBtn
+      || !resultModal || !resultCloseBtn || !xmlTextarea || !copyBtn || !downloadBtn) {
     return;
   }
 
@@ -1531,15 +1557,66 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
       closeModal();
     }
   });
+
+  function showResultModal(xmlText) {
+    xmlTextarea.value = xmlText || '';
+    resultModal.style.display = 'flex';
+  }
+  function closeResultModal() {
+    resultModal.style.display = 'none';
+  }
+  resultCloseBtn.addEventListener('click', closeResultModal);
+  resultModal.addEventListener('click', function(e) {
+    if (e.target === resultModal) {
+      closeResultModal();
+    }
+  });
+
   document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && modal.style.display !== 'none') {
+    if (e.key !== 'Escape') {
+      return;
+    }
+    if (resultModal.style.display !== 'none') {
+      closeResultModal();
+    } else if (modal.style.display !== 'none') {
       closeModal();
     }
   });
 
-  function downloadXml() {
-    window.location.href = '?action=owned_set_bricklink_xml&owned_set_id=' + ownedSetId;
-  }
+  var copyResetTimer = null;
+  copyBtn.addEventListener('click', function() {
+    var label = copyBtn.querySelector('span');
+    function showCopied() {
+      if (copyResetTimer) {
+        clearTimeout(copyResetTimer);
+      }
+      label.textContent = texts.copySuccess;
+      copyResetTimer = setTimeout(function() { label.textContent = texts.copyLabel; }, 1500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(xmlTextarea.value).then(showCopied).catch(function() {
+        xmlTextarea.select();
+        document.execCommand('copy');
+        showCopied();
+      });
+    } else {
+      xmlTextarea.select();
+      document.execCommand('copy');
+      showCopied();
+    }
+  });
+
+  downloadBtn.addEventListener('click', function() {
+    var blob = new Blob([xmlTextarea.value], { type: 'application/xml' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = texts.xmlFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
 
   function renderManualList(items) {
     listEl.innerHTML = '';
@@ -1576,6 +1653,8 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
     });
   }
 
+  var lastCheckXml = '';
+
   function checkAndProceed() {
     var params = new URLSearchParams();
     params.set('action', 'owned_set_bricklink_xml_check');
@@ -1586,8 +1665,9 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
         if (!res.success) {
           throw new Error(res.message || texts.errorRetry);
         }
+        lastCheckXml = res.xml;
         if (res.ready) {
-          downloadXml();
+          showResultModal(res.xml);
           return;
         }
         renderManualList(res.needsManualId);
@@ -1595,9 +1675,12 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
         openModal();
       })
       .catch(function() {
-        // Best-effort check — if it fails outright, just try the actual
-        // download; that endpoint degrades gracefully on its own anyway.
-        downloadXml();
+        // Best-effort check — if it fails outright, open the manual modal
+        // just to surface the error (no rows, save/skip both make no sense
+        // here), instead of the button silently doing nothing.
+        renderManualList([]);
+        errorEl.textContent = texts.errorRetry;
+        openModal();
       });
   }
 
@@ -1608,7 +1691,7 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
 
   skipBtn.addEventListener('click', function() {
     closeModal();
-    downloadXml();
+    showResultModal(lastCheckXml);
   });
 
   form.addEventListener('submit', function(e) {
@@ -1634,7 +1717,10 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
         return;
       }
       closeModal();
-      downloadXml();
+      // Re-check instead of trusting the pre-save xml: still-blank inputs
+      // mean some minifigs may remain unresolved, which should reopen this
+      // same modal showing only those, not silently drop them from the XML.
+      checkAndProceed();
     }).catch(function() {
       errorEl.textContent = texts.errorRetry;
     });
@@ -2809,7 +2895,7 @@ function getOrFetchBricklinkMinifigId(PDO $pdo, int $minifigId, string $figNum):
  * split lines up cleanly with the existing bottleneck/present/damaged
  * model). If a whole-minifig lookup fails, that minifig is reported back
  * via 'needsManualId' instead of silently being left out — the caller
- * (action=owned_set_bricklink_xml) uses that to prompt for a manually
+ * (action=owned_set_bricklink_xml_check) uses that to prompt for a manually
  * entered id rather than serving an incomplete file.
  *
  * @return array{xml: string, skipped: array<int, string>, needsManualId: array<int, array{minifig_id:int, fig_num:string, name:string, thumbnail:?string}>}
@@ -2825,11 +2911,13 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
     }
 
     $colorIds = [];
+    $partNums = [];
     foreach ($categories as $items) {
         foreach ($items as $item) {
             if ($item['rebrickable_color_id'] !== null) {
                 $colorIds[$item['rebrickable_color_id']] = true;
             }
+            $partNums[$item['part_num']] = true;
         }
     }
     $bricklinkColorByRebrickableId = [];
@@ -2839,6 +2927,17 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
         $stmt->execute(array_keys($colorIds));
         foreach ($stmt->fetchAll() as $row) {
             $bricklinkColorByRebrickableId[(int) $row['color_id']] = $row['bricklink_color_id'] !== null ? (int) $row['bricklink_color_id'] : null;
+        }
+    }
+
+    $bricklinkPartIdByPartNum = [];
+    if (!empty($partNums)) {
+        syncBricklinkPartIds($pdo, array_keys($partNums));
+        $placeholders = implode(',', array_fill(0, count($partNums), '?'));
+        $stmt = $pdo->prepare("SELECT part_num, bricklink_part_id FROM parts WHERE part_num IN ($placeholders)");
+        $stmt->execute(array_keys($partNums));
+        foreach ($stmt->fetchAll() as $row) {
+            $bricklinkPartIdByPartNum[$row['part_num']] = $row['bricklink_part_id'];
         }
     }
 
@@ -2855,7 +2954,8 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
                 $skipped[] = $item['part_num'] . ' (' . $item['name'] . ($item['color_name'] !== null ? ' · ' . $item['color_name'] : '') . ')';
                 continue;
             }
-            $lines[] = '  <ITEM><ITEMTYPE>P</ITEMTYPE><ITEMID>' . htmlspecialchars($item['part_num'], ENT_XML1)
+            $bricklinkPartId = $bricklinkPartIdByPartNum[$item['part_num']] ?? $item['part_num'];
+            $lines[] = '  <ITEM><ITEMTYPE>P</ITEMTYPE><ITEMID>' . htmlspecialchars($bricklinkPartId, ENT_XML1)
                 . '</ITEMID><COLOR>' . $bricklinkColorId . '</COLOR><MINQTY>' . $wantedQty
                 . '</MINQTY><CONDITION>N</CONDITION></ITEM>';
         }
@@ -2881,7 +2981,7 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
             . '</ITEMID><MINQTY>' . $figMissing . '</MINQTY><CONDITION>N</CONDITION></ITEM>';
     }
 
-    $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<INVENTORY>' . "\n" . implode("\n", $lines) . "\n" . '</INVENTORY>';
+    $xml = '<INVENTORY>' . "\n" . implode("\n", $lines) . "\n" . '</INVENTORY>';
     if (!empty($skipped)) {
         $xml .= "\n" . '<!-- Ohne BrickLink-Farbzuordnung ausgelassen: ' . htmlspecialchars(implode(', ', $skipped), ENT_XML1) . ' -->';
     }

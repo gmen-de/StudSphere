@@ -628,29 +628,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 
 $ownedSetDetailMessage = '';
 
-// "Bricklink XML" action — a file download, not JSON, so this exits with a
-// non-JSON response unlike every other GET action around it.
-if (isset($_GET['action']) && $_GET['action'] === 'owned_set_bricklink_xml') {
-    $xmlOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));
-    if ($xmlOwnedSet === null) {
-        http_response_code(404);
-        exit;
-    }
-    $export = buildOwnedSetBricklinkXml($pdo, $xmlOwnedSet);
-    $xmlFilename = 'bricklink-' . preg_replace('/[^A-Za-z0-9._-]/', '_', $xmlOwnedSet['rebrickable_set_num']) . '.xml';
-    header('Content-Type: application/xml; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $xmlFilename . '"');
-    echo $export['xml'];
-    exit;
-}
-
-// Run before the actual download (see the "Bricklink XML" button's own
-// script in renderOwnedSetBricklinkModal()) so a whole-missing minifig
-// with no resolvable BrickLink id can be asked about via a modal instead
-// of just silently missing from the file — this also happens to be what
-// actually triggers/caches the moykubik.ru lookup (buildOwnedSetBricklinkXml()
-// -> getOrFetchBricklinkMinifigId()), so by the time the real download
-// request runs right after, everything resolvable here is already cached.
+// Builds the BrickLink XML and hands it back as JSON (not a file download —
+// the result modal in renderOwnedSetBricklinkModal() lets the user copy the
+// text directly into a BrickLink Wanted List, or download it client-side
+// from that same text via a Blob, so there's only one source of truth for
+// the content shown/copied/downloaded). Also doubles as the "is everything
+// resolvable" check before showing that modal: a whole-missing minifig with
+// no resolvable BrickLink id needs the manual-entry modal first — and
+// running buildOwnedSetBricklinkXml() here is what actually triggers/caches
+// the moykubik.ru lookup (-> getOrFetchBricklinkMinifigId()), so anything
+// resolvable is already cached by the time a retry happens.
 if (isset($_GET['action']) && $_GET['action'] === 'owned_set_bricklink_xml_check') {
     header('Content-Type: application/json');
     $checkOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));
@@ -664,6 +651,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'owned_set_bricklink_xml_check
         'success' => true,
         'ready' => empty($checkExport['needsManualId']),
         'needsManualId' => $checkExport['needsManualId'],
+        'xml' => $checkExport['xml'],
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }

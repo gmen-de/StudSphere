@@ -380,6 +380,13 @@ function getSchemaMigrations(): array
             // time) via a third-party site, or entered manually as a fallback.
             addColumnIfMissing($pdo, 'minifigs', 'bricklink_id', 'VARCHAR(20) DEFAULT NULL');
         },
+        25 => function (PDO $pdo): void {
+            // Unlike minifigs, Rebrickable's own API does map parts -> BrickLink IDs
+            // (external_ids.BrickLink) — see syncBricklinkPartIds() in
+            // src/rebrickable.php, called from the BrickLink XML export itself,
+            // batched per the API's own "Performance Tips".
+            addColumnIfMissing($pdo, 'parts', 'bricklink_part_id', 'VARCHAR(20) DEFAULT NULL');
+        },
     ];
 }
 
@@ -442,7 +449,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 24;
+const CURRENT_SCHEMA_VERSION = 25;
 
 function getInstalledSchemaVersion(): int
 {
