@@ -387,6 +387,8 @@ return [
     'owned_set_bricklink_copy_button' => 'Copy',
     'owned_set_bricklink_copy_success' => 'Copied!',
     'owned_set_bricklink_download_button' => 'Download',
+    'owned_set_bricklink_sync_heading' => 'Matching BrickLink IDs',
+    'owned_set_bricklink_sync_intro' => 'Missing BrickLink IDs for parts are being looked up on Rebrickable and saved for next time.',
     'owned_set_field_condition' => 'Condition',
     'owned_set_sealed_note' => 'This set is recorded as new/sealed. An inventory check is only possible once it has been opened.',
     'owned_set_open_button' => 'Open set and do inventory',

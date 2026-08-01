@@ -2844,6 +2844,49 @@ footer {
   border-color: #2563eb;
 }
 
+.owned-set-bricklink-sync-ring-wrap {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  margin: 1.5rem auto;
+}
+
+.owned-set-bricklink-sync-ring {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.owned-set-bricklink-sync-ring-track {
+  fill: none;
+  stroke: #e2e8f0;
+  stroke-width: 8;
+}
+
+.owned-set-bricklink-sync-ring-fill {
+  fill: none;
+  stroke: #2563eb;
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.3s ease;
+}
+
+.owned-set-bricklink-sync-ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 1.15rem;
+  color: #1e293b;
+}
+
+.owned-set-bricklink-sync-status {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .owned-set-inventory-tile-inputs label {
   display: flex;
   flex-direction: column;

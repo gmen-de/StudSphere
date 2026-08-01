@@ -1461,12 +1461,25 @@ SCRIPT;
 }
 
 /**
- * "Bricklink XML" trigger + two modals — the export is shown for copying
+ * "Bricklink XML" trigger + three modals — the export is shown for copying
  * rather than downloaded straight away, since BrickLink's own "Wanted List
- * XML Upload" also just accepts pasted text. Clicking the button first
- * checks (action=owned_set_bricklink_xml_check) whether every whole-missing
+ * XML Upload" also just accepts pasted text.
+ *
+ * Clicking the button first fetches action=owned_set_bricklink_parts_missing
+ * (cheap, DB-only) for the part_nums still missing a BrickLink id. If any
+ * exist, the sync-progress modal opens (ring indicator) and runPartSync()
+ * ticks through them client-side, one batch of up to REBRICKABLE_PART_BATCH_SIZE
+ * per action=owned_set_bricklink_part_sync_tick request, pacing itself to
+ * roughly 1 request/sec to respect Rebrickable's API limit — this is a
+ * browser-driven loop, not a server-side wait, specifically so a set with
+ * many missing parts can't tie up a single shared-hosting request for longer
+ * than its own timeout allows.
+ *
+ * Once part syncing is done (or was never needed), checkAndProceed() calls
+ * action=owned_set_bricklink_xml_check to see whether every whole-missing
  * minifig has a resolvable BrickLink id (getOrFetchBricklinkMinifigId() in
- * this file): if so, the result modal opens straight away with the XML text;
+ * this file, unrelated to the part sync above — minifigs have no API mapping
+ * at all): if so, the result modal opens straight away with the XML text;
  * otherwise the manual-entry modal opens first, one row per minifig still
  * missing an id, each with a Rebrickable link (a human has to find the
  * BrickLink link on that page themselves — see the session's own research on
@@ -1512,6 +1525,21 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
     $html .= '</div>';
     $html .= '</div></div>';
 
+    $html .= '<div class="modal-overlay" id="owned-set-bricklink-sync-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<button type="button" class="modal-close" id="owned-set-bricklink-sync-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<h2>' . htmlspecialchars(t('owned_set_bricklink_sync_heading')) . '</h2>';
+    $html .= '<p class="hint">' . htmlspecialchars(t('owned_set_bricklink_sync_intro')) . '</p>';
+    $html .= '<div class="owned-set-bricklink-sync-ring-wrap">';
+    $html .= '<svg class="owned-set-bricklink-sync-ring" viewBox="0 0 100 100">';
+    $html .= '<circle class="owned-set-bricklink-sync-ring-track" cx="50" cy="50" r="42"/>';
+    $html .= '<circle class="owned-set-bricklink-sync-ring-fill" id="owned-set-bricklink-sync-ring-fill" cx="50" cy="50" r="42"/>';
+    $html .= '</svg>';
+    $html .= '<span class="owned-set-bricklink-sync-ring-label" id="owned-set-bricklink-sync-percent">0%</span>';
+    $html .= '</div>';
+    $html .= '<p class="hint owned-set-bricklink-sync-status" id="owned-set-bricklink-sync-status"></p>';
+    $html .= '</div></div>';
+
     $ownedSetId = (int) $ownedSet['id'];
     $xmlFilename = 'bricklink-' . preg_replace('/[^A-Za-z0-9._-]/', '_', $ownedSet['rebrickable_set_num']) . '.xml';
     $labelsJson = json_encode([
@@ -1540,8 +1568,14 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
   var xmlTextarea = document.getElementById('owned-set-bricklink-xml-content');
   var copyBtn = document.getElementById('owned-set-bricklink-copy');
   var downloadBtn = document.getElementById('owned-set-bricklink-download');
+  var syncModal = document.getElementById('owned-set-bricklink-sync-modal');
+  var syncCloseBtn = document.getElementById('owned-set-bricklink-sync-modal-close');
+  var syncRingFill = document.getElementById('owned-set-bricklink-sync-ring-fill');
+  var syncPercentEl = document.getElementById('owned-set-bricklink-sync-percent');
+  var syncStatusEl = document.getElementById('owned-set-bricklink-sync-status');
   if (!openBtn || !modal || !closeBtn || !listEl || !form || !errorEl || !skipBtn
-      || !resultModal || !resultCloseBtn || !xmlTextarea || !copyBtn || !downloadBtn) {
+      || !resultModal || !resultCloseBtn || !xmlTextarea || !copyBtn || !downloadBtn
+      || !syncModal || !syncCloseBtn || !syncRingFill || !syncPercentEl || !syncStatusEl) {
     return;
   }
 
@@ -1572,16 +1606,85 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
     }
   });
 
+  var ringCircumference = 2 * Math.PI * 42;
+  syncRingFill.style.strokeDasharray = String(ringCircumference);
+  syncRingFill.style.strokeDashoffset = String(ringCircumference);
+
+  function openSyncModal() {
+    syncRingFill.style.strokeDashoffset = String(ringCircumference);
+    syncPercentEl.textContent = '0%';
+    syncStatusEl.textContent = '';
+    syncModal.style.display = 'flex';
+  }
+  function closeSyncModal() {
+    // Only hides it — the batch loop that opened it keeps running in the
+    // background either way, same as the Rebrickable update modal's own
+    // "closing just hides it" behavior.
+    syncModal.style.display = 'none';
+  }
+  function updateSyncProgress(done, total) {
+    var percent = total > 0 ? Math.round((done / total) * 100) : 100;
+    syncRingFill.style.strokeDashoffset = String(ringCircumference * (1 - percent / 100));
+    syncPercentEl.textContent = percent + '%';
+    syncStatusEl.textContent = done + ' / ' + total;
+  }
+  syncCloseBtn.addEventListener('click', closeSyncModal);
+  syncModal.addEventListener('click', function(e) {
+    if (e.target === syncModal) {
+      closeSyncModal();
+    }
+  });
+
   document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape') {
       return;
     }
-    if (resultModal.style.display !== 'none') {
+    if (syncModal.style.display !== 'none') {
+      closeSyncModal();
+    } else if (resultModal.style.display !== 'none') {
       closeResultModal();
     } else if (modal.style.display !== 'none') {
       closeModal();
     }
   });
+
+  function runPartSync(partNums, batchSize) {
+    var total = partNums.length;
+    var batches = [];
+    for (var i = 0; i < partNums.length; i += batchSize) {
+      batches.push(partNums.slice(i, i + batchSize));
+    }
+    var done = 0;
+    openSyncModal();
+    updateSyncProgress(0, total);
+
+    function nextBatch(index) {
+      if (index >= batches.length) {
+        closeSyncModal();
+        checkAndProceed();
+        return;
+      }
+      var batch = batches[index];
+      var startedAt = Date.now();
+      var formData = new FormData();
+      formData.set('action', 'owned_set_bricklink_part_sync_tick');
+      formData.set('part_nums', batch.join(','));
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .catch(function() { return { success: false }; })
+        .then(function() {
+          done += batch.length;
+          updateSyncProgress(done, total);
+          // API allows ~1 req/sec on average — pace the next tick from when
+          // this one started, not from when it finished, so a slow response
+          // doesn't just get "made up for" by firing the next one instantly.
+          var elapsed = Date.now() - startedAt;
+          var wait = Math.max(0, 1000 - elapsed);
+          setTimeout(function() { nextBatch(index + 1); }, wait);
+        });
+    }
+    nextBatch(0);
+  }
 
   var copyResetTimer = null;
   copyBtn.addEventListener('click', function() {
@@ -1686,7 +1789,24 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
 
   openBtn.addEventListener('click', function(e) {
     e.preventDefault();
-    checkAndProceed();
+    var params = new URLSearchParams();
+    params.set('action', 'owned_set_bricklink_parts_missing');
+    params.set('owned_set_id', String(ownedSetId));
+    fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success && res.partNums && res.partNums.length > 0) {
+          runPartSync(res.partNums, res.batchSize || 50);
+        } else {
+          checkAndProceed();
+        }
+      })
+      .catch(function() {
+        // Best-effort — if even this cheap DB-only check fails, skip
+        // straight to the real check/build, which degrades gracefully on
+        // its own (falls back to raw part_nums in the XML).
+        checkAndProceed();
+      });
   });
 
   skipBtn.addEventListener('click', function() {
@@ -2900,7 +3020,14 @@ function getOrFetchBricklinkMinifigId(PDO $pdo, int $minifigId, string $figNum):
  *
  * @return array{xml: string, skipped: array<int, string>, needsManualId: array<int, array{minifig_id:int, fig_num:string, name:string, thumbnail:?string}>}
  */
-function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
+/**
+ * The same three categories (parts, spares if shown, stickers if shown) the
+ * "Beschädigt/Fehlend" tab and the BrickLink XML export both work from —
+ * shared so getOwnedSetBricklinkPartNums() (drives the sync-progress modal's
+ * batch plan) and buildOwnedSetBricklinkXml() (builds the actual export)
+ * can't drift apart on which items are in scope.
+ */
+function getOwnedSetBricklinkCategories(PDO $pdo, array $ownedSet): array
 {
     $categories = [getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale())];
     if ($ownedSet['damaged_missing_show_spares']) {
@@ -2909,6 +3036,37 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
     if ($ownedSet['damaged_missing_show_stickers']) {
         $categories[] = getOwnedSetStickerPartsWithStatus($pdo, $ownedSet, getLocale());
     }
+    return $categories;
+}
+
+/**
+ * part_nums (deduped) still missing a BrickLink id for this set's export —
+ * the browser fetches this first (action=owned_set_bricklink_parts_missing)
+ * to build its own batch plan for the sync-progress modal, before ever
+ * calling buildOwnedSetBricklinkXml(), which itself no longer syncs anything
+ * (see that function's own doc comment).
+ */
+function getOwnedSetBricklinkPartNums(PDO $pdo, array $ownedSet): array
+{
+    $partNums = [];
+    foreach (getOwnedSetBricklinkCategories($pdo, $ownedSet) as $items) {
+        foreach ($items as $item) {
+            $partNums[$item['part_num']] = true;
+        }
+    }
+    return getPartNumsMissingBricklinkId($pdo, array_keys($partNums));
+}
+
+/**
+ * Assumes any resolvable parts.bricklink_part_id has already been synced —
+ * the browser drives that separately, one batch per tick, via the
+ * sync-progress modal (renderOwnedSetBricklinkModal()) BEFORE ever calling
+ * the check/build endpoints this function backs, so there's nothing left to
+ * sync synchronously here.
+ */
+function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
+{
+    $categories = getOwnedSetBricklinkCategories($pdo, $ownedSet);
 
     $colorIds = [];
     $partNums = [];
@@ -2932,7 +3090,6 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
 
     $bricklinkPartIdByPartNum = [];
     if (!empty($partNums)) {
-        syncBricklinkPartIds($pdo, array_keys($partNums));
         $placeholders = implode(',', array_fill(0, count($partNums), '?'));
         $stmt = $pdo->prepare("SELECT part_num, bricklink_part_id FROM parts WHERE part_num IN ($placeholders)");
         $stmt->execute(array_keys($partNums));

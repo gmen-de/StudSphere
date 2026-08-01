@@ -628,6 +628,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 
 $ownedSetDetailMessage = '';
 
+// First step of the BrickLink XML flow (see renderOwnedSetBricklinkModal()'s
+// sync-progress modal): tells the browser which part_nums still need a
+// BrickLink id before it starts ticking through batches. Cheap — no API
+// calls, just the same DB check applyBricklinkPartIdBatch() would do anyway.
+if (isset($_GET['action']) && $_GET['action'] === 'owned_set_bricklink_parts_missing') {
+    header('Content-Type: application/json');
+    $missingPartsOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));
+    if ($missingPartsOwnedSet === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode([
+        'success' => true,
+        'partNums' => getOwnedSetBricklinkPartNums($pdo, $missingPartsOwnedSet),
+        'batchSize' => REBRICKABLE_PART_BATCH_SIZE,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// One tick = one Rebrickable API call for exactly the part_nums the browser
+// sends (capped at REBRICKABLE_PART_BATCH_SIZE) — the browser's sync-progress
+// modal drives this in a loop, pacing itself to roughly 1 request/sec (see
+// that modal's own script), so this endpoint never needs to sleep() or
+// budget its own time the way a single synchronous request would have to.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'owned_set_bricklink_part_sync_tick') {
+    header('Content-Type: application/json');
+    $tickPartNums = array_filter(array_map('trim', explode(',', (string) ($_POST['part_nums'] ?? ''))), fn ($p) => $p !== '');
+    $tickPartNums = array_slice(array_values($tickPartNums), 0, REBRICKABLE_PART_BATCH_SIZE);
+    if (empty($tickPartNums)) {
+        echo json_encode(['success' => true, 'updated' => 0], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode(['success' => true, 'updated' => applyBricklinkPartIdBatch($pdo, $tickPartNums)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // Builds the BrickLink XML and hands it back as JSON (not a file download —
 // the result modal in renderOwnedSetBricklinkModal() lets the user copy the
 // text directly into a BrickLink Wanted List, or download it client-side

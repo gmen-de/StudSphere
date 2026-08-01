@@ -382,9 +382,10 @@ function getSchemaMigrations(): array
         },
         25 => function (PDO $pdo): void {
             // Unlike minifigs, Rebrickable's own API does map parts -> BrickLink IDs
-            // (external_ids.BrickLink) — see syncBricklinkPartIds() in
-            // src/rebrickable.php, called from the BrickLink XML export itself,
-            // batched per the API's own "Performance Tips".
+            // (external_ids.BrickLink) — see applyBricklinkPartIdBatch() in
+            // src/rebrickable.php, driven one batch per tick from the BrickLink
+            // XML export's sync-progress modal, per the API's own "Performance
+            // Tips" on batching part_nums.
             addColumnIfMissing($pdo, 'parts', 'bricklink_part_id', 'VARCHAR(20) DEFAULT NULL');
         },
     ];

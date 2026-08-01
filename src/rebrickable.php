@@ -160,71 +160,76 @@ function syncExternalColorIds(): array
     return ['updated' => $updated, 'skipped' => false];
 }
 
+// Client-enforced, not server-enforced: the browser paces one batch per tick
+// (see renderOwnedSetBricklinkModal()'s sync progress modal in
+// src/owned_sets.php), waiting at least 1s between requests itself, so the
+// server side here never needs to sleep() or budget its own time — each tick
+// is just one bounded API call plus a handful of indexed UPDATEs.
 const REBRICKABLE_PART_BATCH_SIZE = 50;
 
-// Runs synchronously inside the "BrickLink XML" export request (shared hosting,
-// no way to raise max_execution_time) — bounds how long a single export can ever
-// block on this, regardless of how many part_nums it's missing. Whatever isn't
-// reached in time just stays NULL and falls back to its Rebrickable part_num in
-// the XML for this export; the next export (of this or any other set sharing
-// some of the same parts) picks up where this one left off, since the DB write
-// already happened for everything resolved so far.
-const REBRICKABLE_PART_SYNC_TIME_BUDGET_SECONDS = 8.0;
+/**
+ * The part_nums (deduped, already-missing-only) a "BrickLink XML" export still
+ * needs to resolve — the browser uses this to build its own batch plan and
+ * drive applyBricklinkPartIdBatch() one tick at a time. Cheap: only a SELECT,
+ * no API calls.
+ */
+function getPartNumsMissingBricklinkId(PDO $pdo, array $partNums): array
+{
+    $partNums = array_values(array_unique(array_filter($partNums, fn ($p) => $p !== null && $p !== '')));
+    if (empty($partNums)) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($partNums), '?'));
+    $stmt = $pdo->prepare("SELECT part_num FROM parts WHERE part_num IN ($placeholders) AND bricklink_part_id IS NULL");
+    $stmt->execute($partNums);
+    return $stmt->fetchAll(PDO::FETCH_COLUMN);
+}
 
 /**
  * Unlike minifigs, Rebrickable's own part API does map to BrickLink IDs
  * (external_ids.BrickLink) — official, and per the API docs' own "Performance
  * Tips" meant to be queried in batches (part_nums=a,b,c) rather than one request
- * per part. Called from buildOwnedSetBricklinkXml() itself, right before building
- * the export. Only ever fills parts.bricklink_part_id where still NULL, and only
- * ever queries part_nums that don't already have one — a set whose export has
- * already run once costs nothing further on every later export.
+ * per part. One call to this function is exactly one Rebrickable API request —
+ * the caller (action=owned_set_bricklink_part_sync_tick) is responsible for
+ * capping $batch at REBRICKABLE_PART_BATCH_SIZE and for pacing calls roughly
+ * 1/sec, since that's a browser-side loop, not something this function can
+ * enforce on its own. Only ever fills parts.bricklink_part_id where still
+ * NULL — a part already resolved by an earlier export is never re-queried.
  *
- * Best-effort like syncExternalColorIds(): no API key configured, a failed
- * batch, or the time budget above running out, just leaves those parts to fall
- * back to their Rebrickable part_num in the XML (correct for most parts anyway —
- * only a minority actually differ between the two catalogs, e.g. Rebrickable's
- * "3070b" is BrickLink's "3070").
+ * Best-effort like syncExternalColorIds(): a failed batch just leaves those
+ * parts to fall back to their Rebrickable part_num in the XML (correct for
+ * most parts anyway — only a minority actually differ between the two
+ * catalogs, e.g. Rebrickable's "3070b" is BrickLink's "3070").
+ *
+ * @return int Number of parts updated by this one batch.
  */
-function syncBricklinkPartIds(PDO $pdo, array $partNums): void
+function applyBricklinkPartIdBatch(PDO $pdo, array $batch): int
 {
-    $partNums = array_values(array_unique(array_filter($partNums, fn ($p) => $p !== null && $p !== '')));
-    if (empty($partNums) || trim((string) getAppSetting('rebrickable_api_key')) === '') {
-        return;
+    $batch = array_values(array_unique(array_filter($batch, fn ($p) => $p !== null && $p !== '')));
+    if (empty($batch) || trim((string) getAppSetting('rebrickable_api_key')) === '') {
+        return 0;
     }
 
-    $placeholders = implode(',', array_fill(0, count($partNums), '?'));
-    $stmt = $pdo->prepare("SELECT part_num FROM parts WHERE part_num IN ($placeholders) AND bricklink_part_id IS NULL");
-    $stmt->execute($partNums);
-    $missing = $stmt->fetchAll(PDO::FETCH_COLUMN);
-    if (empty($missing)) {
-        return;
+    try {
+        $response = callRebrickableApi('lego/parts/?part_nums=' . urlencode(implode(',', $batch)) . '&inc_part_details=1&page_size=' . count($batch));
+    } catch (Throwable $e) {
+        return 0;
     }
 
     $updateStmt = $pdo->prepare('UPDATE parts SET bricklink_part_id = ? WHERE part_num = ? AND bricklink_part_id IS NULL');
-
-    $start = microtime(true);
-    foreach (array_chunk($missing, REBRICKABLE_PART_BATCH_SIZE) as $index => $batch) {
-        if ($index > 0) {
-            if ((microtime(true) - $start) >= REBRICKABLE_PART_SYNC_TIME_BUDGET_SECONDS) {
-                break;
-            }
-            sleep(1); // API allows ~1 req/sec on average — anything shorter drifts over that
-        }
-        try {
-            $response = callRebrickableApi('lego/parts/?part_nums=' . urlencode(implode(',', $batch)) . '&inc_part_details=1&page_size=' . count($batch));
-        } catch (Throwable $e) {
+    $updated = 0;
+    foreach ($response['results'] ?? [] as $part) {
+        $blId = $part['external_ids']['BrickLink'][0] ?? null;
+        $partNum = $part['part_num'] ?? null;
+        if ($blId === null || $partNum === null) {
             continue;
         }
-        foreach ($response['results'] ?? [] as $part) {
-            $blId = $part['external_ids']['BrickLink'][0] ?? null;
-            $partNum = $part['part_num'] ?? null;
-            if ($blId === null || $partNum === null) {
-                continue;
-            }
-            $updateStmt->execute([(string) $blId, $partNum]);
+        $updateStmt->execute([(string) $blId, $partNum]);
+        if ($updateStmt->rowCount() > 0) {
+            $updated++;
         }
     }
+    return $updated;
 }
 
 function importPartByPartNum(string $partNum): int

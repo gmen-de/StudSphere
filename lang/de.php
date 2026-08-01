@@ -387,6 +387,8 @@ return [
     'owned_set_bricklink_copy_button' => 'Kopieren',
     'owned_set_bricklink_copy_success' => 'Kopiert!',
     'owned_set_bricklink_download_button' => 'Herunterladen',
+    'owned_set_bricklink_sync_heading' => 'BrickLink-IDs werden abgeglichen',
+    'owned_set_bricklink_sync_intro' => 'Fehlende BrickLink-IDs für Bauteile werden bei Rebrickable nachgeschlagen und für später gespeichert.',
     'owned_set_field_condition' => 'Zustand',
     'owned_set_sealed_note' => 'Dieses Set ist als neu/versiegelt erfasst. Eine Inventur ist erst möglich, wenn es geöffnet wird.',
     'owned_set_open_button' => 'Set öffnen und Inventur durchführen',
