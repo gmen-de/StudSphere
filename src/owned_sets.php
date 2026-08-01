@@ -3036,6 +3036,41 @@ function getOwnedSetBricklinkCategories(PDO $pdo, array $ownedSet): array
     if ($ownedSet['damaged_missing_show_stickers']) {
         $categories[] = getOwnedSetStickerPartsWithStatus($pdo, $ownedSet, getLocale());
     }
+
+    // A present minifig with an individually damaged/missing constituent part
+    // only ever shows up as $fig['damaged_quantity'] (never as its own whole-
+    // minifig $figMissing further down in buildOwnedSetBricklinkXml() — see
+    // renderOwnedSetDamagedMissingSection()'s doc comment for why those two
+    // never overlap), so it needs the PART ordered, not a minifig line. This
+    // was previously only surfaced in the "Beschädigt/Fehlend" tab's display
+    // and never actually reached the export at all.
+    $minifigPartItems = [];
+    foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSet) as $fig) {
+        if ($fig['damaged_quantity'] <= 0) {
+            continue;
+        }
+        foreach (getOwnedSetMinifigPartsWithStatus($pdo, $ownedSet, $fig['minifig_id'], $fig['fig_num'], $fig['nominal_quantity'], getLocale()) as $part) {
+            $minifigPartItems[] = [
+                'part_id' => $part['part_id'],
+                'part_num' => $part['part_num'],
+                'name' => $fig['name'] . ' · ' . $part['name'],
+                // getOwnedSetMinifigPartsWithStatus() calls this 'color_id', not
+                // 'rebrickable_color_id' like every other category here — kept
+                // as-is there since applyOwnedSetMinifigPartInventory() builds
+                // storage keys from it, just renamed on the way in here instead.
+                'rebrickable_color_id' => $part['color_id'],
+                'color_name' => $part['color_name'],
+                'thumbnail' => $part['thumbnail'],
+                'nominal_quantity' => $part['nominal_quantity'],
+                'actual_quantity' => $part['actual_quantity'],
+                'damaged_quantity' => $part['damaged_quantity'],
+            ];
+        }
+    }
+    if (!empty($minifigPartItems)) {
+        $categories[] = $minifigPartItems;
+    }
+
     return $categories;
 }
 
@@ -3066,6 +3101,16 @@ function getOwnedSetBricklinkPartNums(PDO $pdo, array $ownedSet): array
  */
 function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
 {
+    // The set's own condition_type, not the individual item's — BrickLink's
+    // wanted-list CONDITION means "what condition will I accept", and this
+    // export always wants a genuine replacement (new for a new set, used is
+    // acceptable for a used one), regardless of whether a given line is
+    // itself damaged or fully missing.
+    $bricklinkCondition = $ownedSet['condition_type'] === 'new' ? 'N' : 'U';
+    // Lets a Wanted List that combines exports from several sets still show,
+    // per line, which set it's for — same set_num/name pairing shown
+    // everywhere else in the app.
+    $bricklinkRemarks = htmlspecialchars($ownedSet['rebrickable_set_num'] . ' - ' . $ownedSet['name'], ENT_XML1);
     $categories = getOwnedSetBricklinkCategories($pdo, $ownedSet);
 
     $colorIds = [];
@@ -3114,7 +3159,7 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
             $bricklinkPartId = $bricklinkPartIdByPartNum[$item['part_num']] ?? $item['part_num'];
             $lines[] = '  <ITEM><ITEMTYPE>P</ITEMTYPE><ITEMID>' . htmlspecialchars($bricklinkPartId, ENT_XML1)
                 . '</ITEMID><COLOR>' . $bricklinkColorId . '</COLOR><MINQTY>' . $wantedQty
-                . '</MINQTY><CONDITION>N</CONDITION></ITEM>';
+                . '</MINQTY><CONDITION>' . $bricklinkCondition . '</CONDITION><REMARKS>' . $bricklinkRemarks . '</REMARKS></ITEM>';
         }
     }
 
@@ -3135,7 +3180,7 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
             continue;
         }
         $lines[] = '  <ITEM><ITEMTYPE>M</ITEMTYPE><ITEMID>' . htmlspecialchars($bricklinkId, ENT_XML1)
-            . '</ITEMID><MINQTY>' . $figMissing . '</MINQTY><CONDITION>N</CONDITION></ITEM>';
+            . '</ITEMID><MINQTY>' . $figMissing . '</MINQTY><CONDITION>' . $bricklinkCondition . '</CONDITION><REMARKS>' . $bricklinkRemarks . '</REMARKS></ITEM>';
     }
 
     $xml = '<INVENTORY>' . "\n" . implode("\n", $lines) . "\n" . '</INVENTORY>';
