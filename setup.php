@@ -431,11 +431,11 @@ switch ($step) {
         $content .= '<form method="post" id="import-form">';
         $content .= '<input type="hidden" name="action" value="import_tick">';
         $content .= '<label>' . htmlspecialchars(t('import_api_key')) . '<input name="api_key" value="' . htmlspecialchars($apiKey) . '"></label>';
-        // Derived from REBRICKABLE_DOWNLOAD_ORDER (src/download.php) instead
+        // Derived from getRebrickableImportTypes() (src/download.php) instead
         // of a separately hardcoded list, so the two can't drift apart again
         // (that's exactly how set_parts.csv — since removed, Rebrickable's
         // CDN 404s on it — ended up listed here after it was already gone).
-        $downloadFileNames = array_map(fn (string $type): string => $type . '.csv', REBRICKABLE_DOWNLOAD_ORDER);
+        $downloadFileNames = array_map(fn (string $type): string => $type . '.csv', getRebrickableImportTypes());
         $content .= '<p>' . htmlspecialchars(t('import_files_list', ['files' => implode(', ', $downloadFileNames)])) . '</p>';
         $content .= '<p>' . htmlspecialchars(t('import_support')) . '</p>';
         $content .= '<div class="import-status" id="importStatus">';

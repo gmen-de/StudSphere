@@ -92,6 +92,7 @@ function importBatchForType(string $type, array $batch): array
         'inventory_sets' => importInventorySetsCsv($batch),
         'inventory_minifigs' => importInventoryMinifigsCsv($batch),
         'set_parts' => importSetPartsCsv($batch),
+        'bricklink_minifig_ids' => importBricklinkMinifigIdsCsv($batch),
         default => throw new InvalidArgumentException('Unbekannter Importtyp: ' . $type),
     };
 }
@@ -495,6 +496,32 @@ function importMinifigsCsv(array $rows): array
             $row['num_parts'] !== null && $row['num_parts'] !== '' ? (int) $row['num_parts'] : null,
             trim((string) ($row['img_url'] ?? $row['image_url'] ?? '')),
         ]);
+        $count++;
+    }
+    $pdo->commit();
+    return ['rows' => $count];
+}
+
+/**
+ * Only ever fills bricklink_id where still NULL — never overwrites a value from a
+ * live moykubik.ru lookup or one entered manually via the fallback modal.
+ */
+function importBricklinkMinifigIdsCsv(array $rows): array
+{
+    $pdo = getPDO();
+    $pdo->beginTransaction();
+    $stmt = $pdo->prepare(
+        'UPDATE minifigs SET bricklink_id = ? WHERE fig_num = ? AND bricklink_id IS NULL'
+    );
+    $count = 0;
+
+    foreach ($rows as $row) {
+        $figNum = trim((string) ($row['fig_num'] ?? ''));
+        $bricklinkId = trim((string) ($row['bricklink_id'] ?? ''));
+        if ($figNum === '' || $bricklinkId === '') {
+            continue;
+        }
+        $stmt->execute([$bricklinkId, $figNum]);
         $count++;
     }
     $pdo->commit();

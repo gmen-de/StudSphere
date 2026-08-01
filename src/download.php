@@ -30,6 +30,33 @@ const REBRICKABLE_DOWNLOAD_ORDER = [
     'inventory_minifigs',
 ];
 
+// Rebrickable's own API has no minifig -> BrickLink ID mapping (confirmed via their
+// forum as an admitted omission), so this is generated offline (import a Rebrickable
+// list of every fig_num, export it as a BrickLink Wanted List XML, pull the IDs back
+// out) and shipped in git as db/seed_bricklink_minifig_ids.csv instead. Runs through
+// the exact same file/tick machinery as a real Rebrickable download (see
+// stepRebrickableImport()'s special case for this type below), just skipping the
+// download stage — so it applies on every fresh install and every "Update jetzt",
+// and is a cheap no-op afterwards since the import only touches rows where
+// bricklink_id is still NULL (never overwrites a live moykubik.ru lookup or a
+// manually-entered ID).
+const BRICKLINK_MINIFIG_SEED_TYPE = 'bricklink_minifig_ids';
+
+/**
+ * REBRICKABLE_DOWNLOAD_ORDER plus the locally-bundled BrickLink seed, for the two
+ * call sites (this file's init + setup.php's step 5) that build a file list to
+ * iterate/display — kept as one function so they can't drift apart.
+ */
+function getRebrickableImportTypes(): array
+{
+    return array_merge(REBRICKABLE_DOWNLOAD_ORDER, [BRICKLINK_MINIFIG_SEED_TYPE]);
+}
+
+function getBricklinkMinifigSeedPath(): string
+{
+    return dirname(__DIR__) . '/db/seed_bricklink_minifig_ids.csv';
+}
+
 // Bounded work per tick, so a single HTTP request never runs long enough to hit
 // shared-hosting timeouts (Apache/PHP-FPM) that can't be raised via php.ini.
 const REBRICKABLE_DOWNLOAD_CHUNK_SIZE = 1_000_000; // ~1 MB per download tick
@@ -340,13 +367,14 @@ function initRebrickableImportState(): array
 {
     $tmpDir = getRebrickableStorageDir();
     @file_put_contents(getRebrickableLogPath(), '');
-    logRebrickableImport('Import gestartet, geplante Dateitypen: ' . implode(', ', REBRICKABLE_DOWNLOAD_ORDER));
+    $types = getRebrickableImportTypes();
+    logRebrickableImport('Import gestartet, geplante Dateitypen: ' . implode(', ', $types));
 
     $files = [];
-    foreach (REBRICKABLE_DOWNLOAD_ORDER as $type) {
+    foreach ($types as $type) {
         $files[$type] = [
             'label' => $type . '.csv',
-            'url' => buildRebrickableDownloadUrl($type),
+            'url' => $type === BRICKLINK_MINIFIG_SEED_TYPE ? null : buildRebrickableDownloadUrl($type),
             'stage' => 'pending',
             'message' => null,
             'sourcePath' => $tmpDir . '/' . $type . '.csv.gz',
@@ -362,7 +390,7 @@ function initRebrickableImportState(): array
     }
 
     return [
-        'types' => REBRICKABLE_DOWNLOAD_ORDER,
+        'types' => $types,
         'currentIndex' => 0,
         'files' => $files,
     ];
@@ -395,6 +423,23 @@ function stepRebrickableImport(array &$state): array
     try {
         switch ($file['stage']) {
             case 'pending':
+                if ($type === BRICKLINK_MINIFIG_SEED_TYPE) {
+                    $seedPath = getBricklinkMinifigSeedPath();
+                    if (!is_file($seedPath)) {
+                        throw new RuntimeException('Seed-Datei nicht gefunden: ' . $seedPath);
+                    }
+                    $headerInfo = readCsvHeaderInfo($seedPath);
+                    $file['csvPath'] = $seedPath;
+                    $file['csvHeaders'] = $headerInfo['headers'];
+                    $file['csvDelimiter'] = $headerInfo['delimiter'];
+                    $file['importOffset'] = $headerInfo['dataOffset'];
+                    $file['totalBytes'] = filesize($seedPath) ?: null;
+                    $file['bytes'] = $file['totalBytes'] ?? 0;
+                    $file['stage'] = 'importing';
+                    logRebrickableImport(sprintf('%s: pending -> importing (lokale Seed-Datei, %s)', $type, $seedPath));
+                    break;
+                }
+
                 $probe = probeRemoteFile($file['url']);
                 if ($probe['status'] !== null && $probe['status'] >= 400) {
                     throw new RuntimeException('Datei nicht verfügbar (HTTP ' . $probe['status'] . '): ' . $file['url']);
@@ -695,7 +740,7 @@ function renderRebrickableUpdateModal(): string
     $html .= '<div class="progress-message idle" id="rebrickableUpdateMessage">' . htmlspecialchars(t('import_not_started')) . '</div>';
     $html .= '<div class="progress-track" id="rebrickableUpdateProgress"><div class="progress-fill"></div></div>';
     $html .= '<ul class="import-file-list" id="rebrickableUpdateFileList">';
-    foreach (REBRICKABLE_DOWNLOAD_ORDER as $type) {
+    foreach (getRebrickableImportTypes() as $type) {
         $html .= '<li class="import-file import-file-pending"><span class="import-file-name">' . htmlspecialchars($type . '.csv') . '</span><span class="import-file-status">' . htmlspecialchars(t('import_stage_pending')) . '</span></li>';
     }
     $html .= '</ul>';
