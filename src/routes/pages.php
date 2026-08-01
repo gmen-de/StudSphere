@@ -1583,6 +1583,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
 
     $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-bricklink-open" title="' . htmlspecialchars(t('owned_set_bricklink_xml_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_bricklink_xml_label')) . '">' . getActionIcon('bricklink_xml') . '</button>';
     $content .= renderOwnedSetBricklinkModal($ownedSet);
+    // Placeholder: matches missing/damaged parts against loose stock elsewhere
+    // and lets the user queue them onto a pick list, eventually worked through
+    // via a future mobile PWA that adjusts stock as items get picked — none of
+    // that backend exists yet, this button is just the reserved spot + icon.
+    $content .= '<button type="button" class="owned-set-action-pill" onclick="alert(' . json_encode(t('owned_set_pick_list_coming_soon'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ')" title="' . htmlspecialchars(t('owned_set_pick_list_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_pick_list_label')) . '">' . getActionIcon('pick_list') . '</button>';
     $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-sell-open" title="' . htmlspecialchars(t('owned_set_sell_heading')) . '" aria-label="' . htmlspecialchars(t('owned_set_sell_heading')) . '">' . getActionIcon('sell') . '</button>';
     $removeConfirmJson = json_encode(t('owned_set_remove_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $content .= <<<SCRIPT

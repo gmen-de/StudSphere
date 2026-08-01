@@ -367,6 +367,8 @@ return [
     'owned_set_move_heading' => 'Move',
     'owned_set_move_current' => 'Current storage location: {path}',
     'owned_set_move_button' => 'Move',
+    'owned_set_pick_list_label' => 'Pick list',
+    'owned_set_pick_list_coming_soon' => 'Pick list: match missing parts against your loose inventory - this feature isn\'t available yet.',
     'owned_set_sell_heading' => 'Sell',
     'owned_set_sell_price_label' => 'Sale price',
     'owned_set_sell_date_label' => 'Sale date',

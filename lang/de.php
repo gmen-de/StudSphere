@@ -367,6 +367,8 @@ return [
     'owned_set_move_heading' => 'Verschieben',
     'owned_set_move_current' => 'Aktueller Lagerort: {path}',
     'owned_set_move_button' => 'Verschieben',
+    'owned_set_pick_list_label' => 'Pickliste',
+    'owned_set_pick_list_coming_soon' => 'Pickliste: fehlende Teile gegen dein loses Inventar abgleichen - diese Funktion ist noch nicht verfügbar.',
     'owned_set_sell_heading' => 'Verkaufen',
     'owned_set_sell_price_label' => 'Verkaufspreis',
     'owned_set_sell_date_label' => 'Verkaufsdatum',
