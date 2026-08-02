@@ -17,16 +17,6 @@ const LDRAW_LIBRARY_URL = 'https://library.ldraw.org/library/updates/complete.zi
 const LDRAW_DOWNLOAD_CHUNK_SIZE = 4_000_000; // ~4 MB per download tick
 const LDRAW_EXTRACT_BATCH_SIZE = 400; // zip entries extracted per tick
 
-// Originally 20s, on the reasoning that this module only runs on a
-// self-hosted install with a real admin behind it, so a long tick wasn't a
-// shared-hosting execution-time problem the way IMAGE_DOWNLOAD_TIME_BUDGET_SECONDS's
-// 4s is. In practice a 20s tick is long enough to itself trip an SSL
-// offloader/reverse proxy's own gateway timeout (confirmed: a real HTTP 504
-// while viewing sets with lots of missing renders) — especially with several
-// set pages open at once, each running its own tick loop and competing for
-// CPU. Kept short instead; see also stepLdrawSetRenderBatch()'s render lock,
-// which handles the multi-tab CPU contention half of the same problem.
-const LDRAW_RENDER_TIME_BUDGET_SECONDS = 5.0;
 // Matches .part-modal-image's 16rem (256px) display size — the largest
 // context these renders show up in (part-detail modal); the card grid uses
 // a much smaller 4.5rem, so this comfortably covers both.
@@ -45,12 +35,9 @@ const LDRAW_AA_SAMPLES = 8;
 // software/Xvfb rendering routinely takes 60-120s for a single part (no GPU
 // available) — normal, not stuck, but also long enough that a genuinely
 // hung leocad process (a real crash/deadlock, not just "slow") could
-// otherwise block the request holding stepLdrawSetRenderBatch()'s render
-// lock indefinitely, tying up an Apache worker forever instead of just for a
-// while. 180s is well above any observed legitimate render, so this is a
-// safety net against a true hang, not a budget for normal renders — the
-// existing per-tick 5s check (LDRAW_RENDER_TIME_BUDGET_SECONDS) already
-// accepts that a single render can and normally does run well past it.
+// otherwise block the persistent render worker (see runLdrawRenderWorkerOnce())
+// on one item forever. 180s is well above any observed legitimate render, so
+// this is a safety net against a true hang, not a budget for normal renders.
 const LDRAW_RENDER_EXEC_TIMEOUT_SECONDS = 180;
 // `timeout`'s own exit code when it has to SIGKILL/SIGTERM the process.
 const TIMEOUT_COMMAND_EXIT_CODE = 124;
@@ -66,10 +53,8 @@ const LDRAW_RENDER_NICE_LEVEL = 19;
 // Rebrickable's API enforces its own rate limit (confirmed via a real 429
 // during testing — hundreds of not-yet-cached parts in one batch blew
 // through it almost immediately). Only the first lookup per part ever hits
-// the network (resolvePartLdrawId() caches on parts.ldraw_id after that),
-// so throttling just the network-hitting calls keeps a normal tick fast
-// while still respecting the limit on a library's first full pass.
-const LDRAW_MAX_API_CALLS_PER_TICK = 15;
+// the network (resolvePartLdrawId() caches on parts.ldraw_id after that), so
+// the render worker only ever needs to pace the calls that actually hit it.
 const LDRAW_API_CALL_DELAY_MICROSECONDS = 350_000; // ~2.8 req/s
 
 /**
@@ -105,11 +90,6 @@ function getLdrawRenderTmpDir(): string
         throw new RuntimeException('Konnte Temp-Verzeichnis nicht erstellen: ' . $dir);
     }
     return $dir;
-}
-
-function getLdrawRenderLockPath(): string
-{
-    return getLdrawStorageDir() . '/render.lock';
 }
 
 /**
@@ -407,12 +387,21 @@ function ldrawContextualRenderingReady(): bool
  * getSetPartsList() for whichever tab is being shown) still need a
  * locally-rendered image. Sticker sheets are marked permanently
  * unavailable right here (an INSERT with a NULL path) instead of being
- * handed to the render step, since they have no 3D geometry to render —
- * same end state a failed render would reach, just without wasting an
- * attempt on something guaranteed to fail.
+ * queued, since they have no 3D geometry to render — same end state a
+ * failed render would reach, just without wasting a worker attempt on
+ * something guaranteed to fail.
+ *
+ * Deliberately stops at (part_id, color_id) identity — it used to also
+ * resolve ldraw_id/is_trans/ldraw_color_id here (and was called on every
+ * ~1s poll while an overlay was open, so that resolution, including a
+ * Rebrickable API call for ldraw_id, ran redundantly on every single poll).
+ * That resolution is the render worker's job now (see
+ * resolveLdrawRenderTarget()), done once when it actually claims a queue
+ * row — this function only needs to know what's still missing so it can be
+ * enqueued.
  *
  * @param array $items getSetPartsList()'s rows
- * @return array<int, array{part_id:int, color_id:int, part_num:string, ldraw_id:?string, rgb:?string}>
+ * @return array<int, array{part_id:int, color_id:int, part_num:string}>
  */
 function getMissingLdrawRenderPairs(PDO $pdo, array $items): array
 {
@@ -426,7 +415,6 @@ function getMissingLdrawRenderPairs(PDO $pdo, array $items): array
             'part_id' => (int) $item['part_id'],
             'color_id' => (int) $item['rebrickable_color_id'],
             'part_num' => (string) $item['part_num'],
-            'rgb' => $item['color_rgb'] ?? null,
         ];
     }
     if (empty($candidates)) {
@@ -441,7 +429,7 @@ function getMissingLdrawRenderPairs(PDO $pdo, array $items): array
     }
 
     // A pair with ANY row already (a real path, or a NULL "can't render"
-    // marker) is settled — drop it before it ever reaches the render step.
+    // marker) is settled — drop it before it ever reaches the queue.
     $existingStmt = $pdo->prepare("SELECT part_id, color_id FROM part_color_images WHERE (part_id, color_id) IN ($pairPlaceholders)");
     $existingStmt->execute($pairParams);
     foreach ($existingStmt->fetchAll() as $row) {
@@ -471,221 +459,222 @@ function getMissingLdrawRenderPairs(PDO $pdo, array $items): array
             }
         }
     }
-    if (empty($candidates)) {
-        return [];
-    }
-
-    $ldrawIdStmt = $pdo->prepare("SELECT id, ldraw_id FROM parts WHERE id IN ($partIdPlaceholders)");
-    $ldrawIdStmt->execute($partIds);
-    $ldrawIdByPart = array_column($ldrawIdStmt->fetchAll(), 'ldraw_id', 'id');
-
-    // getSetPartsList()'s rows carry color_rgb but not is_trans/ldraw_color_id
-    // — is_trans is needed so matchLdrawColorCode() only matches within the
-    // correct opaque/transparent LDraw color group (see its doc comment);
-    // ldraw_color_id (see syncExternalColorIds() in src/rebrickable.php) is
-    // Rebrickable's own authoritative color mapping, preferred over
-    // matchLdrawColorCode()'s RGB-nearest-neighbor guess wherever it's set.
-    $colorIds = array_values(array_unique(array_column($candidates, 'color_id')));
-    $colorIdPlaceholders = implode(',', array_fill(0, count($colorIds), '?'));
-    $transStmt = $pdo->prepare("SELECT color_id, is_trans, ldraw_color_id FROM colors WHERE color_id IN ($colorIdPlaceholders)");
-    $transStmt->execute($colorIds);
-    $colorRows = $transStmt->fetchAll();
-    $isTransByColor = array_column($colorRows, 'is_trans', 'color_id');
-    $ldrawColorIdByColor = array_column($colorRows, 'ldraw_color_id', 'color_id');
-
-    foreach ($candidates as $key => $c) {
-        $candidates[$key]['ldraw_id'] = $ldrawIdByPart[$c['part_id']] ?? null;
-        $candidates[$key]['is_trans'] = !empty($isTransByColor[$c['color_id']] ?? 0);
-        $storedLdrawColorId = $ldrawColorIdByColor[$c['color_id']] ?? null;
-        $candidates[$key]['ldraw_color_id'] = $storedLdrawColorId !== null ? (int) $storedLdrawColorId : null;
-    }
 
     return array_values($candidates);
 }
 
 /**
- * @param array<int, array{part_id:int, color_id:int, part_num:string, ldraw_id:?string, rgb:?string, is_trans:bool, ldraw_color_id:?int}> $pairs
- * @return array{pairs:array, index:int, stats:array{processed:int, rendered:int, skipped:int, errors:int}}
+ * Total distinct renderable (part_id, color_id) pairs for a set, regardless
+ * of whether each one is already resolved — the denominator for
+ * getLdrawSetRenderProgress()'s percentage, computed the same way
+ * getMissingLdrawRenderPairs() builds its candidate list before checking
+ * what's already settled.
  */
-function initLdrawSetRenderState(array $pairs): array
+function countLdrawRenderablePairs(array $items): int
 {
-    return [
-        'pairs' => array_values($pairs),
-        'index' => 0,
-        'stats' => ['processed' => 0, 'rendered' => 0, 'skipped' => 0, 'errors' => 0, 'timedOut' => 0],
-    ];
+    $keys = [];
+    foreach ($items as $item) {
+        if (($item['rebrickable_color_id'] ?? null) === null) {
+            continue;
+        }
+        $keys[$item['part_id'] . ':' . $item['rebrickable_color_id']] = true;
+    }
+    return count($keys);
 }
 
 /**
- * One time-budgeted batch over a fixed, already-known list of pairs (a
- * single set's missing renders — typically dozens to a few hundred, not
- * the whole catalog), so a plain index cursor is enough; no DB-side
- * "already exists" re-check is needed per row since getMissingLdrawRenderPairs()
- * already did that once up front.
- *
- * A pair only ever gets a permanent NULL "can't render" marker for
- * definitive reasons (Rebrickable confirms no LDraw mapping, no usable
- * color match, or the .dat file is missing from the library) — a
- * Rebrickable API hiccup leaves no row at all, so the pair is simply
- * missing again (and retried) whenever any set containing it is next
- * viewed, rather than being wrongly marked unavailable forever.
- *
- * @return array{done: bool, lockBusy?: bool}
+ * INSERT IGNOREs each pair into ldraw_render_queue — the UNIQUE key on
+ * (part_id, color_id) is what makes this safe to call from many concurrent
+ * pollers (different sets/users sharing a part) without ever double-queuing
+ * the same pair.
  */
-function stepLdrawSetRenderBatch(array &$state): array
+function enqueueLdrawRenders(PDO $pdo, array $pairs): void
 {
-    $pdo = getPDO();
-    $pairs = $state['pairs'];
-    $total = count($pairs);
+    if (empty($pairs)) {
+        return;
+    }
+    $stmt = $pdo->prepare('INSERT IGNORE INTO ldraw_render_queue (part_id, color_id) VALUES (?, ?)');
+    foreach ($pairs as $pair) {
+        $stmt->execute([$pair['part_id'], $pair['color_id']]);
+    }
+}
 
-    // A session-persisted $state can predate the current deploy (a tab left
-    // open across an update) — backfill any stats key added since, rather
-    // than warning on an undefined index the first time it's incremented.
-    $state['stats'] += ['processed' => 0, 'rendered' => 0, 'skipped' => 0, 'errors' => 0, 'timedOut' => 0];
+/**
+ * The web-facing half of rendering: enqueues whatever's still missing for
+ * this set (cheap — no exec(), no Rebrickable API call) and reports overall
+ * progress, including what the persistent worker (see
+ * runLdrawRenderWorkerOnce()) is doing right now, so the polling overlay can
+ * show it. Replaces the old session-persisted stepLdrawSetRenderBatch() tick
+ * entirely — every call here is self-contained and safe to repeat, so no
+ * per-set state needs to survive between polls.
+ *
+ * @param array $items getSetPartsList()'s rows
+ * @return array{status:string, percent:int, done:int, total:int, currentPart:?string, queueDepth:int}
+ */
+function getLdrawSetRenderProgress(PDO $pdo, array $items): array
+{
+    $total = countLdrawRenderablePairs($items);
+    $missing = getMissingLdrawRenderPairs($pdo, $items);
+    enqueueLdrawRenders($pdo, $missing);
 
-    if ($state['index'] >= $total) {
-        return ['done' => true];
+    $done = $total - count($missing);
+    $percent = $total > 0 ? (int) round(min(1.0, $done / $total) * 100) : 100;
+
+    $currentPart = $pdo->query(
+        "SELECT p.part_num FROM ldraw_render_queue q
+         INNER JOIN parts p ON p.id = q.part_id
+         WHERE q.status = 'rendering' LIMIT 1"
+    )->fetchColumn();
+
+    $queueDepth = (int) $pdo->query("SELECT COUNT(*) FROM ldraw_render_queue WHERE status = 'pending'")->fetchColumn();
+
+    return [
+        'status' => count($missing) > 0 ? 'running' : 'done',
+        'percent' => $percent,
+        'done' => $done,
+        'total' => $total,
+        'currentPart' => $currentPart !== false ? (string) $currentPart : null,
+        'queueDepth' => $queueDepth,
+    ];
+}
+
+// A hanging render (killed by LDRAW_RENDER_EXEC_TIMEOUT_SECONDS) is sent to
+// the back of the queue and retried rather than given up on immediately —
+// but not forever, so one genuinely-broken part can't tie up the single
+// worker indefinitely across repeated attempts.
+const LDRAW_RENDER_MAX_ATTEMPTS = 5;
+
+/**
+ * Resolves the one thing the queue itself doesn't carry: which LDraw part
+ * file and color code a (part_id, color_id) pair renders as. Mirrors what
+ * getMissingLdrawRenderPairs() used to precompute for a whole set at once,
+ * but done per-item, at claim time, only by the worker that's actually about
+ * to render it — see runLdrawRenderWorkerOnce().
+ *
+ * @return array{ldrawId: ?string, ldrawColorCode: ?int}
+ */
+function resolveLdrawRenderTarget(PDO $pdo, int $partId, string $partNum, int $colorId): array
+{
+    $cachedStmt = $pdo->prepare('SELECT ldraw_id FROM parts WHERE id = ?');
+    $cachedStmt->execute([$partId]);
+    $cached = $cachedStmt->fetchColumn();
+    $hitNetwork = $cached === false || $cached === null;
+
+    $ldrawId = resolvePartLdrawId($pdo, $partId, $partNum);
+    if ($hitNetwork) {
+        // Only the first lookup per part ever reaches Rebrickable's API
+        // (resolvePartLdrawId() caches on parts.ldraw_id after that) — see
+        // LDRAW_API_CALL_DELAY_MICROSECONDS' doc comment for why this is
+        // paced at all.
+        usleep(LDRAW_API_CALL_DELAY_MICROSECONDS);
     }
 
-    // Only one render loop across the whole app runs at a time — several set
-    // pages left open at once would otherwise each spawn their own tick loop
-    // and compete for CPU on the same leocad+Xvfb renders, which is exactly
-    // what pushed a single tick's response time past an SSL offloader's
-    // gateway timeout (see LDRAW_RENDER_TIME_BUDGET_SECONDS's doc comment).
-    // Non-blocking trylock: a tick that loses the race does no work and
-    // returns immediately instead of queuing up behind the lock holder.
-    // 'lockBusy' tells the client's tick loop to back off hard instead of
-    // polling again almost immediately — with several set pages open, each
-    // losing this race, hammering the lock every tick is exactly the request
-    // flood that made the server unresponsive under real use (a single
-    // render legitimately takes 60-120s, so a losing tab has no reason to
-    // ask again in under a couple of seconds).
-    $lockHandle = fopen(getLdrawRenderLockPath(), 'c');
-    if ($lockHandle === false || !flock($lockHandle, LOCK_EX | LOCK_NB)) {
-        if ($lockHandle !== false) {
-            fclose($lockHandle);
-        }
-        return ['done' => false, 'lockBusy' => true];
+    $colorStmt = $pdo->prepare('SELECT rgb, is_trans, ldraw_color_id FROM colors WHERE color_id = ?');
+    $colorStmt->execute([$colorId]);
+    $colorRow = $colorStmt->fetch();
+
+    // Rebrickable's own mapping (synced by syncExternalColorIds()) is
+    // authoritative where it exists; matchLdrawColorCode()'s RGB-nearest-
+    // neighbor guess only kicks in for colors Rebrickable doesn't map at all.
+    $storedLdrawColorId = $colorRow['ldraw_color_id'] ?? null;
+    $ldrawColorCode = $storedLdrawColorId !== null
+        ? (int) $storedLdrawColorId
+        : (($colorRow['rgb'] ?? null) !== null ? matchLdrawColorCode($colorRow['rgb'], !empty($colorRow['is_trans'])) : null);
+
+    return ['ldrawId' => $ldrawId, 'ldrawColorCode' => $ldrawColorCode];
+}
+
+/**
+ * One claim-resolve-render-settle cycle for the persistent LDraw render
+ * worker (bin/ldraw_render_worker.php). Runs entirely outside any web
+ * request, so a render taking the 60-120s it normally takes on this
+ * hardware never ties up an Apache worker or risks an external gateway's
+ * own request timeout — both real problems with the old design, where
+ * stepLdrawSetRenderBatch() rendered synchronously inside
+ * action=ldraw_set_render_tick.
+ *
+ * @return bool true if a queue row was claimed and processed, false if the
+ *   queue was empty (caller should back off before calling again)
+ */
+function runLdrawRenderWorkerOnce(PDO $pdo): bool
+{
+    $pdo->beginTransaction();
+    $row = $pdo->query(
+        "SELECT id, part_id, color_id, attempts FROM ldraw_render_queue
+         WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1 FOR UPDATE"
+    )->fetch();
+    if (!$row) {
+        $pdo->rollBack();
+        return false;
     }
+    $pdo->prepare("UPDATE ldraw_render_queue SET status = 'rendering', started_at = NOW() WHERE id = ?")
+        ->execute([$row['id']]);
+    $pdo->commit();
+
+    $upsertStmt = $pdo->prepare(
+        'INSERT INTO part_color_images (part_id, color_id, local_image_path)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE local_image_path = VALUES(local_image_path), fetched_at = CURRENT_TIMESTAMP'
+    );
+    $deleteStmt = $pdo->prepare('DELETE FROM ldraw_render_queue WHERE id = ?');
+    $requeueStmt = $pdo->prepare(
+        "UPDATE ldraw_render_queue SET status = 'pending', started_at = NULL, attempts = ?, created_at = NOW() WHERE id = ?"
+    );
 
     try {
-        $upsertStmt = $pdo->prepare(
-            'INSERT INTO part_color_images (part_id, color_id, local_image_path)
-             VALUES (?, ?, ?)
-             ON DUPLICATE KEY UPDATE local_image_path = VALUES(local_image_path), fetched_at = CURRENT_TIMESTAMP'
-        );
+        $partNumStmt = $pdo->prepare('SELECT part_num FROM parts WHERE id = ?');
+        $partNumStmt->execute([$row['part_id']]);
+        $partNum = (string) $partNumStmt->fetchColumn();
 
-        $start = microtime(true);
-        $networkCalls = 0;
-        $consecutiveApiFailures = 0;
+        $target = resolveLdrawRenderTarget($pdo, (int) $row['part_id'], $partNum, (int) $row['color_id']);
 
-        while ($state['index'] < $total) {
-            $pair = $pairs[$state['index']];
-            $needsApiCall = $pair['ldraw_id'] === null;
-
-            if ($needsApiCall && ($networkCalls >= LDRAW_MAX_API_CALLS_PER_TICK || $consecutiveApiFailures >= 3)) {
-                // Per-tick cap reached, or the API looks unavailable right now
-                // — stop attempting more lookups this tick. $state['index']
-                // isn't advanced past this pair, so the next tick retries it.
-                break;
-            }
-
-            if ($needsApiCall) {
-                if ($networkCalls > 0) {
-                    usleep(LDRAW_API_CALL_DELAY_MICROSECONDS);
-                }
-                $networkCalls++;
-            }
-
-            try {
-                $ldrawId = $needsApiCall
-                    ? resolvePartLdrawId($pdo, $pair['part_id'], $pair['part_num'])
-                    : ($pair['ldraw_id'] !== '' ? $pair['ldraw_id'] : null);
-                $consecutiveApiFailures = 0;
-            } catch (Throwable $e) {
-                if ($needsApiCall) {
-                    $consecutiveApiFailures++;
-                }
-                $state['index']++;
-                $state['stats']['processed']++;
-                $state['stats']['errors']++;
-                continue;
-            }
-
-            $state['index']++;
-            $state['stats']['processed']++;
-
-            // Rebrickable's own mapping (synced by syncExternalColorIds())
-            // is authoritative where it exists; matchLdrawColorCode()'s
-            // RGB-nearest-neighbor guess only kicks in for the ~39% of
-            // colors Rebrickable doesn't map to an LDraw color at all.
-            $ldrawColorCode = $pair['ldraw_color_id']
-                ?? ($pair['rgb'] !== null ? matchLdrawColorCode($pair['rgb'], $pair['is_trans']) : null);
-
-            if ($ldrawId === null || $ldrawColorCode === null) {
-                // Definitively resolved either way (confirmed no LDraw mapping,
-                // or no usable color) — permanent, mark it.
-                $upsertStmt->execute([$pair['part_id'], $pair['color_id'], null]);
-                $state['stats']['skipped']++;
-                continue;
-            }
-
-            $filename = $pair['color_id'] . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $ldrawId) . '.png';
-            $shard = getImageShard($filename);
-            $dir = getImageStorageDir('part_color_images', $shard);
-            $absolutePath = $dir . '/' . $filename;
-            $relativePath = getImageRelativePath('part_color_images', $shard, $filename);
-
-            $renderResult = renderLdrawPartImage($ldrawId, $ldrawColorCode, $absolutePath);
-            if ($renderResult === true) {
-                $upsertStmt->execute([$pair['part_id'], $pair['color_id'], $relativePath]);
-                $state['stats']['rendered']++;
-            } elseif ($renderResult === false) {
-                // The .dat file wasn't found in the library — a real (if rare)
-                // gap, permanent for this library version, so it's marked too
-                // rather than re-attempted every time this part comes up.
-                $upsertStmt->execute([$pair['part_id'], $pair['color_id'], null]);
-                $state['stats']['errors']++;
-            } else {
-                // null: killed by LDRAW_RENDER_EXEC_TIMEOUT_SECONDS — transient,
-                // not proof this part can never render. Deliberately no upsert
-                // here, so this pair is left unresolved and simply retried
-                // whenever a set containing it is next viewed, same as one
-                // that's never been attempted at all.
-                $state['stats']['timedOut']++;
-            }
-
-            if ((microtime(true) - $start) >= LDRAW_RENDER_TIME_BUDGET_SECONDS) {
-                break;
-            }
+        if ($target['ldrawId'] === null || $target['ldrawColorCode'] === null) {
+            // Definitively resolved either way (confirmed no LDraw mapping, or
+            // no usable color) — permanent, mark it rather than re-attempting.
+            $upsertStmt->execute([$row['part_id'], $row['color_id'], null]);
+            $deleteStmt->execute([$row['id']]);
+            return true;
         }
 
-        return ['done' => $state['index'] >= $total, 'lockBusy' => false];
-    } finally {
-        flock($lockHandle, LOCK_UN);
-        fclose($lockHandle);
+        $filename = $row['color_id'] . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $target['ldrawId']) . '.png';
+        $shard = getImageShard($filename);
+        $dir = getImageStorageDir('part_color_images', $shard);
+        $absolutePath = $dir . '/' . $filename;
+        $relativePath = getImageRelativePath('part_color_images', $shard, $filename);
+
+        $renderResult = renderLdrawPartImage($target['ldrawId'], $target['ldrawColorCode'], $absolutePath);
+    } catch (Throwable $e) {
+        // A Rebrickable API hiccup during resolveLdrawRenderTarget() (network
+        // blip, transient 5xx) is not a verdict on the part — send it to the
+        // back of the queue like a render timeout, rather than leaving the
+        // row stuck in 'rendering' forever or wrongly blacklisting it.
+        $requeueStmt->execute([(int) $row['attempts'] + 1, $row['id']]);
+        throw $e;
     }
-}
 
-/**
- * @return array{status:string, percent:int, processed:int, total:int, rendered:int, skipped:int, errors:int, lockBusy:bool}
- */
-function buildLdrawSetRenderProgressPayload(array $state, bool $done, bool $lockBusy = false): array
-{
-    $total = count($state['pairs']);
-    $processed = $state['stats']['processed'];
-    $percent = $total > 0 ? (int) round(min(1.0, $processed / $total) * 100) : 100;
+    if ($renderResult === true) {
+        $upsertStmt->execute([$row['part_id'], $row['color_id'], $relativePath]);
+        $deleteStmt->execute([$row['id']]);
+    } elseif ($renderResult === false) {
+        // The .dat file wasn't found in the library — a real (if rare) gap,
+        // permanent for this library version.
+        $upsertStmt->execute([$row['part_id'], $row['color_id'], null]);
+        $deleteStmt->execute([$row['id']]);
+    } else {
+        // null: killed by LDRAW_RENDER_EXEC_TIMEOUT_SECONDS — transient, not
+        // proof this part can never render. Sent to the back of the queue
+        // (fresh created_at) so a single hanging part can't monopolize the
+        // only worker; only given up on after repeated attempts.
+        $attempts = (int) $row['attempts'] + 1;
+        if ($attempts >= LDRAW_RENDER_MAX_ATTEMPTS) {
+            $upsertStmt->execute([$row['part_id'], $row['color_id'], null]);
+            $deleteStmt->execute([$row['id']]);
+        } else {
+            $requeueStmt->execute([$attempts, $row['id']]);
+        }
+    }
 
-    return [
-        'status' => $done ? 'done' : 'running',
-        'percent' => $done ? 100 : $percent,
-        'processed' => $processed,
-        'total' => $total,
-        'lockBusy' => $lockBusy,
-        'rendered' => $state['stats']['rendered'],
-        'skipped' => $state['stats']['skipped'],
-        'errors' => $state['stats']['errors'],
-    ];
+    return true;
 }
 
 /**
@@ -703,6 +692,11 @@ function renderLdrawRenderOverlay(int $inventoryId): string
         'message' => t('ldraw_set_render_message'),
         'errorMessage' => t('ldraw_set_render_error'),
         'skipLabel' => t('ldraw_set_render_skip'),
+        // Left with literal {part}/{count} placeholders (t() only replaces
+        // what's passed in $vars) so the client can substitute live values
+        // into it on every poll, rather than re-fetching a translation.
+        'currentTemplate' => t('ldraw_set_render_current'),
+        'waitingMessage' => t('ldraw_set_render_waiting'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $html = '<div class="ldraw-render-overlay" id="ldraw-render-overlay">';
@@ -715,6 +709,7 @@ function renderLdrawRenderOverlay(int $inventoryId): string
     $html .= '<span class="ldraw-render-percent" id="ldraw-render-percent">0%</span>';
     $html .= '</div>';
     $html .= '<p class="ldraw-render-message" id="ldraw-render-message"></p>';
+    $html .= '<p class="ldraw-render-status" id="ldraw-render-status"></p>';
     $html .= '<button type="button" class="ldraw-render-skip" id="ldraw-render-skip">' . htmlspecialchars(t('ldraw_set_render_skip')) . '</button>';
     $html .= '</div>';
     $html .= '</div>';
@@ -727,8 +722,9 @@ function renderLdrawRenderOverlay(int $inventoryId): string
   var ringFg = document.getElementById("ldraw-render-ring-fg");
   var percentLabel = document.getElementById("ldraw-render-percent");
   var messageLabel = document.getElementById("ldraw-render-message");
+  var statusLabel = document.getElementById("ldraw-render-status");
   var skipButton = document.getElementById("ldraw-render-skip");
-  if (!overlay || !ringFg || !percentLabel || !messageLabel || !skipButton) {
+  if (!overlay || !ringFg || !percentLabel || !messageLabel || !statusLabel || !skipButton) {
     return;
   }
 
@@ -745,6 +741,18 @@ function renderLdrawRenderOverlay(int $inventoryId): string
     ringFg.style.strokeDashoffset = (circumference * (1 - percent / 100)).toFixed(2);
   }
   setPercent(0);
+
+  function updateStatusLine(data) {
+    if (data.currentPart) {
+      statusLabel.textContent = texts.currentTemplate
+        .replace('{part}', data.currentPart)
+        .replace('{count}', data.queueDepth);
+    } else if (data.queueDepth > 0) {
+      statusLabel.textContent = texts.waitingMessage;
+    } else {
+      statusLabel.textContent = '';
+    }
+  }
 
   skipButton.addEventListener("click", function() {
     stopped = true;
@@ -773,6 +781,7 @@ function renderLdrawRenderOverlay(int $inventoryId): string
     tick().then(function(data) {
       consecutiveFailures = 0;
       setPercent(data.percent || 0);
+      updateStatusLine(data);
       if (data.status === 'done') {
         window.location.reload();
         return;
@@ -781,12 +790,11 @@ function renderLdrawRenderOverlay(int $inventoryId): string
         messageLabel.textContent = data.message || texts.errorMessage;
         return;
       }
-      // A single render legitimately takes 60-120s, so a tick that lost the
-      // render.lock race (another set page is already working) has no
-      // reason to ask again in under a couple of seconds — with several set
-      // pages open at once, all polling as fast as possible here is exactly
-      // what turned into a request flood against the server.
-      setTimeout(loop, data.lockBusy ? 3000 : 500);
+      // Rendering itself now happens in a separate persistent worker, not
+      // in this request — this tick only enqueues and reports state, so
+      // it's always fast and there's no lock-contention backoff to make
+      // anymore; a flat ~1s poll is plenty responsive.
+      setTimeout(loop, 1000);
     }).catch(function() {
       consecutiveFailures++;
       if (consecutiveFailures <= maxAutoRetries) {

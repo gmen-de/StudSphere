@@ -1,0 +1,15 @@
+[Unit]
+Description=StudSphere LDraw render worker
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/html
+ExecStart=/usr/bin/php /var/www/html/bin/ldraw_render_worker.php
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

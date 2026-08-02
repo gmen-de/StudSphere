@@ -406,6 +406,29 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        27 => function (PDO $pdo): void {
+            // Replaces the old request-bound render tick (see
+            // stepLdrawSetRenderBatch(), removed): a persistent CLI worker
+            // (bin/ldraw_render_worker.php) now claims one row at a time from
+            // this queue instead of exec()-ing leocad inside a web request —
+            // see getLdrawSetRenderProgress()/runLdrawRenderWorkerOnce() in
+            // src/ldraw.php for why (Apache worker-pool exhaustion + an
+            // external gateway timeout neither could be fixed from the
+            // request side).
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS ldraw_render_queue (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    part_id INT NOT NULL,
+                    color_id INT NOT NULL,
+                    status ENUM(\'pending\', \'rendering\') NOT NULL DEFAULT \'pending\',
+                    attempts INT NOT NULL DEFAULT 0,
+                    started_at TIMESTAMP NULL DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY ldraw_render_queue_pair (part_id, color_id),
+                    CONSTRAINT fk_ldrawrenderqueue_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -468,7 +491,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 26;
+const CURRENT_SCHEMA_VERSION = 27;
 
 function getInstalledSchemaVersion(): int
 {

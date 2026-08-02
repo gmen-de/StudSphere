@@ -2342,6 +2342,13 @@ footer {
   font-size: 0.9rem;
 }
 
+.ldraw-render-status {
+  margin: 0.25rem 0 0;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  min-height: 1.1em;
+}
+
 .ldraw-render-skip {
   width: auto;
   padding: 0.5rem 1rem;

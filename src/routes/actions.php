@@ -187,16 +187,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw_set_render_tick') {
     header('Content-Type: application/json');
-    // PHP's own php.ini max_execution_time (60s on the test server) would
-    // otherwise fatally abort this script mid-render — a single leocad
-    // render legitimately takes 60-120s under software/Xvfb rendering, well
-    // past that, regardless of the exec()-level `timeout` wrapper in
-    // renderLdrawPartImage() (that one bounds the child process, not this
-    // PHP script itself). Same pattern as import.php/download.php's own
-    // long-running ticks.
-    if (function_exists('set_time_limit')) {
-        @set_time_limit(0);
-    }
+    // Rendering itself now happens entirely outside this request — see
+    // runLdrawRenderWorkerOnce() (src/ldraw.php) and bin/ldraw_render_worker.php.
+    // This tick only enqueues what's still missing and reports queue state,
+    // so it's always fast; no set_time_limit(0)/session state needed anymore.
     try {
         if (!ldrawContextualRenderingReady()) {
             throw new RuntimeException(t('ldraw_tools_unavailable', ['missing' => 'leocad, xvfb']));
@@ -207,22 +201,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw
             throw new RuntimeException(t('ldraw_invalid_inventory'));
         }
 
-        $sessionKey = 'ldraw_set_render_state_' . $inventoryId;
-        $state = $_SESSION[$sessionKey] ?? null;
-        if (!is_array($state)) {
-            $items = getSetPartsList($pdo, $inventoryId, false, getLocale());
-            $pairs = getMissingLdrawRenderPairs($pdo, $items);
-            $state = initLdrawSetRenderState($pairs);
-        }
-
-        $result = stepLdrawSetRenderBatch($state);
-        $_SESSION[$sessionKey] = $state;
-
-        $payload = buildLdrawSetRenderProgressPayload($state, $result['done'], $result['lockBusy'] ?? false);
-
-        if ($result['done']) {
-            unset($_SESSION[$sessionKey]);
-        }
+        $items = getSetPartsList($pdo, $inventoryId, false, getLocale());
+        $payload = getLdrawSetRenderProgress($pdo, $items);
 
         echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {

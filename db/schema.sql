@@ -251,6 +251,18 @@ CREATE TABLE IF NOT EXISTS part_color_images (
     CONSTRAINT fk_partcolorimage_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS ldraw_render_queue (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    part_id INT NOT NULL,
+    color_id INT NOT NULL,
+    status ENUM('pending', 'rendering') NOT NULL DEFAULT 'pending',
+    attempts INT NOT NULL DEFAULT 0,
+    started_at TIMESTAMP NULL DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY ldraw_render_queue_pair (part_id, color_id),
+    CONSTRAINT fk_ldrawrenderqueue_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS part_set_counts (
     part_id INT NOT NULL,
     color_id INT NOT NULL,
