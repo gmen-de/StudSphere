@@ -292,21 +292,28 @@ function renderDashboardZone(PDO $pdo, string $zone, array $widgets, array $plac
     foreach ($widgets as $widget) {
         $html .= renderDashboardWidgetCard($pdo, $widget);
     }
-    $html .= '</div>';
 
+    // Inside the zone itself (not a sibling after it) — same width/column as
+    // the widgets above it, so which zone a given "+" belongs to is never
+    // ambiguous, even when a zone is otherwise empty.
     $available = array_diff_key(getDashboardWidgetDefinitions(), array_flip($placedTypes));
     if (!empty($available)) {
-        $html .= '<form method="post" class="dashboard-widget-add-form">';
-        $html .= '<input type="hidden" name="action" value="add_dashboard_widget">';
-        $html .= '<input type="hidden" name="zone" value="' . htmlspecialchars($zone) . '">';
-        $html .= '<select name="widget_type">';
+        $html .= '<div class="dashboard-widget-add">';
+        $html .= '<button type="button" class="dashboard-widget-add-toggle" title="' . htmlspecialchars(t('dashboard_widget_add_label')) . '" aria-label="' . htmlspecialchars(t('dashboard_widget_add_label')) . '" aria-expanded="false">' . getActionIcon('add') . '</button>';
+        $html .= '<div class="dashboard-widget-add-menu" hidden>';
         foreach ($available as $type => $def) {
-            $html .= '<option value="' . htmlspecialchars($type) . '">' . htmlspecialchars(t($def['labelKey'])) . '</option>';
+            $html .= '<form method="post" class="dashboard-widget-add-form">';
+            $html .= '<input type="hidden" name="action" value="add_dashboard_widget">';
+            $html .= '<input type="hidden" name="zone" value="' . htmlspecialchars($zone) . '">';
+            $html .= '<input type="hidden" name="widget_type" value="' . htmlspecialchars($type) . '">';
+            $html .= '<button type="submit" class="dashboard-widget-add-menu-item">' . htmlspecialchars(t($def['labelKey'])) . '</button>';
+            $html .= '</form>';
         }
-        $html .= '</select>';
-        $html .= '<button type="submit" class="dashboard-widget-add-submit" title="' . htmlspecialchars(t('dashboard_widget_add_label')) . '" aria-label="' . htmlspecialchars(t('dashboard_widget_add_label')) . '">' . getActionIcon('add') . '</button>';
-        $html .= '</form>';
+        $html .= '</div>';
+        $html .= '</div>';
     }
+
+    $html .= '</div>';
 
     return $html;
 }
@@ -380,6 +387,30 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
     });
   }
 
+  function closeAllAddMenus(except) {
+    document.querySelectorAll('.dashboard-widget-add-menu').forEach(function(menu) {
+      if (menu !== except) {
+        menu.hidden = true;
+        menu.previousElementSibling.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
+  document.querySelectorAll('.dashboard-widget-add-toggle').forEach(function(addToggle) {
+    var menu = addToggle.nextElementSibling;
+    addToggle.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var willOpen = menu.hidden;
+      closeAllAddMenus(willOpen ? menu : null);
+      menu.hidden = !willOpen;
+      addToggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+  });
+
+  document.addEventListener('click', function() {
+    closeAllAddMenus(null);
+  });
+
   zones.forEach(function(zone) {
     zone.addEventListener('dragover', function(e) {
       e.preventDefault();
@@ -401,7 +432,11 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
       if (after) {
         zone.insertBefore(dragged, after);
       } else {
-        zone.appendChild(dragged);
+        // Never past the "+ add" control, if this zone has one — it must
+        // always stay the last element so it keeps reading as "add to the
+        // end of this zone" rather than jumping mid-list.
+        var addControl = zone.querySelector('.dashboard-widget-add');
+        zone.insertBefore(dragged, addControl || null);
       }
     });
     zone.addEventListener('drop', function(e) {

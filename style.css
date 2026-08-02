@@ -3408,30 +3408,73 @@ footer {
   padding: 0.25rem 1.1rem 1.1rem;
 }
 
-.dashboard-widget-add-form {
+.dashboard-widget-add {
+  position: relative;
   display: none;
-  align-items: center;
-  gap: 0.5rem;
+}
+
+.dashboard-edit-mode .dashboard-widget-add {
+  display: block;
+}
+
+.dashboard-widget-add-toggle {
   width: auto;
-  flex: none;
-}
-
-.dashboard-edit-mode .dashboard-widget-add-form {
   display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px dashed rgba(37,99,235,0.4);
+  color: #2563eb;
+  box-shadow: none;
+  border-radius: 0.6rem;
+  padding: 0.55rem;
 }
 
-.dashboard-zone-left .dashboard-widget-add-form,
-.dashboard-zone-right .dashboard-widget-add-form {
+.dashboard-widget-add-toggle:hover {
+  background: rgba(37,99,235,0.08);
+  transform: none;
+}
+
+.dashboard-widget-add-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.dashboard-widget-add-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 200px;
+  padding: 0.4rem;
+  background: rgba(255,255,255,0.98);
+  border: 1px solid rgba(148,163,184,0.3);
+  border-radius: 0.75rem;
+  box-shadow: 0 18px 50px rgba(15,23,42,0.12);
+}
+
+.dashboard-widget-add-form {
   width: 100%;
 }
 
-.dashboard-widget-add-form select {
-  width: auto;
+.dashboard-widget-add-menu .dashboard-widget-add-menu-item {
+  width: 100%;
+  background: transparent;
+  color: #1e293b;
+  border: none;
+  box-shadow: none;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
 }
 
-.dashboard-widget-add-form .dashboard-widget-add-submit {
-  width: auto;
-  white-space: nowrap;
+.dashboard-widget-add-menu .dashboard-widget-add-menu-item:hover {
+  background: rgba(37,99,235,0.08);
+  transform: none;
 }
 
 .dashboard-chart-scroll {
