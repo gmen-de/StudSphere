@@ -3463,6 +3463,14 @@ footer {
   box-shadow: 0 18px 50px rgba(15,23,42,0.12);
 }
 
+/* Own display:flex above otherwise beats the [hidden] attribute's UA-default
+   display:none (author styles always win over the UA stylesheet, regardless
+   of specificity) — without this, toggling the .hidden DOM property from JS
+   had no visible effect and every "+" menu showed open at once in edit mode. */
+.dashboard-widget-add-menu[hidden] {
+  display: none;
+}
+
 .dashboard-widget-add-form {
   width: 100%;
 }
