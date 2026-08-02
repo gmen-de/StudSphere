@@ -1099,3 +1099,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
     echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     exit;
 }
+
+// The owned sets behind one clicked bar of the collection-stats chart (see
+// renderDashboardWidgetCollectionStats() in src/dashboard.php) — 'group'
+// selects which of computeOwnedSetsByYear()/computeOwnedSetsByTheme()'s bars
+// 'value' refers to.
+if (isset($_GET['action']) && $_GET['action'] === 'dashboard_sets_by_group') {
+    header('Content-Type: application/json');
+    $group = (string) ($_GET['group'] ?? '');
+    $value = (int) ($_GET['value'] ?? 0);
+
+    if ($group === 'year') {
+        echo json_encode(['sets' => getOwnedSetsByYear($pdo, $value)], JSON_UNESCAPED_UNICODE);
+    } elseif ($group === 'theme') {
+        echo json_encode(['sets' => getOwnedSetsByTheme($pdo, $value)], JSON_UNESCAPED_UNICODE);
+    } else {
+        http_response_code(400);
+        echo json_encode(['sets' => []], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}

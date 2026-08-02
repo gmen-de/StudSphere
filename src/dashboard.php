@@ -178,30 +178,144 @@ function computeOwnedSetsByYear(PDO $pdo): array
 }
 
 /**
- * A bar per year (not the six status-bar numbers anymore — those are
- * already always visible in the status bar on every page, no need to
- * repeat them here) — wrapped in its own horizontally scrolling container
- * since a decades-spanning collection makes this genuinely wide, one bar
- * per year rather than shrinking bars to fit.
+ * One row per theme actually used by an owned set — deliberately flat, one
+ * bar per leaf theme (not rolled up through parent_theme_id; see
+ * getOwnedSetThemeTree() in src/sets.php for the full hierarchy view used
+ * elsewhere), mirroring computeOwnedSetsByYear()'s one-bar-per-year shape.
+ * Sorted by count descending (ties alphabetical) since, unlike years, themes
+ * have no natural order to sweep across.
+ *
+ * s.theme = CAST(th.theme_id AS CHAR), not the other way around, to keep
+ * using idx_sets_theme — see getSetThemeTree()'s doc comment in src/sets.php
+ * for why casting the indexed VARCHAR column itself would defeat it.
+ *
+ * @return array<int, array{theme_id:int, name:string, count:int}>
+ */
+function computeOwnedSetsByTheme(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        'SELECT th.theme_id, th.name, COUNT(*) AS count
+         FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id
+         INNER JOIN themes th ON s.theme = CAST(th.theme_id AS CHAR)
+         GROUP BY th.theme_id, th.name
+         ORDER BY count DESC, th.name ASC'
+    );
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['theme_id'] = (int) $row['theme_id'];
+        $row['count'] = (int) $row['count'];
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
+ * The owned sets behind one bar of the collection-stats chart — fetched on
+ * demand when a bar is clicked (action=dashboard_sets_by_group in
+ * src/routes/actions.php), not preloaded, since most bars are never clicked
+ * in a given visit.
+ *
+ * @return array<int, array{id:int, rebrickable_set_num:string, name:string, thumbnail:?string}>
+ */
+function getOwnedSetsByYear(PDO $pdo, int $year): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT os.id, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
+         FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id
+         WHERE s.year = ?
+         ORDER BY s.name'
+    );
+    $stmt->execute([$year]);
+    return $stmt->fetchAll();
+}
+
+/** @return array<int, array{id:int, rebrickable_set_num:string, name:string, thumbnail:?string}> */
+function getOwnedSetsByTheme(PDO $pdo, int $themeId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT os.id, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
+         FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id
+         WHERE s.theme = ?
+         ORDER BY s.name'
+    );
+    $stmt->execute([(string) $themeId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Two interchangeable bar charts (year / theme) sharing one toggle — not the
+ * six status-bar numbers anymore, those are already always visible in the
+ * status bar on every page. Both charts are rendered up front (cheap at
+ * personal-collection scale) and switched client-side, so toggling needs no
+ * round trip; each is wrapped in its own horizontally scrolling container
+ * since either a decades-spanning collection or a many-themed one makes this
+ * genuinely wide — one bar per value rather than shrinking bars to fit.
+ * Clicking a bar with sets behind it opens #dashboard-sets-modal (see
+ * renderDashboardWidgets()) with that bar's sets.
  */
 function renderDashboardWidgetCollectionStats(PDO $pdo): string
 {
     $byYear = computeOwnedSetsByYear($pdo);
-    if (empty($byYear)) {
+    $byTheme = computeOwnedSetsByTheme($pdo);
+    if (empty($byYear) && empty($byTheme)) {
         return '<p class="hint">' . htmlspecialchars(t('dashboard_widget_recent_sets_empty')) . '</p>';
     }
 
-    $maxCount = max($byYear);
-    $html = '<div class="dashboard-chart-scroll"><div class="dashboard-chart">';
-    foreach ($byYear as $year => $count) {
-        $heightPercent = $maxCount > 0 ? (int) round(($count / $maxCount) * 100) : 0;
-        $html .= '<div class="dashboard-chart-bar-col" title="' . $year . ': ' . $count . '">';
-        $html .= '<span class="dashboard-chart-count">' . ($count > 0 ? formatNumber($count) : '') . '</span>';
+    $html = '<div class="dashboard-stats-toggle">';
+    $html .= '<button type="button" class="dashboard-stats-toggle-btn active" data-chart="year">' . htmlspecialchars(t('dashboard_stats_toggle_year')) . '</button>';
+    $html .= '<button type="button" class="dashboard-stats-toggle-btn" data-chart="theme">' . htmlspecialchars(t('dashboard_stats_toggle_theme')) . '</button>';
+    $html .= '</div>';
+
+    $html .= '<div class="dashboard-chart-scroll" data-chart="year">' . renderDashboardChartBars($byYear, 'year') . '</div>';
+    $html .= '<div class="dashboard-chart-scroll" data-chart="theme" hidden>' . renderDashboardChartBars($byTheme, 'theme') . '</div>';
+
+    return $html;
+}
+
+/**
+ * @param array $rows computeOwnedSetsByYear()'s year=>count map when
+ *   $group==='year', otherwise computeOwnedSetsByTheme()'s row list
+ */
+function renderDashboardChartBars(array $rows, string $group): string
+{
+    if (empty($rows)) {
+        return '<p class="hint">' . htmlspecialchars(t('dashboard_widget_recent_sets_empty')) . '</p>';
+    }
+
+    $bars = $group === 'year'
+        ? array_map(
+            fn (int $year, int $count): array => ['value' => $year, 'label' => (string) $year, 'count' => $count],
+            array_keys($rows),
+            array_values($rows)
+        )
+        : array_map(
+            fn (array $row): array => ['value' => $row['theme_id'], 'label' => $row['name'], 'count' => $row['count']],
+            $rows
+        );
+
+    $maxCount = max(array_column($bars, 'count'));
+    $html = '<div class="dashboard-chart">';
+    foreach ($bars as $bar) {
+        $clickable = $bar['count'] > 0;
+        $heightPercent = $maxCount > 0 ? (int) round(($bar['count'] / $maxCount) * 100) : 0;
+
+        $html .= '<div class="dashboard-chart-bar-col' . ($clickable ? ' dashboard-chart-bar-col-clickable' : '') . '"';
+        if ($clickable) {
+            $html .= ' role="button" tabindex="0"'
+                . ' data-group="' . htmlspecialchars($group) . '"'
+                . ' data-value="' . (int) $bar['value'] . '"'
+                . ' data-label="' . htmlspecialchars($bar['label']) . '"';
+        }
+        $html .= ' title="' . htmlspecialchars($bar['label'] . ': ' . $bar['count']) . '">';
+        $html .= '<span class="dashboard-chart-count">' . ($bar['count'] > 0 ? formatNumber($bar['count']) : '') . '</span>';
         $html .= '<div class="dashboard-chart-bar-track"><div class="dashboard-chart-bar" style="height:' . $heightPercent . '%"></div></div>';
-        $html .= '<span class="dashboard-chart-year">' . $year . '</span>';
+        $html .= '<span class="dashboard-chart-label">' . htmlspecialchars($bar['label']) . '</span>';
         $html .= '</div>';
     }
-    $html .= '</div></div>';
+    $html .= '</div>';
     return $html;
 }
 
@@ -351,9 +465,23 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
     $html .= '</div>';
     $html .= '</div>';
 
+    // Page-level, not per-widget — collection_stats can only ever be placed
+    // once (addDashboardWidget() rejects a duplicate widget_type), but this
+    // lives here rather than inside renderDashboardWidgetCollectionStats()
+    // since it's shared UI chrome (a modal), the same pattern every other
+    // modal in this app (e.g. part-detail-modal) follows.
+    $html .= '<div class="modal-overlay" id="dashboard-sets-modal" style="display:none;">';
+    $html .= '<div class="modal-box"><button type="button" class="modal-close" id="dashboard-sets-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<h2 id="dashboard-sets-modal-title"></h2>';
+    $html .= '<div id="dashboard-sets-modal-content"></div>';
+    $html .= '</div></div>';
+
     $editLabelsJson = json_encode([
         'edit' => t('dashboard_edit_button'),
         'done' => t('dashboard_edit_done_button'),
+        'setsModalHeading' => t('dashboard_sets_modal_heading'),
+        'setsModalEmpty' => t('dashboard_sets_modal_empty'),
+        'errorRetry' => t('import_error_retry'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $html .= <<<SCRIPT
@@ -468,6 +596,99 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
       });
     });
     fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' });
+  }
+
+  document.querySelectorAll('.dashboard-stats-toggle-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var chart = btn.dataset.chart;
+      document.querySelectorAll('.dashboard-stats-toggle-btn').forEach(function(b) {
+        b.classList.toggle('active', b === btn);
+      });
+      document.querySelectorAll('.dashboard-chart-scroll').forEach(function(el) {
+        el.hidden = el.dataset.chart !== chart;
+      });
+    });
+  });
+
+  var setsModal = document.getElementById('dashboard-sets-modal');
+  var setsModalTitle = document.getElementById('dashboard-sets-modal-title');
+  var setsModalContent = document.getElementById('dashboard-sets-modal-content');
+  var setsModalClose = document.getElementById('dashboard-sets-modal-close');
+
+  function closeSetsModal() {
+    setsModal.style.display = 'none';
+    setsModalContent.innerHTML = '';
+  }
+
+  if (setsModal && setsModalTitle && setsModalContent && setsModalClose) {
+    setsModalClose.addEventListener('click', closeSetsModal);
+    setsModal.addEventListener('click', function(e) {
+      if (e.target === setsModal) {
+        closeSetsModal();
+      }
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && setsModal.style.display !== 'none') {
+        closeSetsModal();
+      }
+    });
+
+    function openSetsModal(group, value, label) {
+      setsModalTitle.textContent = texts.setsModalHeading.replace('{label}', label);
+      setsModalContent.innerHTML = '';
+      setsModal.style.display = 'flex';
+
+      fetch('?action=dashboard_sets_by_group&group=' + encodeURIComponent(group) + '&value=' + encodeURIComponent(value), { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var sets = data.sets || [];
+          if (sets.length === 0) {
+            setsModalContent.innerHTML = '<p class="hint"></p>';
+            setsModalContent.firstChild.textContent = texts.setsModalEmpty;
+            return;
+          }
+          var list = document.createElement('ul');
+          list.className = 'dashboard-set-list';
+          sets.forEach(function(set) {
+            var li = document.createElement('li');
+            var a = document.createElement('a');
+            a.href = '?page=owned_set_detail&id=' + set.id;
+            if (set.thumbnail) {
+              var img = document.createElement('img');
+              img.src = set.thumbnail;
+              img.alt = '';
+              img.className = 'dashboard-set-thumb';
+              a.appendChild(img);
+            }
+            var name = document.createElement('span');
+            name.className = 'dashboard-set-name';
+            name.textContent = set.name;
+            a.appendChild(name);
+            var small = document.createElement('small');
+            small.textContent = set.rebrickable_set_num;
+            a.appendChild(small);
+            li.appendChild(a);
+            list.appendChild(li);
+          });
+          setsModalContent.appendChild(list);
+        })
+        .catch(function() {
+          setsModalContent.innerHTML = '<p class="hint"></p>';
+          setsModalContent.firstChild.textContent = texts.errorRetry;
+        });
+    }
+
+    document.querySelectorAll('.dashboard-chart-bar-col-clickable').forEach(function(col) {
+      col.addEventListener('click', function() {
+        openSetsModal(col.dataset.group, col.dataset.value, col.dataset.label);
+      });
+      col.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openSetsModal(col.dataset.group, col.dataset.value, col.dataset.label);
+        }
+      });
+    });
   }
 })();
 </script>

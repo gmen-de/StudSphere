@@ -3484,6 +3484,27 @@ footer {
   transform: none;
 }
 
+.dashboard-stats-toggle {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.dashboard-stats-toggle-btn {
+  width: auto;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  color: #64748b;
+}
+
+.dashboard-stats-toggle-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
 .dashboard-chart-scroll {
   overflow-x: auto;
   padding-bottom: 0.25rem;
@@ -3503,6 +3524,21 @@ footer {
   gap: 0.3rem;
   width: 2.25rem;
   flex-shrink: 0;
+}
+
+.dashboard-chart-bar-col-clickable {
+  cursor: pointer;
+  border-radius: 0.25rem;
+}
+
+.dashboard-chart-bar-col-clickable:hover .dashboard-chart-bar,
+.dashboard-chart-bar-col-clickable:focus-visible .dashboard-chart-bar {
+  background: #1d4ed8;
+}
+
+.dashboard-chart-bar-col-clickable:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .dashboard-chart-count {
@@ -3526,7 +3562,7 @@ footer {
   border-radius: 0.25rem 0.25rem 0 0;
 }
 
-.dashboard-chart-year {
+.dashboard-chart-label {
   font-size: 0.7rem;
   color: #64748b;
   writing-mode: vertical-rl;
