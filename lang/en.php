@@ -155,6 +155,8 @@ return [
     'logout' => 'Logout',
     'dashboard_help' => 'You can now import Rebrickable CSV files or trigger an automatic data update from settings.',
     'dashboard_widget_add_label' => 'Add widget',
+    'dashboard_edit_button' => 'Edit',
+    'dashboard_edit_done_button' => 'Done',
     'dashboard_widget_remove_label' => 'Remove widget',
     'dashboard_widget_collection_stats' => 'Collection stats',
     'dashboard_widget_recent_sets' => 'Recently added sets',

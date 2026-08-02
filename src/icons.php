@@ -62,7 +62,8 @@ function getBooleanStatusIcon(bool $value): string
  * modal (renderOwnedSetBricklinkModal() in src/owned_sets.php). 'pick_list' is
  * the action bar's placeholder "Pickliste" button (list + magnifying glass —
  * checking loose stock against what's missing) — no functionality behind it
- * yet, see that button's own doc comment in src/routes/pages.php.
+ * yet, see that button's own doc comment in src/routes/pages.php. 'add' is
+ * the dashboard's per-zone "add a widget" button (src/dashboard.php).
  */
 function getActionIcon(string $key): string
 {
@@ -75,6 +76,7 @@ function getActionIcon(string $key): string
         'copy' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4H5.5A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>',
         'download' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>',
         'pick_list' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="12" height="16" rx="1.5"/><path d="M7 8h6"/><path d="M7 11.5h6"/><path d="M7 15h3.5"/><circle cx="16.5" cy="16.5" r="3"/><path d="M18.8 18.8L21 21"/></svg>',
+        'add' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
     ];
 
     return $icons[$key] ?? '';

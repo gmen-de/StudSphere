@@ -155,6 +155,8 @@ return [
     'logout' => 'Abmelden',
     'dashboard_help' => 'Hier können Sie jetzt Rebrickable-Download-Dateien importieren oder im Bereich Einstellungen eine automatische Datenaktualisierung starten.',
     'dashboard_widget_add_label' => 'Widget hinzufügen',
+    'dashboard_edit_button' => 'Bearbeiten',
+    'dashboard_edit_done_button' => 'Fertig',
     'dashboard_widget_remove_label' => 'Widget entfernen',
     'dashboard_widget_collection_stats' => 'Sammlungs-Statistik',
     'dashboard_widget_recent_sets' => 'Zuletzt hinzugefügte Sets',

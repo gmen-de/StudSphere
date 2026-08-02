@@ -26,15 +26,12 @@ function getDashboardWidgetDefinitions(): array
 
 /**
  * Seeded once per user, the first time their dashboard is ever loaded (see
- * getUserDashboardWidgets()) — a reasonable starting layout rather than a
- * blank page, matching the three zones: 'top' is a horizontal strip, 'left'/
- * 'right' are the two vertical columns below it.
+ * getUserDashboardWidgets()) — the dashboard starts otherwise empty, just
+ * the collection-stats timeline on top; the user adds anything else
+ * themselves via edit mode.
  */
 const DASHBOARD_DEFAULT_LAYOUT = [
     ['widget_type' => 'collection_stats', 'zone' => 'top', 'position' => 0],
-    ['widget_type' => 'last_sync', 'zone' => 'top', 'position' => 1],
-    ['widget_type' => 'incomplete_sets', 'zone' => 'left', 'position' => 0],
-    ['widget_type' => 'recent_sets', 'zone' => 'right', 'position' => 0],
 ];
 
 /**
@@ -150,18 +147,61 @@ function renderDashboardWidgetContent(PDO $pdo, string $widgetType): string
     }
 }
 
-/** Same six numbers as the top status bar (computeAppStats(), cached — see refreshAppStatsCache()). */
+/**
+ * Every year from the oldest to the newest set actually in the collection,
+ * including zero-count years in between (a real gap is information too, not
+ * something to silently skip) — @return array<int, int> year => count of
+ * owned-set instances released that year.
+ */
+function computeOwnedSetsByYear(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        'SELECT s.year, COUNT(*) AS count
+         FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id
+         WHERE s.year IS NOT NULL
+         GROUP BY s.year'
+    );
+    $counts = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $counts[(int) $row['year']] = (int) $row['count'];
+    }
+    if (empty($counts)) {
+        return [];
+    }
+
+    $byYear = [];
+    for ($year = min(array_keys($counts)); $year <= max(array_keys($counts)); $year++) {
+        $byYear[$year] = $counts[$year] ?? 0;
+    }
+    return $byYear;
+}
+
+/**
+ * A bar per year (not the six status-bar numbers anymore — those are
+ * already always visible in the status bar on every page, no need to
+ * repeat them here) — wrapped in its own horizontally scrolling container
+ * since a decades-spanning collection makes this genuinely wide, one bar
+ * per year rather than shrinking bars to fit.
+ */
 function renderDashboardWidgetCollectionStats(PDO $pdo): string
 {
-    $stats = computeAppStats($pdo);
-    $html = '<div class="dashboard-stat-grid">';
-    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['bricks_total']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_total')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['bricks_distinct']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_distinct')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['sets']) . '</strong><span>' . htmlspecialchars(t('stat_sets')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['minifigs']) . '</strong><span>' . htmlspecialchars(t('stat_minifigs')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['bricks_damaged']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_damaged')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['bricks_missing']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_missing')) . '</span></div>';
-    $html .= '</div>';
+    $byYear = computeOwnedSetsByYear($pdo);
+    if (empty($byYear)) {
+        return '<p class="hint">' . htmlspecialchars(t('dashboard_widget_recent_sets_empty')) . '</p>';
+    }
+
+    $maxCount = max($byYear);
+    $html = '<div class="dashboard-chart-scroll"><div class="dashboard-chart">';
+    foreach ($byYear as $year => $count) {
+        $heightPercent = $maxCount > 0 ? (int) round(($count / $maxCount) * 100) : 0;
+        $html .= '<div class="dashboard-chart-bar-col" title="' . $year . ': ' . $count . '">';
+        $html .= '<span class="dashboard-chart-count">' . ($count > 0 ? formatNumber($count) : '') . '</span>';
+        $html .= '<div class="dashboard-chart-bar-track"><div class="dashboard-chart-bar" style="height:' . $heightPercent . '%"></div></div>';
+        $html .= '<span class="dashboard-chart-year">' . $year . '</span>';
+        $html .= '</div>';
+    }
+    $html .= '</div></div>';
     return $html;
 }
 
@@ -230,7 +270,7 @@ function renderDashboardWidgetCard(PDO $pdo, array $widget): string
     $definitions = getDashboardWidgetDefinitions();
     $label = isset($definitions[$widget['widget_type']]) ? t($definitions[$widget['widget_type']]['labelKey']) : $widget['widget_type'];
 
-    $html = '<div class="dashboard-widget" draggable="true" data-widget-id="' . (int) $widget['id'] . '">';
+    $html = '<div class="dashboard-widget" draggable="false" data-widget-id="' . (int) $widget['id'] . '">';
     $html .= '<div class="dashboard-widget-header"><span class="dashboard-widget-title">' . htmlspecialchars($label) . '</span>';
     $html .= '<form method="post" class="dashboard-widget-remove-form">';
     $html .= '<input type="hidden" name="action" value="remove_dashboard_widget">';
@@ -264,7 +304,7 @@ function renderDashboardZone(PDO $pdo, string $zone, array $widgets, array $plac
             $html .= '<option value="' . htmlspecialchars($type) . '">' . htmlspecialchars(t($def['labelKey'])) . '</option>';
         }
         $html .= '</select>';
-        $html .= '<button type="submit" class="dashboard-widget-add-submit">' . htmlspecialchars(t('dashboard_widget_add_label')) . '</button>';
+        $html .= '<button type="submit" class="dashboard-widget-add-submit" title="' . htmlspecialchars(t('dashboard_widget_add_label')) . '" aria-label="' . htmlspecialchars(t('dashboard_widget_add_label')) . '">' . getActionIcon('add') . '</button>';
         $html .= '</form>';
     }
 
@@ -278,6 +318,16 @@ function renderDashboardZone(PDO $pdo, string $zone, array $widgets, array $plac
  * sends the complete post-drop DOM order for all zones to
  * action=save_dashboard_layout (see saveDashboardLayout()) — simpler and
  * more robust than tracking incremental moves server-side.
+ *
+ * View mode (the default on every load — this never persists, unlike the
+ * layout itself) hides the remove buttons, the "add a widget" controls, and
+ * collapses any empty zone to nothing, so a dashboard with little or nothing
+ * placed still looks intentional rather than full of empty boxes and
+ * controls. The "Bearbeiten" button toggles a class on the grid that reveals
+ * all of that (CSS, see .dashboard-edit-mode in style.css) and is also what
+ * gates whether widgets are actually draggable — dragging is a deliberate
+ * edit-mode action, not something that should happen by accident while just
+ * viewing the dashboard.
  */
 function renderDashboardWidgets(PDO $pdo, int $userId): string
 {
@@ -285,7 +335,8 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
     $zones = groupDashboardWidgetsByZone($widgets);
     $placedTypes = array_column($widgets, 'widget_type');
 
-    $html = '<div class="dashboard-grid">';
+    $html = '<button type="button" id="dashboard-edit-toggle" class="dashboard-edit-toggle">' . getActionIcon('edit') . '<span>' . htmlspecialchars(t('dashboard_edit_button')) . '</span></button>';
+    $html .= '<div class="dashboard-grid" id="dashboard-grid">';
     $html .= renderDashboardZone($pdo, 'top', $zones['top'], $placedTypes, 'x');
     $html .= '<div class="dashboard-columns">';
     $html .= '<div class="dashboard-column">' . renderDashboardZone($pdo, 'left', $zones['left'], $placedTypes, 'y') . '</div>';
@@ -293,15 +344,39 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
     $html .= '</div>';
     $html .= '</div>';
 
-    $html .= <<<'SCRIPT'
+    $editLabelsJson = json_encode([
+        'edit' => t('dashboard_edit_button'),
+        'done' => t('dashboard_edit_done_button'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $html .= <<<SCRIPT
 <script>
 (function(){
+  var texts = $editLabelsJson;
+  var grid = document.getElementById('dashboard-grid');
+  var toggle = document.getElementById('dashboard-edit-toggle');
   var zones = document.querySelectorAll('.dashboard-zone');
   var dragged = null;
+  var editMode = false;
 
   function widgetsIn(zone) {
     return Array.prototype.filter.call(zone.children, function(el) {
       return el.classList.contains('dashboard-widget');
+    });
+  }
+
+  function setEditMode(on) {
+    editMode = on;
+    grid.classList.toggle('dashboard-edit-mode', on);
+    toggle.querySelector('span').textContent = on ? texts.done : texts.edit;
+    document.querySelectorAll('.dashboard-widget').forEach(function(widget) {
+      widget.draggable = on;
+    });
+  }
+
+  if (toggle && grid) {
+    toggle.addEventListener('click', function() {
+      setEditMode(!editMode);
     });
   }
 

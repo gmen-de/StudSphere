@@ -3296,7 +3296,35 @@ footer {
 .dashboard-zone {
   display: flex;
   gap: 1.25rem;
-  min-height: 3rem;
+}
+
+.dashboard-edit-mode .dashboard-zone {
+  min-height: 3.5rem;
+  border: 2px dashed rgba(148,163,184,0.4);
+  border-radius: 0.85rem;
+  padding: 0.6rem;
+}
+
+.dashboard-edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: auto;
+  margin-bottom: 0.5rem;
+  background: transparent;
+  color: #2563eb;
+  border: 1px solid rgba(37,99,235,0.35);
+  box-shadow: none;
+}
+
+.dashboard-edit-toggle:hover {
+  background: rgba(37,99,235,0.08);
+  transform: none;
+}
+
+.dashboard-edit-toggle svg {
+  width: 18px;
+  height: 18px;
 }
 
 .dashboard-zone-top {
@@ -3348,6 +3376,11 @@ footer {
 
 .dashboard-widget-remove-form {
   width: auto;
+  display: none;
+}
+
+.dashboard-edit-mode .dashboard-widget-remove-form {
+  display: block;
 }
 
 .dashboard-widget-header .dashboard-widget-remove {
@@ -3376,11 +3409,15 @@ footer {
 }
 
 .dashboard-widget-add-form {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 0.5rem;
   width: auto;
   flex: none;
+}
+
+.dashboard-edit-mode .dashboard-widget-add-form {
+  display: flex;
 }
 
 .dashboard-zone-left .dashboard-widget-add-form,
@@ -3397,26 +3434,54 @@ footer {
   white-space: nowrap;
 }
 
-.dashboard-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-  gap: 0.75rem;
+.dashboard-chart-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
 }
 
-.dashboard-stat {
+.dashboard-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+  min-width: max-content;
+}
+
+.dashboard-chart-bar-col {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  align-items: center;
+  gap: 0.3rem;
+  width: 2.25rem;
+  flex-shrink: 0;
 }
 
-.dashboard-stat strong {
-  font-size: 1.3rem;
-  color: #1e293b;
-}
-
-.dashboard-stat span {
-  font-size: 0.75rem;
+.dashboard-chart-count {
+  font-size: 0.7rem;
   color: #64748b;
+  height: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-chart-bar-track {
+  display: flex;
+  align-items: flex-end;
+  height: 120px;
+  width: 100%;
+}
+
+.dashboard-chart-bar {
+  width: 100%;
+  min-height: 2px;
+  background: #2563eb;
+  border-radius: 0.25rem 0.25rem 0 0;
+}
+
+.dashboard-chart-year {
+  font-size: 0.7rem;
+  color: #64748b;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
 }
 
 .dashboard-set-list {
