@@ -3505,69 +3505,65 @@ footer {
   color: #ffffff;
 }
 
-.dashboard-chart-scroll {
-  overflow-x: auto;
-  padding-bottom: 0.25rem;
-}
-
-.dashboard-chart {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.35rem;
-  min-width: max-content;
-}
-
-.dashboard-chart-bar-col {
+.dashboard-hbar-chart {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.3rem;
-  width: 2.25rem;
-  flex-shrink: 0;
+  gap: 0.35rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
-.dashboard-chart-bar-col-clickable {
+.dashboard-hbar-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr 2.5rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dashboard-hbar-row-clickable {
   cursor: pointer;
   border-radius: 0.25rem;
 }
 
-.dashboard-chart-bar-col-clickable:hover .dashboard-chart-bar,
-.dashboard-chart-bar-col-clickable:focus-visible .dashboard-chart-bar {
+.dashboard-hbar-row-clickable:hover .dashboard-hbar-bar,
+.dashboard-hbar-row-clickable:focus-visible .dashboard-hbar-bar {
   background: #1d4ed8;
 }
 
-.dashboard-chart-bar-col-clickable:focus-visible {
+.dashboard-hbar-row-clickable:focus-visible {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
 }
 
-.dashboard-chart-count {
-  font-size: 0.7rem;
+.dashboard-hbar-label {
+  font-size: 0.75rem;
   color: #64748b;
-  height: 1rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.dashboard-chart-bar-track {
-  display: flex;
-  align-items: flex-end;
-  height: 120px;
-  width: 100%;
-}
-
-.dashboard-chart-bar {
-  width: 100%;
-  min-height: 2px;
-  background: #2563eb;
-  border-radius: 0.25rem 0.25rem 0 0;
-}
-
-.dashboard-chart-label {
-  font-size: 0.7rem;
-  color: #64748b;
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
+  text-align: right;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboard-hbar-track {
+  height: 0.85rem;
+  background: #e2e8f0;
+  border-radius: 0.2rem;
+  overflow: hidden;
+}
+
+.dashboard-hbar-bar {
+  height: 100%;
+  min-width: 2px;
+  background: #2563eb;
+  border-radius: 0.2rem;
+}
+
+.dashboard-hbar-count {
+  font-size: 0.7rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .dashboard-set-list {

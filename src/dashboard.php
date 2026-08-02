@@ -250,11 +250,8 @@ function getOwnedSetsByTheme(PDO $pdo, int $themeId): array
  * six status-bar numbers anymore, those are already always visible in the
  * status bar on every page. Both charts are rendered up front (cheap at
  * personal-collection scale) and switched client-side, so toggling needs no
- * round trip; each is wrapped in its own horizontally scrolling container
- * since either a decades-spanning collection or a many-themed one makes this
- * genuinely wide — one bar per value rather than shrinking bars to fit.
- * Clicking a bar with sets behind it opens #dashboard-sets-modal (see
- * renderDashboardWidgets()) with that bar's sets.
+ * round trip. Clicking a bar with sets behind it opens #dashboard-sets-modal
+ * (see renderDashboardWidgets()) with that bar's sets.
  */
 function renderDashboardWidgetCollectionStats(PDO $pdo): string
 {
@@ -269,17 +266,27 @@ function renderDashboardWidgetCollectionStats(PDO $pdo): string
     $html .= '<button type="button" class="dashboard-stats-toggle-btn" data-chart="theme">' . htmlspecialchars(t('dashboard_stats_toggle_theme')) . '</button>';
     $html .= '</div>';
 
-    $html .= '<div class="dashboard-chart-scroll" data-chart="year">' . renderDashboardChartBars($byYear, 'year') . '</div>';
-    $html .= '<div class="dashboard-chart-scroll" data-chart="theme" hidden>' . renderDashboardChartBars($byTheme, 'theme') . '</div>';
+    $html .= '<div data-chart="year">' . renderDashboardChartRows($byYear, 'year') . '</div>';
+    $html .= '<div data-chart="theme" hidden>' . renderDashboardChartRows($byTheme, 'theme') . '</div>';
 
     return $html;
 }
 
 /**
+ * A horizontal bar per value: label right-aligned in a fixed-width column
+ * flush against the bar, bar left-aligned growing rightward from there —
+ * every row is exactly one line tall regardless of label length. The
+ * previous approach (a vertical bar per value, rotated label below it) broke
+ * down for themes specifically: a rotated label's *height* depends on its
+ * text length, and with columns bottom-aligned, a long theme name pushed its
+ * whole column taller, throwing that bar's top edge out of line with
+ * shorter-labelled columns next to it — years never exposed this since every
+ * label is 4 digits, always the same length.
+ *
  * @param array $rows computeOwnedSetsByYear()'s year=>count map when
  *   $group==='year', otherwise computeOwnedSetsByTheme()'s row list
  */
-function renderDashboardChartBars(array $rows, string $group): string
+function renderDashboardChartRows(array $rows, string $group): string
 {
     if (empty($rows)) {
         return '<p class="hint">' . htmlspecialchars(t('dashboard_widget_recent_sets_empty')) . '</p>';
@@ -297,12 +304,12 @@ function renderDashboardChartBars(array $rows, string $group): string
         );
 
     $maxCount = max(array_column($bars, 'count'));
-    $html = '<div class="dashboard-chart">';
+    $html = '<div class="dashboard-hbar-chart">';
     foreach ($bars as $bar) {
         $clickable = $bar['count'] > 0;
-        $heightPercent = $maxCount > 0 ? (int) round(($bar['count'] / $maxCount) * 100) : 0;
+        $widthPercent = $maxCount > 0 ? (int) round(($bar['count'] / $maxCount) * 100) : 0;
 
-        $html .= '<div class="dashboard-chart-bar-col' . ($clickable ? ' dashboard-chart-bar-col-clickable' : '') . '"';
+        $html .= '<div class="dashboard-hbar-row' . ($clickable ? ' dashboard-hbar-row-clickable' : '') . '"';
         if ($clickable) {
             $html .= ' role="button" tabindex="0"'
                 . ' data-group="' . htmlspecialchars($group) . '"'
@@ -310,9 +317,9 @@ function renderDashboardChartBars(array $rows, string $group): string
                 . ' data-label="' . htmlspecialchars($bar['label']) . '"';
         }
         $html .= ' title="' . htmlspecialchars($bar['label'] . ': ' . $bar['count']) . '">';
-        $html .= '<span class="dashboard-chart-count">' . ($bar['count'] > 0 ? formatNumber($bar['count']) : '') . '</span>';
-        $html .= '<div class="dashboard-chart-bar-track"><div class="dashboard-chart-bar" style="height:' . $heightPercent . '%"></div></div>';
-        $html .= '<span class="dashboard-chart-label">' . htmlspecialchars($bar['label']) . '</span>';
+        $html .= '<span class="dashboard-hbar-label">' . htmlspecialchars($bar['label']) . '</span>';
+        $html .= '<div class="dashboard-hbar-track"><div class="dashboard-hbar-bar" style="width:' . $widthPercent . '%"></div></div>';
+        $html .= '<span class="dashboard-hbar-count">' . ($bar['count'] > 0 ? formatNumber($bar['count']) : '') . '</span>';
         $html .= '</div>';
     }
     $html .= '</div>';
@@ -604,7 +611,10 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
       document.querySelectorAll('.dashboard-stats-toggle-btn').forEach(function(b) {
         b.classList.toggle('active', b === btn);
       });
-      document.querySelectorAll('.dashboard-chart-scroll').forEach(function(el) {
+      // div[data-chart], not the bare attribute selector — the toggle
+      // buttons themselves also carry data-chart, and would otherwise match
+      // and hide each other.
+      document.querySelectorAll('div[data-chart]').forEach(function(el) {
         el.hidden = el.dataset.chart !== chart;
       });
     });
@@ -678,14 +688,14 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
         });
     }
 
-    document.querySelectorAll('.dashboard-chart-bar-col-clickable').forEach(function(col) {
-      col.addEventListener('click', function() {
-        openSetsModal(col.dataset.group, col.dataset.value, col.dataset.label);
+    document.querySelectorAll('.dashboard-hbar-row-clickable').forEach(function(row) {
+      row.addEventListener('click', function() {
+        openSetsModal(row.dataset.group, row.dataset.value, row.dataset.label);
       });
-      col.addEventListener('keydown', function(e) {
+      row.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          openSetsModal(col.dataset.group, col.dataset.value, col.dataset.label);
+          openSetsModal(row.dataset.group, row.dataset.value, row.dataset.label);
         }
       });
     });
