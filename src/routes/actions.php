@@ -90,6 +90,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rebri
     exit;
 }
 
+$collectionMessage = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_collection_settings') {
+    $newCollectionName = trim($_POST['collection_name'] ?? '');
+    if ($newCollectionName === '') {
+        $collectionMessage = t('error_collection_name_required');
+    } else {
+        setAppSetting('collection_name', $newCollectionName);
+        $collectionMessage = t('settings_collection_saved');
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_rebrickable_settings') {
     setAppSetting('rebrickable_download_base_url', trim($_POST['download_base_url'] ?? ''));
     setAppSetting('rebrickable_api_url', trim($_POST['api_url'] ?? ''));
@@ -1067,5 +1078,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_s
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => t('add_stock_failed', ['message' => $e->getMessage()])], JSON_UNESCAPED_UNICODE);
     }
+    exit;
+}
+
+// Dashboard widget management — add/remove are plain form POSTs (no
+// action="" on the <form>, so they submit back to the bare dashboard URL and
+// the request just falls through to the normal dashboard render further
+// down with the updated widget list); save_dashboard_layout is the one
+// fetch()-driven action, from the drag-and-drop script in
+// renderDashboardWidgets() (src/dashboard.php).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_dashboard_widget') {
+    $newWidgetType = (string) ($_POST['widget_type'] ?? '');
+    $newWidgetZone = (string) ($_POST['zone'] ?? '');
+    try {
+        addDashboardWidget($pdo, (int) $_SESSION['user_id'], $newWidgetType, $newWidgetZone);
+    } catch (Throwable $e) {
+        // Only reachable via a tampered request (the <select> only ever
+        // offers valid, not-yet-placed types) — nothing sensible to show the
+        // user, just don't add anything.
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remove_dashboard_widget') {
+    removeDashboardWidget($pdo, (int) $_SESSION['user_id'], (int) ($_POST['widget_id'] ?? 0));
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_dashboard_layout') {
+    header('Content-Type: application/json');
+    saveDashboardLayout($pdo, (int) $_SESSION['user_id'], (array) ($_POST['layout'] ?? []));
+    echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     exit;
 }

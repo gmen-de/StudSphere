@@ -18,6 +18,19 @@ if (isset($_GET['page']) && $_GET['page'] === 'settings') {
     if ($importMessage !== '') {
         $content .= '<p><strong>' . htmlspecialchars($importMessage) . '</strong></p>';
     }
+
+    $content .= '<h2>' . htmlspecialchars(t('settings_collection_title')) . '</h2>';
+    $content .= '<p>' . htmlspecialchars(t('settings_collection_help')) . '</p>';
+    if ($collectionMessage !== '') {
+        $content .= '<p><strong>' . htmlspecialchars($collectionMessage) . '</strong></p>';
+    }
+    $content .= '<form method="post">';
+    $content .= '<input type="hidden" name="action" value="update_collection_settings">';
+    $content .= '<label>' . htmlspecialchars(t('collection_name_label'))
+        . '<input name="collection_name" value="' . htmlspecialchars((string) getAppSetting('collection_name', '')) . '" required></label>';
+    $content .= '<button type="submit">' . htmlspecialchars(t('settings_collection_save_button')) . '</button>';
+    $content .= '</form>';
+
     $content .= '<button type="button" id="rebrickable-update-open">' . htmlspecialchars(t('settings_update_button')) . '</button>';
     $content .= '<p>' . htmlspecialchars(t('settings_update_help')) . '</p>';
     $content .= renderRebrickableUpdateModal();
@@ -481,10 +494,13 @@ SCRIPT;
             $content .= '<p><strong>' . htmlspecialchars($adminUserMessage) . '</strong></p>';
         }
 
-        $allUsers = $pdo->query('SELECT username, email, is_admin FROM users ORDER BY username ASC')->fetchAll();
+        $allUsers = $pdo->query('SELECT username, email, full_name, is_admin FROM users ORDER BY username ASC')->fetchAll();
         $content .= '<ul class="admin-user-list">';
         foreach ($allUsers as $listedUser) {
             $content .= '<li>' . htmlspecialchars($listedUser['username']);
+            if ($listedUser['full_name'] !== null && $listedUser['full_name'] !== '') {
+                $content .= ' – ' . htmlspecialchars($listedUser['full_name']);
+            }
             if ($listedUser['email'] !== null && $listedUser['email'] !== '') {
                 $content .= ' (' . htmlspecialchars($listedUser['email']) . ')';
             }
@@ -498,6 +514,7 @@ SCRIPT;
         $content .= '<h3>' . htmlspecialchars(t('admin_user_add_heading')) . '</h3>';
         $content .= '<form method="post">';
         $content .= '<input type="hidden" name="action" value="admin_create_user">';
+        $content .= '<label>' . htmlspecialchars(t('admin_user_full_name_label')) . '<input name="full_name" autocomplete="off" required></label>';
         $content .= '<label>' . htmlspecialchars(t('admin_user_username_label')) . '<input name="username" autocomplete="off" required></label>';
         $content .= '<label>' . htmlspecialchars(t('admin_user_email_label')) . '<input type="email" name="email" autocomplete="off"></label>';
         $content .= '<label>' . htmlspecialchars(t('admin_user_password_label')) . '<input type="password" name="password" autocomplete="new-password" required></label>';

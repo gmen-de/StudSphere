@@ -15,6 +15,7 @@ function installDatabase(): void
             username VARCHAR(100) NOT NULL UNIQUE,
             password_hash VARCHAR(255) NOT NULL,
             email VARCHAR(255) DEFAULT NULL,
+            full_name VARCHAR(255) DEFAULT NULL,
             is_admin TINYINT(1) NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
@@ -205,6 +206,16 @@ function installDatabase(): void
             setting_key VARCHAR(100) NOT NULL UNIQUE,
             setting_value TEXT NOT NULL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS dashboard_widgets (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            widget_type VARCHAR(50) NOT NULL,
+            zone ENUM(\'top\', \'left\', \'right\') NOT NULL,
+            position INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_dashboardwidget_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
 
         'CREATE TABLE IF NOT EXISTS part_translations (

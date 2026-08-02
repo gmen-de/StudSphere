@@ -388,6 +388,24 @@ function getSchemaMigrations(): array
             // Tips" on batching part_nums.
             addColumnIfMissing($pdo, 'parts', 'bricklink_part_id', 'VARCHAR(20) DEFAULT NULL');
         },
+        26 => function (PDO $pdo): void {
+            // Nullable even though the app now requires it on every new-user
+            // form (setup.php steps 3/4, action=admin_create_user) — existing
+            // users on an upgraded install have no value yet and there's no
+            // sensible default to backfill with.
+            addColumnIfMissing($pdo, 'users', 'full_name', 'VARCHAR(255) DEFAULT NULL');
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS dashboard_widgets (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    widget_type VARCHAR(50) NOT NULL,
+                    zone ENUM(\'top\', \'left\', \'right\') NOT NULL,
+                    position INT NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_dashboardwidget_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -450,7 +468,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 25;
+const CURRENT_SCHEMA_VERSION = 26;
 
 function getInstalledSchemaVersion(): int
 {

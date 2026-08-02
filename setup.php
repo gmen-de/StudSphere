@@ -126,8 +126,11 @@ $dbHost = $sessionDb['host'] ?? '127.0.0.1';
 $dbName = $sessionDb['dbname'] ?? 'studsphere';
 $dbUser = $sessionDb['user'] ?? 'root';
 $dbPass = '';
+$collectionName = '';
+$adminFullName = '';
 $adminUser = '';
 $adminEmail = '';
+$userFullName = '';
 $userName = '';
 $userEmail = '';
 $apiKey = '';
@@ -292,22 +295,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'create_admin') {
+        $collectionName = trim($_POST['collection_name'] ?? '');
+        $adminFullName = trim($_POST['admin_full_name'] ?? '');
         $adminUser = trim($_POST['admin_user'] ?? '');
         $adminEmail = trim($_POST['admin_email'] ?? '');
         $adminPass = $_POST['admin_pass'] ?? '';
         $adminPassConfirm = $_POST['admin_pass_confirm'] ?? '';
 
-        if ($adminUser === '' || $adminPass === '') {
+        if ($collectionName === '' || $adminFullName === '' || $adminUser === '' || $adminPass === '') {
             $error = t('error_admin_required');
         } elseif ($adminPass !== $adminPassConfirm) {
             $error = t('error_admin_password_mismatch');
         } else {
             try {
                 require_once __DIR__ . '/src/db.php';
+                require_once __DIR__ . '/src/settings.php';
                 $pdo = getPDO();
                 $hash = password_hash($adminPass, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare('INSERT INTO users (username, password_hash, email, is_admin) VALUES (?, ?, ?, 1)');
-                $stmt->execute([$adminUser, $hash, $adminEmail]);
+                $stmt = $pdo->prepare('INSERT INTO users (username, password_hash, email, full_name, is_admin) VALUES (?, ?, ?, ?, 1)');
+                $stmt->execute([$adminUser, $hash, $adminEmail, $adminFullName]);
+                setAppSetting('collection_name', $collectionName);
                 $_SESSION['setup_admin'] = true;
                 header('Location: setup.php?step=4');
                 exit;
@@ -322,12 +329,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: setup.php?step=5');
             exit;
         }
+        $userFullName = trim($_POST['user_full_name'] ?? '');
         $userName = trim($_POST['user_name'] ?? '');
         $userEmail = trim($_POST['user_email'] ?? '');
         $userPass = $_POST['user_pass'] ?? '';
         $userPassConfirm = $_POST['user_pass_confirm'] ?? '';
 
-        if ($userName === '' || $userPass === '') {
+        if ($userFullName === '' || $userName === '' || $userPass === '') {
             $error = t('error_user_required');
         } elseif ($userPass !== $userPassConfirm) {
             $error = t('error_user_password_mismatch');
@@ -336,8 +344,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 require_once __DIR__ . '/src/db.php';
                 $pdo = getPDO();
                 $hash = password_hash($userPass, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare('INSERT INTO users (username, password_hash, email, is_admin) VALUES (?, ?, ?, 0)');
-                $stmt->execute([$userName, $hash, $userEmail]);
+                $stmt = $pdo->prepare('INSERT INTO users (username, password_hash, email, full_name, is_admin) VALUES (?, ?, ?, ?, 0)');
+                $stmt->execute([$userName, $hash, $userEmail, $userFullName]);
                 header('Location: setup.php?step=5');
                 exit;
             } catch (Throwable $e) {
@@ -405,7 +413,9 @@ switch ($step) {
         $content .= '<section class="card"><h2>' . htmlspecialchars(t('admin_account')) . '</h2><p>' . htmlspecialchars(t('admin_help')) . '</p>';
         $content .= '<form method="post">';
         $content .= '<input type="hidden" name="action" value="create_admin">';
-        $content .= '<label>' . htmlspecialchars(t('admin_username')) . '<input name="admin_user" value="' . htmlspecialchars($adminUser) . '"></label>';
+        $content .= '<label>' . htmlspecialchars(t('collection_name_label')) . '<input name="collection_name" value="' . htmlspecialchars($collectionName) . '" required></label>';
+        $content .= '<label>' . htmlspecialchars(t('admin_full_name')) . '<input name="admin_full_name" value="' . htmlspecialchars($adminFullName) . '" required></label>';
+        $content .= '<label>' . htmlspecialchars(t('admin_username')) . '<input name="admin_user" value="' . htmlspecialchars($adminUser) . '" required></label>';
         $content .= '<label>' . htmlspecialchars(t('admin_email')) . '<input type="email" name="admin_email" value="' . htmlspecialchars($adminEmail) . '"></label>';
         $content .= '<label>' . htmlspecialchars(t('admin_password')) . '<input type="password" name="admin_pass"></label>';
         $content .= '<label>' . htmlspecialchars(t('admin_password_confirm')) . '<input type="password" name="admin_pass_confirm"></label>';
@@ -417,7 +427,8 @@ switch ($step) {
         $content .= '<section class="card"><h2>' . htmlspecialchars(t('normal_user')) . '</h2><p>' . htmlspecialchars(t('user_help')) . '</p>';
         $content .= '<form method="post">';
         $content .= '<input type="hidden" name="action" value="create_user">';
-        $content .= '<label>' . htmlspecialchars(t('user_username')) . '<input name="user_name" value="' . htmlspecialchars($userName) . '"></label>';
+        $content .= '<label>' . htmlspecialchars(t('user_full_name')) . '<input name="user_full_name" value="' . htmlspecialchars($userFullName) . '" required></label>';
+        $content .= '<label>' . htmlspecialchars(t('user_username')) . '<input name="user_name" value="' . htmlspecialchars($userName) . '" required></label>';
         $content .= '<label>' . htmlspecialchars(t('user_email')) . '<input type="email" name="user_email" value="' . htmlspecialchars($userEmail) . '"></label>';
         $content .= '<label>' . htmlspecialchars(t('user_password')) . '<input type="password" name="user_pass"></label>';
         $content .= '<label>' . htmlspecialchars(t('user_password_confirm')) . '<input type="password" name="user_pass_confirm"></label>';
