@@ -344,6 +344,7 @@ return [
     'owned_set_not_found_title' => 'Instance not found',
     'owned_set_not_found' => 'This set instance no longer exists.',
     'owned_set_instance_label' => 'Instance',
+    'owned_set_detail_page_title' => 'Inv: {set_num} - {name}',
     'owned_set_invalid_set' => 'Invalid set.',
     'owned_set_location_label' => 'Storage location',
     'owned_set_condition_new' => 'New',

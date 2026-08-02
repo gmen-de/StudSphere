@@ -1482,7 +1482,13 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     ];
 
     $completeness = getOwnedSetCompleteness($pdo, $ownedSet);
+    // Ancestors only, not the set's own auto-generated leaf location itself
+    // (always the last entry — see location_type 'owned_set' elsewhere in this
+    // codebase) — showing "... » Cargo Station (4555-1) #1" on the Cargo
+    // Station (4555-1) #1 page itself is redundant, the "Lagerort" row is
+    // about where the set physically sits, not the set's own name again.
     $locationPath = getStorageLocationAncestors($ownedSet['location_id']);
+    array_pop($locationPath);
     $adjacentOwnedSets = getAdjacentOwnedSets($pdo, $ownedSet);
 
     // Layout: image (+ room for a future set description, not built yet) top
@@ -1790,7 +1796,8 @@ SCRIPT;
     $content .= '</div>'; // .owned-set-tabs-row
     $content .= '</div>'; // .owned-set-layout
 
-    renderApp(t('owned_set_instance_label') . ' – ' . $ownedSet['rebrickable_set_num'], $content, $user, computeAppStats($pdo), $ownedSetBreadcrumbs);
+    $ownedSetPageTitle = t('owned_set_detail_page_title', ['set_num' => $ownedSet['rebrickable_set_num'], 'name' => $ownedSet['name']]);
+    renderApp($ownedSetPageTitle, $content, $user, computeAppStats($pdo), $ownedSetBreadcrumbs);
     exit;
 }
 
