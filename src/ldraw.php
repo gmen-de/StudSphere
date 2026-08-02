@@ -538,6 +538,11 @@ function stepLdrawSetRenderBatch(array &$state): array
     $pairs = $state['pairs'];
     $total = count($pairs);
 
+    // A session-persisted $state can predate the current deploy (a tab left
+    // open across an update) — backfill any stats key added since, rather
+    // than warning on an undefined index the first time it's incremented.
+    $state['stats'] += ['processed' => 0, 'rendered' => 0, 'skipped' => 0, 'errors' => 0, 'timedOut' => 0];
+
     if ($state['index'] >= $total) {
         return ['done' => true];
     }
