@@ -3647,6 +3647,56 @@ span.dashboard-vbar-cell-clickable:focus-visible {
   white-space: nowrap;
 }
 
+.dashboard-activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.dashboard-activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.dashboard-activity-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  margin-top: 0.35rem;
+  flex-shrink: 0;
+}
+
+.dashboard-activity-dot-in {
+  background: #16a34a;
+}
+
+.dashboard-activity-dot-out {
+  background: #dc2626;
+}
+
+.dashboard-activity-dot-set {
+  background: #2563eb;
+}
+
+.dashboard-activity-text {
+  flex: 1;
+  font-size: 0.85rem;
+  color: #1e293b;
+}
+
+.dashboard-activity-time {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 @media (max-width: 800px) {
   .dashboard-columns {
     grid-template-columns: 1fr;

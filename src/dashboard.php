@@ -21,6 +21,7 @@ function getDashboardWidgetDefinitions(): array
         'recent_sets' => ['labelKey' => 'dashboard_widget_recent_sets'],
         'incomplete_sets' => ['labelKey' => 'dashboard_widget_incomplete_sets'],
         'last_sync' => ['labelKey' => 'dashboard_widget_last_sync'],
+        'recent_activity' => ['labelKey' => 'dashboard_widget_recent_activity'],
     ];
 }
 
@@ -142,6 +143,8 @@ function renderDashboardWidgetContent(PDO $pdo, string $widgetType): string
             return renderDashboardWidgetIncompleteSets($pdo);
         case 'last_sync':
             return renderDashboardWidgetLastSync();
+        case 'recent_activity':
+            return renderDashboardWidgetRecentActivity($pdo);
         default:
             return '';
     }
@@ -396,6 +399,139 @@ function renderDashboardWidgetLastSync(): string
     $lastSync = getAppSetting('last_update_all');
     $html = '<p>' . htmlspecialchars($lastSync !== null ? formatDate($lastSync, true) : t('dashboard_widget_last_sync_never')) . '</p>';
     $html .= '<a href="?page=settings">' . htmlspecialchars(t('dashboard_widget_last_sync_action')) . '</a>';
+    return $html;
+}
+
+const DASHBOARD_ACTIVITY_LIMIT = 8;
+
+/**
+ * Merges the two places this app already writes a "who did what, when" audit
+ * trail — storage_movements (every addStorageStock()/setStorageItemQuantity()
+ * call, i.e. loose-part stock in/out/corrections) and owned_sets.added_by
+ * (a set joining the collection) — into one recency-ordered feed. Neither
+ * table had a reader before this widget; storage_movements in particular has
+ * been written on every stock change since it was introduced but never
+ * actually shown anywhere.
+ *
+ * Each source is queried for its own $limit most recent rows independently
+ * (the two tables don't share a comparable shape, so a single UNIONed query
+ * isn't a good fit), then merged in PHP and trimmed — fine at
+ * personal-collection scale, same reasoning as this file's other widgets.
+ *
+ * quantity_change's sign (not storage_movements.movement_type) decides
+ * in-vs-out wording: 'correction' rows can move quantity either direction,
+ * so the type column alone doesn't say which happened.
+ *
+ * @return array<int, array{type:string, created_at:string, user:?string}>
+ */
+function getRecentActivity(PDO $pdo, int $limit = DASHBOARD_ACTIVITY_LIMIT): array
+{
+    $stockStmt = $pdo->query(
+        'SELECT sm.created_at, sm.quantity_change,
+                u.username, u.full_name,
+                p.part_num, p.name AS part_name,
+                c.name AS color_name,
+                sl.name AS location_name
+         FROM storage_movements sm
+         LEFT JOIN users u ON u.id = sm.user_id
+         LEFT JOIN parts p ON p.id = sm.part_id
+         LEFT JOIN colors c ON c.id = sm.color_id
+         LEFT JOIN storage_locations sl ON sl.id = sm.location_id
+         ORDER BY sm.created_at DESC
+         LIMIT ' . (int) $limit
+    );
+    $activity = array_map(
+        fn (array $row): array => [
+            'type' => 'stock',
+            'created_at' => $row['created_at'],
+            'user' => $row['full_name'] ?: $row['username'],
+            'quantity_change' => (int) $row['quantity_change'],
+            'part_name' => $row['part_name'],
+            'part_num' => $row['part_num'],
+            'color_name' => $row['color_name'],
+            'location_name' => $row['location_name'],
+        ],
+        $stockStmt->fetchAll()
+    );
+
+    $setStmt = $pdo->query(
+        'SELECT os.created_at, u.username, u.full_name, s.name AS set_name, s.rebrickable_set_num
+         FROM owned_sets os
+         LEFT JOIN users u ON u.id = os.added_by
+         INNER JOIN sets s ON s.id = os.set_id
+         ORDER BY os.created_at DESC
+         LIMIT ' . (int) $limit
+    );
+    $activity = array_merge($activity, array_map(
+        fn (array $row): array => [
+            'type' => 'set_added',
+            'created_at' => $row['created_at'],
+            'user' => $row['full_name'] ?: $row['username'],
+            'set_name' => $row['set_name'],
+            'set_num' => $row['rebrickable_set_num'],
+        ],
+        $setStmt->fetchAll()
+    ));
+
+    usort($activity, fn (array $a, array $b): int => strcmp($b['created_at'], $a['created_at']));
+
+    return array_slice($activity, 0, $limit);
+}
+
+function renderDashboardWidgetRecentActivity(PDO $pdo): string
+{
+    $activity = getRecentActivity($pdo);
+    if (empty($activity)) {
+        return '<p class="hint">' . htmlspecialchars(t('dashboard_widget_recent_activity_empty')) . '</p>';
+    }
+
+    $html = '<ul class="dashboard-activity-list">';
+    foreach ($activity as $entry) {
+        $user = $entry['user'] ?? t('dashboard_activity_unknown_user');
+
+        if ($entry['type'] === 'set_added') {
+            $dotClass = 'dashboard-activity-dot-set';
+            $text = t('dashboard_activity_set_added', [
+                'user' => $user,
+                'set' => $entry['set_name'] . ' (' . $entry['set_num'] . ')',
+            ]);
+        } else {
+            $part = $entry['part_name'] . ' (' . $entry['part_num'] . ')' . ($entry['color_name'] !== null ? ' · ' . $entry['color_name'] : '');
+            $location = $entry['location_name'] ?? t('dashboard_activity_unknown_location');
+
+            if ($entry['quantity_change'] > 0) {
+                $dotClass = 'dashboard-activity-dot-in';
+                $text = t('dashboard_activity_stock_in', [
+                    'user' => $user,
+                    'quantity' => (string) $entry['quantity_change'],
+                    'part' => $part,
+                    'location' => $location,
+                ]);
+            } elseif ($entry['quantity_change'] < 0) {
+                $dotClass = 'dashboard-activity-dot-out';
+                $text = t('dashboard_activity_stock_out', [
+                    'user' => $user,
+                    'quantity' => (string) abs($entry['quantity_change']),
+                    'part' => $part,
+                    'location' => $location,
+                ]);
+            } else {
+                $dotClass = 'dashboard-activity-dot-out';
+                $text = t('dashboard_activity_stock_correction', [
+                    'user' => $user,
+                    'part' => $part,
+                    'location' => $location,
+                ]);
+            }
+        }
+
+        $html .= '<li class="dashboard-activity-item">';
+        $html .= '<span class="dashboard-activity-dot ' . $dotClass . '" aria-hidden="true"></span>';
+        $html .= '<span class="dashboard-activity-text">' . htmlspecialchars($text) . '</span>';
+        $html .= '<span class="dashboard-activity-time">' . htmlspecialchars(formatDate($entry['created_at'], true)) . '</span>';
+        $html .= '</li>';
+    }
+    $html .= '</ul>';
     return $html;
 }
 
