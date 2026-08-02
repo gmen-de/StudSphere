@@ -164,6 +164,7 @@ return [
     'dashboard_widget_incomplete_sets_empty' => 'Alle Sets sind vollständig.',
     'dashboard_widget_last_sync_never' => 'Noch nie synchronisiert.',
     'dashboard_widget_last_sync_action' => 'Update jetzt',
+    'dashboard_stat_missing' => 'Fehlende Teile',
     'import_file_label' => 'Datei auswählen:',
     'error_import_file_required' => 'Bitte wählen Sie eine gültige Datei zum Importieren aus.',
     'import_success_rows' => 'Import abgeschlossen: {count} Zeilen importiert.',

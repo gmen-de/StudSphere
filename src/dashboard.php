@@ -150,18 +150,38 @@ function renderDashboardWidgetContent(PDO $pdo, string $widgetType): string
     }
 }
 
-/** Same five numbers as the top status bar (computeAppStats(), cached — see refreshAppStatsCache()). */
+/**
+ * The five cached top-status-bar numbers (computeAppStats(), see
+ * refreshAppStatsCache()) plus a sixth, "fehlende Teile" — not part of that
+ * cache since it isn't a flat column sum like the others: it's nominal minus
+ * actual per owned set (same definition as getOwnedSetCompleteness(), summed
+ * across every set), which needs each set's own Rebrickable inventory to
+ * know what "nominal" even means. Computed live, same tradeoff as the
+ * incomplete-sets widget below.
+ */
 function renderDashboardWidgetCollectionStats(PDO $pdo): string
 {
     $stats = computeAppStats($pdo);
+    $missing = computeCollectionMissingPartsTotal($pdo);
     $html = '<div class="dashboard-stat-grid">';
     $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['bricks_total']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_total')) . '</span></div>';
     $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['bricks_distinct']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_distinct')) . '</span></div>';
     $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['sets']) . '</strong><span>' . htmlspecialchars(t('stat_sets')) . '</span></div>';
     $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['minifigs']) . '</strong><span>' . htmlspecialchars(t('stat_minifigs')) . '</span></div>';
     $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['bricks_damaged']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_damaged')) . '</span></div>';
+    $html .= '<div class="dashboard-stat"><strong>' . number_format($missing) . '</strong><span>' . htmlspecialchars(t('dashboard_stat_missing')) . '</span></div>';
     $html .= '</div>';
     return $html;
+}
+
+function computeCollectionMissingPartsTotal(PDO $pdo): int
+{
+    $missing = 0;
+    foreach (getAllOwnedSets($pdo) as $set) {
+        $completeness = getOwnedSetCompleteness($pdo, $set);
+        $missing += max(0, $completeness['nominal'] - $completeness['actual']);
+    }
+    return $missing;
 }
 
 function renderDashboardWidgetSetList(array $sets, string $emptyKey, ?callable $badge = null): string
