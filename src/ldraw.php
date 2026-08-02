@@ -526,7 +526,14 @@ function getLdrawSetRenderProgress(PDO $pdo, array $items): array
          WHERE q.status = 'rendering' LIMIT 1"
     )->fetchColumn();
 
-    $queueDepth = (int) $pdo->query("SELECT COUNT(*) FROM ldraw_render_queue WHERE status = 'pending'")->fetchColumn();
+    // The queue's total row count (not just status='pending') so the number
+    // shown next to "currently rendering: X" is everything still waiting
+    // *behind* X, not a separate/contradictory-looking count — a pair being
+    // actively rendered has status='rendering', not 'pending', so counting
+    // only 'pending' rows made "0 in queue" show up right next to "currently
+    // rendering: X", which read as a contradiction.
+    $totalQueued = (int) $pdo->query('SELECT COUNT(*) FROM ldraw_render_queue')->fetchColumn();
+    $queueDepth = $currentPart !== false ? max(0, $totalQueued - 1) : $totalQueued;
 
     return [
         'status' => count($missing) > 0 ? 'running' : 'done',

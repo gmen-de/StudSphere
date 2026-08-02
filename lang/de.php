@@ -87,7 +87,7 @@ return [
     'ldraw_set_render_message' => 'Bauteilbilder werden erstellt …',
     'ldraw_set_render_error' => 'Fehler beim Erstellen der Bauteilbilder.',
     'ldraw_set_render_skip' => 'Überspringen',
-    'ldraw_set_render_current' => 'Aktuell: {part} · noch {count} in der Warteschlange',
+    'ldraw_set_render_current' => 'Aktuell: {part} · noch {count} weitere in der Warteschlange',
     'ldraw_set_render_waiting' => 'Wird in die Warteschlange eingereiht …',
     'ldraw_stage_probe' => 'Prüfe LDraw-Bibliothek …',
     'ldraw_stage_download' => 'Lade LDraw-Bibliothek herunter …',

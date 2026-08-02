@@ -87,7 +87,7 @@ return [
     'ldraw_set_render_message' => 'Creating part images …',
     'ldraw_set_render_error' => 'Failed to create part images.',
     'ldraw_set_render_skip' => 'Skip',
-    'ldraw_set_render_current' => 'Currently: {part} · {count} left in queue',
+    'ldraw_set_render_current' => 'Currently: {part} · {count} more queued after this',
     'ldraw_set_render_waiting' => 'Waiting in queue …',
     'ldraw_stage_probe' => 'Checking LDraw library …',
     'ldraw_stage_download' => 'Downloading LDraw library …',
