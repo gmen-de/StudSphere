@@ -187,6 +187,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw_set_render_tick') {
     header('Content-Type: application/json');
+    // PHP's own php.ini max_execution_time (60s on the test server) would
+    // otherwise fatally abort this script mid-render — a single leocad
+    // render legitimately takes 60-120s under software/Xvfb rendering, well
+    // past that, regardless of the exec()-level `timeout` wrapper in
+    // renderLdrawPartImage() (that one bounds the child process, not this
+    // PHP script itself). Same pattern as import.php/download.php's own
+    // long-running ticks.
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(0);
+    }
     try {
         if (!ldrawContextualRenderingReady()) {
             throw new RuntimeException(t('ldraw_tools_unavailable', ['missing' => 'leocad, xvfb']));
