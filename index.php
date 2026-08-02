@@ -277,6 +277,7 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '<span class="status-stat" id="status-stat-sets"><strong>' . number_format($stats['sets']) . '</strong> ' . htmlspecialchars(t('stat_sets')) . '</span>';
     echo '<span class="status-stat" id="status-stat-minifigs"><strong>' . number_format($stats['minifigs']) . '</strong> ' . htmlspecialchars(t('stat_minifigs')) . '</span>';
     echo '<span class="status-stat" id="status-stat-bricks_damaged"><strong>' . number_format($stats['bricks_damaged']) . '</strong> ' . htmlspecialchars(t('stat_bricks_damaged')) . '</span>';
+    echo '<span class="status-stat" id="status-stat-bricks_missing"><strong>' . number_format($stats['bricks_missing']) . '</strong> ' . htmlspecialchars(t('stat_bricks_missing')) . '</span>';
     echo '</div>';
     echo '<div class="status-user">';
     echo '<a class="status-username" href="?page=settings">' . htmlspecialchars($user['username']) . '</a>';

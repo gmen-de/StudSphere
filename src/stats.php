@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/settings.php';
+require_once __DIR__ . '/owned_sets.php';
 
 /**
  * Maps the stats-bar figures to their app_settings cache keys. These are the
@@ -29,6 +30,11 @@ require_once __DIR__ . '/settings.php';
  *   Damaged pieces are still physically present (a subset of "Bausteine
  *   gesamt"/quantity, not subtracted from it) — see
  *   setOwnedSetPartInventory() in src/owned_sets.php.
+ * - "Fehlende Teile": nominal minus actual, summed across every owned set
+ *   (same definition as getOwnedSetCompleteness(), just totalled instead of
+ *   per-set) — not a flat column sum like the other five, needs each set's
+ *   own Rebrickable inventory to know what "nominal" means, which is exactly
+ *   why this whole thing is cached rather than computed on every page load.
  *
  * Cached rather than computed live because these queries (especially the
  * minifig one, which joins through every owned set's inventory) can get
@@ -42,6 +48,7 @@ const APP_STATS_CACHE_KEYS = [
     'sets' => 'cached_stat_sets',
     'minifigs' => 'cached_stat_minifigs',
     'bricks_damaged' => 'cached_stat_bricks_damaged',
+    'bricks_missing' => 'cached_stat_bricks_missing',
 ];
 
 function computeAppStats(PDO $pdo): array
@@ -72,9 +79,20 @@ function refreshAppStatsCache(PDO $pdo): array
         'sets' => (int) $pdo->query('SELECT COUNT(*) FROM owned_sets')->fetchColumn(),
         'minifigs' => (int) $pdo->query('SELECT COALESCE(SUM(quantity), 0) FROM owned_set_minifigs')->fetchColumn(),
         'bricks_damaged' => (int) $pdo->query('SELECT COALESCE(SUM(damaged_quantity), 0) FROM storage_items')->fetchColumn(),
+        'bricks_missing' => computeCollectionMissingPartsTotal($pdo),
     ];
     foreach (APP_STATS_CACHE_KEYS as $key => $settingKey) {
         setAppSetting($settingKey, (string) $stats[$key]);
     }
     return $stats;
+}
+
+function computeCollectionMissingPartsTotal(PDO $pdo): int
+{
+    $missing = 0;
+    foreach (getAllOwnedSets($pdo) as $set) {
+        $completeness = getOwnedSetCompleteness($pdo, $set);
+        $missing += max(0, $completeness['nominal'] - $completeness['actual']);
+    }
+    return $missing;
 }
