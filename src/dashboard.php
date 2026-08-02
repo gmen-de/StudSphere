@@ -266,27 +266,30 @@ function renderDashboardWidgetCollectionStats(PDO $pdo): string
     $html .= '<button type="button" class="dashboard-stats-toggle-btn" data-chart="theme">' . htmlspecialchars(t('dashboard_stats_toggle_theme')) . '</button>';
     $html .= '</div>';
 
-    $html .= '<div data-chart="year">' . renderDashboardChartRows($byYear, 'year') . '</div>';
-    $html .= '<div data-chart="theme" hidden>' . renderDashboardChartRows($byTheme, 'theme') . '</div>';
+    $html .= '<div class="dashboard-chart-scroll" data-chart="year">' . renderDashboardChartColumns($byYear, 'year') . '</div>';
+    $html .= '<div class="dashboard-chart-scroll" data-chart="theme" hidden>' . renderDashboardChartColumns($byTheme, 'theme') . '</div>';
 
     return $html;
 }
 
 /**
- * A horizontal bar per value: label right-aligned in a fixed-width column
- * flush against the bar, bar left-aligned growing rightward from there —
- * every row is exactly one line tall regardless of label length. The
- * previous approach (a vertical bar per value, rotated label below it) broke
- * down for themes specifically: a rotated label's *height* depends on its
- * text length, and with columns bottom-aligned, a long theme name pushed its
- * whole column taller, throwing that bar's top edge out of line with
- * shorter-labelled columns next to it — years never exposed this since every
- * label is 4 digits, always the same length.
+ * Standing bars in columns, side by side — but built as 3 parallel rows
+ * (counts / bars / labels) sharing one flex container per row, not as N
+ * independent per-column flex stacks. That's what actually fixes the
+ * original bug: the bar row is a fixed height and bottom-aligned, so every
+ * bar sits on the same baseline regardless of anything below it; the label
+ * row is a separate shared row, top-aligned, sized to whatever its tallest
+ * label needs — a long theme name just wraps and grows that row taller for
+ * *every* column at once, it can no longer push its own bar out of line with
+ * its neighbors the way an independent per-column stack did (see the removed
+ * renderDashboardChartRows()' doc comment for that story, and the one before
+ * it — rotated labels below independently-bottom-aligned columns — for how
+ * this bug first showed up).
  *
  * @param array $rows computeOwnedSetsByYear()'s year=>count map when
  *   $group==='year', otherwise computeOwnedSetsByTheme()'s row list
  */
-function renderDashboardChartRows(array $rows, string $group): string
+function renderDashboardChartColumns(array $rows, string $group): string
 {
     if (empty($rows)) {
         return '<p class="hint">' . htmlspecialchars(t('dashboard_widget_recent_sets_empty')) . '</p>';
@@ -304,26 +307,36 @@ function renderDashboardChartRows(array $rows, string $group): string
         );
 
     $maxCount = max(array_column($bars, 'count'));
-    $html = '<div class="dashboard-hbar-chart">';
+
+    $countsRow = '<div class="dashboard-vbar-row dashboard-vbar-row-counts">';
+    $barsRow = '<div class="dashboard-vbar-row dashboard-vbar-row-bars">';
+    $labelsRow = '<div class="dashboard-vbar-row dashboard-vbar-row-labels">';
+
     foreach ($bars as $bar) {
         $clickable = $bar['count'] > 0;
-        $widthPercent = $maxCount > 0 ? (int) round(($bar['count'] / $maxCount) * 100) : 0;
-
-        $html .= '<div class="dashboard-hbar-row' . ($clickable ? ' dashboard-hbar-row-clickable' : '') . '"';
-        if ($clickable) {
-            $html .= ' role="button" tabindex="0"'
+        $heightPercent = $maxCount > 0 ? (int) round(($bar['count'] / $maxCount) * 100) : 0;
+        $clickAttrs = $clickable
+            ? ' role="button" tabindex="0"'
                 . ' data-group="' . htmlspecialchars($group) . '"'
                 . ' data-value="' . (int) $bar['value'] . '"'
-                . ' data-label="' . htmlspecialchars($bar['label']) . '"';
-        }
-        $html .= ' title="' . htmlspecialchars($bar['label'] . ': ' . $bar['count']) . '">';
-        $html .= '<span class="dashboard-hbar-label">' . htmlspecialchars($bar['label']) . '</span>';
-        $html .= '<div class="dashboard-hbar-track"><div class="dashboard-hbar-bar" style="width:' . $widthPercent . '%"></div></div>';
-        $html .= '<span class="dashboard-hbar-count">' . ($bar['count'] > 0 ? formatNumber($bar['count']) : '') . '</span>';
-        $html .= '</div>';
+                . ' data-label="' . htmlspecialchars($bar['label']) . '"'
+            : '';
+        $titleAttr = ' title="' . htmlspecialchars($bar['label'] . ': ' . $bar['count']) . '"';
+
+        $countsRow .= '<span class="dashboard-vbar-count">' . ($bar['count'] > 0 ? formatNumber($bar['count']) : '') . '</span>';
+
+        $barsRow .= '<div class="dashboard-vbar-cell' . ($clickable ? ' dashboard-vbar-cell-clickable' : '') . '"' . $clickAttrs . $titleAttr . '>';
+        $barsRow .= '<div class="dashboard-vbar-track"><div class="dashboard-vbar-bar" style="height:' . $heightPercent . '%"></div></div>';
+        $barsRow .= '</div>';
+
+        $labelsRow .= '<span class="dashboard-vbar-label' . ($clickable ? ' dashboard-vbar-cell-clickable' : '') . '"' . $clickAttrs . $titleAttr . '>' . htmlspecialchars($bar['label']) . '</span>';
     }
-    $html .= '</div>';
-    return $html;
+
+    $countsRow .= '</div>';
+    $barsRow .= '</div>';
+    $labelsRow .= '</div>';
+
+    return '<div class="dashboard-vbar-chart">' . $countsRow . $barsRow . $labelsRow . '</div>';
 }
 
 function renderDashboardWidgetSetList(array $sets, string $emptyKey, ?callable $badge = null): string
@@ -688,14 +701,14 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
         });
     }
 
-    document.querySelectorAll('.dashboard-hbar-row-clickable').forEach(function(row) {
-      row.addEventListener('click', function() {
-        openSetsModal(row.dataset.group, row.dataset.value, row.dataset.label);
+    document.querySelectorAll('.dashboard-vbar-cell-clickable').forEach(function(cell) {
+      cell.addEventListener('click', function() {
+        openSetsModal(cell.dataset.group, cell.dataset.value, cell.dataset.label);
       });
-      row.addEventListener('keydown', function(e) {
+      cell.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          openSetsModal(row.dataset.group, row.dataset.value, row.dataset.label);
+          openSetsModal(cell.dataset.group, cell.dataset.value, cell.dataset.label);
         }
       });
     });
