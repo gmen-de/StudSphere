@@ -41,6 +41,20 @@ const LDRAW_STUD_STYLE = 4;
 // parts this simple (chosen by comparing 1/4/8 side by side).
 const LDRAW_AA_SAMPLES = 8;
 
+// exec() has no built-in timeout. Watching real renders on the test server:
+// software/Xvfb rendering routinely takes 60-120s for a single part (no GPU
+// available) — normal, not stuck, but also long enough that a genuinely
+// hung leocad process (a real crash/deadlock, not just "slow") could
+// otherwise block the request holding stepLdrawSetRenderBatch()'s render
+// lock indefinitely, tying up an Apache worker forever instead of just for a
+// while. 180s is well above any observed legitimate render, so this is a
+// safety net against a true hang, not a budget for normal renders — the
+// existing per-tick 5s check (LDRAW_RENDER_TIME_BUDGET_SECONDS) already
+// accepts that a single render can and normally does run well past it.
+const LDRAW_RENDER_EXEC_TIMEOUT_SECONDS = 180;
+// `timeout`'s own exit code when it has to SIGKILL/SIGTERM the process.
+const TIMEOUT_COMMAND_EXIT_CODE = 124;
+
 // Rebrickable's API enforces its own rate limit (confirmed via a real 429
 // during testing — hundreds of not-yet-cached parts in one batch blew
 // through it almost immediately). Only the first lookup per part ever hits
@@ -127,7 +141,7 @@ function ldrawToolsAvailable(): array
         $missing[] = 'exec()';
     }
 
-    foreach (['leocad', 'xvfb-run'] as $binary) {
+    foreach (['leocad', 'xvfb-run', 'timeout'] as $binary) {
         $path = @shell_exec('command -v ' . escapeshellarg($binary) . ' 2>/dev/null');
         if ($path === null || trim((string) $path) === '') {
             $missing[] = $binary;
@@ -232,8 +246,14 @@ function matchLdrawColorCode(string $rgbHex, bool $isTrans): ?int
  * real (virtual) GL context to render — Qt's "offscreen" platform alone
  * wasn't enough in testing ("Error creating OpenGL context"), xvfb-run +
  * software Mesa was required.
+ *
+ * @return ?bool true on success, false on a genuine/permanent render failure
+ *   (caller marks the pair unavailable), null if the render had to be killed
+ *   for running past LDRAW_RENDER_EXEC_TIMEOUT_SECONDS — that's a transient
+ *   condition, not proof the part can never render, so the caller must leave
+ *   it unresolved (no DB row) rather than permanently blacklisting it.
  */
-function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outputPath): bool
+function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outputPath): ?bool
 {
     $partFile = $ldrawId . '.dat';
     if (!is_file(getLdrawPartFilePath($ldrawId))) {
@@ -251,7 +271,8 @@ function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outp
     }
 
     $cmd = sprintf(
-        'xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --aa-samples %d --viewpoint home %s 2>&1',
+        'timeout %d xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --aa-samples %d --viewpoint home %s 2>&1',
+        LDRAW_RENDER_EXEC_TIMEOUT_SECONDS,
         escapeshellarg(getLdrawLibraryRootDir()),
         escapeshellarg($outputPath),
         LDRAW_RENDER_IMAGE_SIZE,
@@ -262,6 +283,10 @@ function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outp
     );
     exec($cmd, $outputLines, $exitCode);
     @unlink($snippetPath);
+
+    if ($exitCode === TIMEOUT_COMMAND_EXIT_CODE) {
+        return null;
+    }
 
     return $exitCode === 0 && is_file($outputPath) && filesize($outputPath) > 0;
 }
@@ -478,7 +503,7 @@ function initLdrawSetRenderState(array $pairs): array
     return [
         'pairs' => array_values($pairs),
         'index' => 0,
-        'stats' => ['processed' => 0, 'rendered' => 0, 'skipped' => 0, 'errors' => 0],
+        'stats' => ['processed' => 0, 'rendered' => 0, 'skipped' => 0, 'errors' => 0, 'timedOut' => 0],
     ];
 }
 
@@ -592,15 +617,23 @@ function stepLdrawSetRenderBatch(array &$state): array
             $absolutePath = $dir . '/' . $filename;
             $relativePath = getImageRelativePath('part_color_images', $shard, $filename);
 
-            if (renderLdrawPartImage($ldrawId, $ldrawColorCode, $absolutePath)) {
+            $renderResult = renderLdrawPartImage($ldrawId, $ldrawColorCode, $absolutePath);
+            if ($renderResult === true) {
                 $upsertStmt->execute([$pair['part_id'], $pair['color_id'], $relativePath]);
                 $state['stats']['rendered']++;
-            } else {
+            } elseif ($renderResult === false) {
                 // The .dat file wasn't found in the library — a real (if rare)
                 // gap, permanent for this library version, so it's marked too
                 // rather than re-attempted every time this part comes up.
                 $upsertStmt->execute([$pair['part_id'], $pair['color_id'], null]);
                 $state['stats']['errors']++;
+            } else {
+                // null: killed by LDRAW_RENDER_EXEC_TIMEOUT_SECONDS — transient,
+                // not proof this part can never render. Deliberately no upsert
+                // here, so this pair is left unresolved and simply retried
+                // whenever a set containing it is next viewed, same as one
+                // that's never been attempted at all.
+                $state['stats']['timedOut']++;
             }
 
             if ((microtime(true) - $start) >= LDRAW_RENDER_TIME_BUDGET_SECONDS) {
