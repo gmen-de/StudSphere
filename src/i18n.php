@@ -99,3 +99,41 @@ function t(string $key, array $vars = []): string
 {
     return translate($key, $vars);
 }
+
+/**
+ * number_format(), but with the separators of the app's currently selected
+ * locale (getLocale() — the flag switcher, not the browser's own language)
+ * instead of PHP's English-style default. Plain text, no markup, so it's
+ * safe to embed inside a t() placeholder that gets htmlspecialchars()'d as a
+ * whole afterward — unlike a client-side Intl.NumberFormat() approach, which
+ * would need every such translated sentence restructured so the number is
+ * its own DOM node instead of interpolated text.
+ */
+function formatNumber(int|float $value, int $decimals = 0): string
+{
+    [$decimalSeparator, $thousandsSeparator] = getLocale() === 'de' ? [',', '.'] : ['.', ','];
+    return number_format($value, $decimals, $decimalSeparator, $thousandsSeparator);
+}
+
+/**
+ * Formats a date (accepts anything strtotime() understands — a DB
+ * TIMESTAMP string, an ISO 8601 string, etc.) per the app's locale, same
+ * reasoning as formatNumber(). Returns the original input unchanged if it
+ * can't be parsed, rather than throwing — callers already treat "no value
+ * yet" (getAppSetting() defaults, NULL columns) as a valid input here.
+ */
+function formatDate(?string $value, bool $withTime = false): string
+{
+    if ($value === null || $value === '') {
+        return '';
+    }
+    $timestamp = strtotime($value);
+    if ($timestamp === false) {
+        return $value;
+    }
+    $pattern = getLocale() === 'de' ? 'd.m.Y' : 'm/d/Y';
+    if ($withTime) {
+        $pattern .= ' H:i';
+    }
+    return date($pattern, $timestamp);
+}

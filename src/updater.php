@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/download.php';
 require_once __DIR__ . '/migrations.php';
+require_once __DIR__ . '/i18n.php';
 
 const UPDATE_REPO = 'gmen-de/StudSphere';
 const UPDATE_DOWNLOAD_CHUNK_SIZE = 1_000_000; // ~1 MB per download tick, same reasoning as Rebrickable
@@ -25,7 +26,7 @@ function getVersionDate(): string
 {
     $path = dirname(__DIR__) . '/VERSION';
     $mtime = is_file($path) ? filemtime($path) : false;
-    return $mtime !== false ? date('d.m.Y', $mtime) : '';
+    return $mtime !== false ? formatDate(date('c', $mtime)) : '';
 }
 
 /**

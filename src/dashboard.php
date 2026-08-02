@@ -155,12 +155,12 @@ function renderDashboardWidgetCollectionStats(PDO $pdo): string
 {
     $stats = computeAppStats($pdo);
     $html = '<div class="dashboard-stat-grid">';
-    $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['bricks_total']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_total')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['bricks_distinct']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_distinct')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['sets']) . '</strong><span>' . htmlspecialchars(t('stat_sets')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['minifigs']) . '</strong><span>' . htmlspecialchars(t('stat_minifigs')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['bricks_damaged']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_damaged')) . '</span></div>';
-    $html .= '<div class="dashboard-stat"><strong>' . number_format($stats['bricks_missing']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_missing')) . '</span></div>';
+    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['bricks_total']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_total')) . '</span></div>';
+    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['bricks_distinct']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_distinct')) . '</span></div>';
+    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['sets']) . '</strong><span>' . htmlspecialchars(t('stat_sets')) . '</span></div>';
+    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['minifigs']) . '</strong><span>' . htmlspecialchars(t('stat_minifigs')) . '</span></div>';
+    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['bricks_damaged']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_damaged')) . '</span></div>';
+    $html .= '<div class="dashboard-stat"><strong>' . formatNumber($stats['bricks_missing']) . '</strong><span>' . htmlspecialchars(t('stat_bricks_missing')) . '</span></div>';
     $html .= '</div>';
     return $html;
 }
@@ -213,14 +213,14 @@ function renderDashboardWidgetIncompleteSets(PDO $pdo): string
     return renderDashboardWidgetSetList(
         $incomplete,
         'dashboard_widget_incomplete_sets_empty',
-        fn (array $set): string => number_format($set['percent'], 1) . '%'
+        fn (array $set): string => formatNumber($set['percent'], 1) . '%'
     );
 }
 
 function renderDashboardWidgetLastSync(): string
 {
     $lastSync = getAppSetting('last_update_all');
-    $html = '<p>' . htmlspecialchars($lastSync !== null ? $lastSync : t('dashboard_widget_last_sync_never')) . '</p>';
+    $html = '<p>' . htmlspecialchars($lastSync !== null ? formatDate($lastSync, true) : t('dashboard_widget_last_sync_never')) . '</p>';
     $html .= '<a href="?page=settings">' . htmlspecialchars(t('dashboard_widget_last_sync_action')) . '</a>';
     return $html;
 }

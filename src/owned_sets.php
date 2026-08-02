@@ -1951,7 +1951,7 @@ function renderOwnedSetCard(array $ownedSet, ?float $completenessPercent = null)
     $html .= '<span class="set-card-num">' . htmlspecialchars($ownedSet['rebrickable_set_num']) . '</span>';
     $html .= '<span class="set-card-name" title="' . htmlspecialchars($ownedSet['name']) . '">' . htmlspecialchars($ownedSet['name']) . '</span>';
     if ($completenessPercent !== null) {
-        $html .= '<span class="set-card-meta">' . htmlspecialchars(number_format($completenessPercent, 1)) . '%</span>';
+        $html .= '<span class="set-card-meta">' . htmlspecialchars(formatNumber($completenessPercent, 1)) . '%</span>';
     }
     $html .= '</a>';
     return $html;
@@ -2062,7 +2062,7 @@ function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal): str
 {
     $circumference = 2 * M_PI * 45;
     $offset = $circumference * (1 - min(100.0, $percent) / 100);
-    $label = number_format($actual) . ' / ' . number_format($nominal);
+    $label = formatNumber($actual) . ' / ' . formatNumber($nominal);
     $ringClass = ownedSetCompletenessRingClass($percent);
 
     $html = '<div class="owned-set-total-ring-wrap">';
@@ -2137,11 +2137,13 @@ function renderOwnedSetQuantityModalScript(array $ownedSet, string $ownedField, 
     $ownedFieldJson = json_encode($ownedField);
     $damagedFieldJson = json_encode($damagedField);
     $gridIdJson = json_encode($gridId);
+    $localeJson = json_encode(getLocale(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     return <<<SCRIPT
 <script>
 (function(){
   var texts = $labelsJson;
+  var appLocale = $localeJson;
   var ownedSetId = {$ownedSet['id']};
   var ownedField = $ownedFieldJson;
   var damagedField = $damagedFieldJson;
@@ -2226,7 +2228,8 @@ function renderOwnedSetQuantityModalScript(array $ownedSet, string $ownedField, 
   }
 
   function formatNumber(n) {
-    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    var sep = appLocale === 'de' ? '.' : ',';
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, sep);
   }
 
   // Mirrors ownedSetCompletenessRingClass() in src/owned_sets.php (PHP) —
@@ -2429,11 +2432,13 @@ function renderOwnedSetMinifigQuantityModalScript(array $ownedSet): string
         'loading' => t('owned_set_tab_loading'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $gridIdJson = json_encode('owned-set-minifig-grid');
+    $localeJson = json_encode(getLocale(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     return <<<SCRIPT
 <script>
 (function(){
   var texts = $labelsJson;
+  var appLocale = $localeJson;
   var ownedSetId = {$ownedSet['id']};
 
   var grid = document.getElementById($gridIdJson);
@@ -2493,7 +2498,8 @@ function renderOwnedSetMinifigQuantityModalScript(array $ownedSet): string
   }
 
   function formatNumber(n) {
-    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+    var sep = appLocale === 'de' ? '.' : ',';
+    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, sep);
   }
 
   // Mirrors ownedSetCompletenessRingClass() in src/owned_sets.php (PHP) —

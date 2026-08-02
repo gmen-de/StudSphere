@@ -35,10 +35,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'settings') {
     $content .= '<p>' . htmlspecialchars(t('settings_update_help')) . '</p>';
     $content .= renderRebrickableUpdateModal();
     $content .= '<h2>' . htmlspecialchars(t('settings_recent_updates')) . '</h2>';
+    $formatLastUpdate = fn (string $key): string => ($value = getAppSetting($key)) !== null ? formatDate($value, true) : t('not_available');
     $content .= '<ul>';
-    $content .= '<li>' . htmlspecialchars(t('settings_last_update_all', ['value' => getAppSetting('last_update_all', t('not_available'))])) . '</li>';
-    $content .= '<li>' . htmlspecialchars(t('settings_last_update_parts', ['value' => getAppSetting('last_update_parts', t('not_available'))])) . '</li>';
-    $content .= '<li>' . htmlspecialchars(t('settings_last_update_sets', ['value' => getAppSetting('last_update_sets', t('not_available'))])) . '</li>';
+    $content .= '<li>' . htmlspecialchars(t('settings_last_update_all', ['value' => $formatLastUpdate('last_update_all')])) . '</li>';
+    $content .= '<li>' . htmlspecialchars(t('settings_last_update_parts', ['value' => $formatLastUpdate('last_update_parts')])) . '</li>';
+    $content .= '<li>' . htmlspecialchars(t('settings_last_update_sets', ['value' => $formatLastUpdate('last_update_sets')])) . '</li>';
     $content .= '</ul>';
 
     $content .= '<h2>' . htmlspecialchars(t('settings_rebrickable_title')) . '</h2>';
@@ -91,10 +92,12 @@ if (isset($_GET['page']) && $_GET['page'] === 'settings') {
         'skipped_label' => t('image_skipped_label'),
         'errors_label' => t('image_errors_label'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $imageLocaleJson = json_encode(getLocale(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $content .= <<<SCRIPT
 <script>
 (function(){
   var texts = $imageLabelsJson;
+  var appLocale = $imageLocaleJson;
   var stageLabels = {
     pending: texts.stage_pending,
     running: texts.stage_running,
@@ -113,7 +116,8 @@ if (isset($_GET['page']) && $_GET['page'] === 'settings') {
     if (n === null || n === undefined) {
       return "0";
     }
-    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ".");
+    var sep = appLocale === "de" ? "." : ",";
+    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, sep);
   }
 
   function renderTables(tables) {
@@ -709,7 +713,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'sets_search') {
     $hasResultsGrid = $isTextSearch || $themeParam !== null;
 
     $renderSetsResultsGrid = function (array $results, int $pageNum, int $perPage) use ($pdo): string {
-        $html = '<span class="results-summary">' . htmlspecialchars(t('sets_found_count', ['count' => number_format($results['total'])])) . '</span>';
+        $html = '<span class="results-summary">' . htmlspecialchars(t('sets_found_count', ['count' => formatNumber($results['total'])])) . '</span>';
         if (empty($results['items'])) {
             $html .= '<section class="card"><p>' . htmlspecialchars(t('sets_categories_empty')) . '</p></section>';
             return $html;
@@ -955,7 +959,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
         $sidebar .= '</form>';
 
         $main = '<p><a href="?page=minifigs_search">&larr; ' . htmlspecialchars(t('back_to_categories')) . '</a></p>';
-        $main .= '<span class="results-summary">' . htmlspecialchars(t('minifigs_found_count', ['count' => number_format($results['total'])])) . '</span>';
+        $main .= '<span class="results-summary">' . htmlspecialchars(t('minifigs_found_count', ['count' => formatNumber($results['total'])])) . '</span>';
 
         if (empty($results['items'])) {
             $main .= '<section class="card"><p>' . htmlspecialchars(t('minifigs_categories_empty')) . '</p></section>';
@@ -1126,7 +1130,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
     $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
     $content .= '<table class="set-detail-table">';
     if ($set['num_parts'] !== null) {
-        $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_total')) . '</th><td>' . htmlspecialchars(t('set_detail_num_parts', ['count' => number_format((int) $set['num_parts'])])) . '</td></tr>';
+        $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_total')) . '</th><td>' . htmlspecialchars(t('set_detail_num_parts', ['count' => formatNumber((int) $set['num_parts'])])) . '</td></tr>';
     }
     $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_exclusive')) . '</th><td>' . (int) $inventorySummary['exclusive'] . '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_rare')) . '</th><td>' . (int) $inventorySummary['rare'] . '</td></tr>';
@@ -1351,7 +1355,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
         } else {
             $content .= '<ul class="instructions-list">';
             foreach ($instructions as $instruction) {
-                $uploadedAt = date('d.m.Y', strtotime($instruction['uploaded_at']));
+                $uploadedAt = formatDate($instruction['uploaded_at']);
                 $label = $instruction['label'] !== null ? $instruction['label'] : $instruction['original_filename'];
                 $content .= '<li class="instruction-item" data-id="' . $instruction['id'] . '">';
                 $content .= '<a href="' . htmlspecialchars($instruction['stored_path']) . '" target="_blank" rel="noopener">' . htmlspecialchars($label) . '</a>';
@@ -1558,7 +1562,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     // renderOwnedSetQuantityModalScript()'s applySummaryUpdate()).
     $ownedInventorySummary = getOwnedSetInventorySummary($pdo, $ownedSet, getLocale());
     $renderActualNominalRow = function (string $labelKey, string $idKey, array $counts) use (&$content): void {
-        $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td id="owned-set-summary-' . $idKey . '">' . htmlspecialchars(t('owned_set_num_parts_actual', ['actual' => number_format($counts['actual']), 'nominal' => number_format($counts['nominal'])])) . '</td></tr>';
+        $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td id="owned-set-summary-' . $idKey . '">' . htmlspecialchars(t('owned_set_num_parts_actual', ['actual' => formatNumber($counts['actual']), 'nominal' => formatNumber($counts['nominal'])])) . '</td></tr>';
     };
     $renderBoxInfoRow = function (string $labelKey, bool $value, ?string $notesLabelKey, ?string $notes) use (&$content): void {
         $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td>' . htmlspecialchars($value ? t('owned_set_wizard_yes') : t('owned_set_wizard_no'));
@@ -1718,12 +1722,14 @@ SCRIPT;
             'errorRetry' => t('import_error_retry'),
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         $loadingHtmlJson = json_encode($loadingHtml, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $ownedSetTabLocaleJson = json_encode(getLocale(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
         $content .= <<<SCRIPT
 <script>
 (function(){
   var texts = $tabLoadingLabelsJson;
   var loadingHtml = $loadingHtmlJson;
+  var appLocale = $ownedSetTabLocaleJson;
   var container = document.getElementById('owned-set-tab-content');
   var nav = document.getElementById('owned-set-tabs-nav');
   if (!container || !nav) {
@@ -1742,7 +1748,8 @@ SCRIPT;
   }
 
   function formatNumber(n) {
-    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+    var sep = appLocale === 'de' ? '.' : ',';
+    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, sep);
   }
 
   function applyStats(stats) {
@@ -1965,7 +1972,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'bricks_search') {
         $sidebar .= '</form>';
 
         $main = '<p><a href="?page=bricks_search">&larr; ' . htmlspecialchars(t('back_to_categories')) . '</a></p>';
-        $main .= '<span class="results-summary">' . htmlspecialchars(t('parts_found_count', ['count' => number_format($results['total'])])) . '</span>';
+        $main .= '<span class="results-summary">' . htmlspecialchars(t('parts_found_count', ['count' => formatNumber($results['total'])])) . '</span>';
 
         if (empty($results['items'])) {
             $main .= '<section class="card"><p>' . htmlspecialchars(t('parts_categories_empty')) . '</p></section>';

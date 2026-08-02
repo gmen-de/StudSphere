@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/i18n.php';
 
 const INSTRUCTION_MAX_LABEL_LENGTH = 255;
 
@@ -126,5 +127,5 @@ function formatFileSize(int $bytes): string
         $unitIndex++;
     }
     $decimals = $unitIndex === 0 ? 0 : 1;
-    return number_format($value, $decimals, ',', '.') . ' ' . $units[$unitIndex];
+    return formatNumber($value, $decimals) . ' ' . $units[$unitIndex];
 }
