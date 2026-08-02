@@ -55,6 +55,14 @@ const LDRAW_RENDER_EXEC_TIMEOUT_SECONDS = 180;
 // `timeout`'s own exit code when it has to SIGKILL/SIGTERM the process.
 const TIMEOUT_COMMAND_EXIT_CODE = 124;
 
+// Runs leocad at the lowest CPU scheduling priority (19 — nice's own max) so
+// a render, however long it takes, only ever soaks up CPU cycles Apache/
+// PHP/MariaDB aren't actively contending for, rather than competing with
+// them on equal footing. Niceness is inherited by child processes, so
+// wrapping the outermost command (timeout, then xvfb-run, then leocad) is
+// enough for it to apply all the way down to the actual leocad process.
+const LDRAW_RENDER_NICE_LEVEL = 19;
+
 // Rebrickable's API enforces its own rate limit (confirmed via a real 429
 // during testing — hundreds of not-yet-cached parts in one batch blew
 // through it almost immediately). Only the first lookup per part ever hits
@@ -141,7 +149,7 @@ function ldrawToolsAvailable(): array
         $missing[] = 'exec()';
     }
 
-    foreach (['leocad', 'xvfb-run', 'timeout'] as $binary) {
+    foreach (['leocad', 'xvfb-run', 'timeout', 'nice'] as $binary) {
         $path = @shell_exec('command -v ' . escapeshellarg($binary) . ' 2>/dev/null');
         if ($path === null || trim((string) $path) === '') {
             $missing[] = $binary;
@@ -271,7 +279,8 @@ function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outp
     }
 
     $cmd = sprintf(
-        'timeout %d xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --aa-samples %d --viewpoint home %s 2>&1',
+        'nice -n %d timeout %d xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --aa-samples %d --viewpoint home %s 2>&1',
+        LDRAW_RENDER_NICE_LEVEL,
         LDRAW_RENDER_EXEC_TIMEOUT_SECONDS,
         escapeshellarg(getLdrawLibraryRootDir()),
         escapeshellarg($outputPath),
@@ -521,7 +530,7 @@ function initLdrawSetRenderState(array $pairs): array
  * missing again (and retried) whenever any set containing it is next
  * viewed, rather than being wrongly marked unavailable forever.
  *
- * @return array{done: bool}
+ * @return array{done: bool, lockBusy?: bool}
  */
 function stepLdrawSetRenderBatch(array &$state): array
 {
@@ -539,14 +548,19 @@ function stepLdrawSetRenderBatch(array &$state): array
     // what pushed a single tick's response time past an SSL offloader's
     // gateway timeout (see LDRAW_RENDER_TIME_BUDGET_SECONDS's doc comment).
     // Non-blocking trylock: a tick that loses the race does no work and
-    // returns immediately instead of queuing up behind the lock holder — the
-    // client's tick loop just polls again a moment later.
+    // returns immediately instead of queuing up behind the lock holder.
+    // 'lockBusy' tells the client's tick loop to back off hard instead of
+    // polling again almost immediately — with several set pages open, each
+    // losing this race, hammering the lock every tick is exactly the request
+    // flood that made the server unresponsive under real use (a single
+    // render legitimately takes 60-120s, so a losing tab has no reason to
+    // ask again in under a couple of seconds).
     $lockHandle = fopen(getLdrawRenderLockPath(), 'c');
     if ($lockHandle === false || !flock($lockHandle, LOCK_EX | LOCK_NB)) {
         if ($lockHandle !== false) {
             fclose($lockHandle);
         }
-        return ['done' => false];
+        return ['done' => false, 'lockBusy' => true];
     }
 
     try {
@@ -641,7 +655,7 @@ function stepLdrawSetRenderBatch(array &$state): array
             }
         }
 
-        return ['done' => $state['index'] >= $total];
+        return ['done' => $state['index'] >= $total, 'lockBusy' => false];
     } finally {
         flock($lockHandle, LOCK_UN);
         fclose($lockHandle);
@@ -649,9 +663,9 @@ function stepLdrawSetRenderBatch(array &$state): array
 }
 
 /**
- * @return array{status:string, percent:int, processed:int, total:int, rendered:int, skipped:int, errors:int}
+ * @return array{status:string, percent:int, processed:int, total:int, rendered:int, skipped:int, errors:int, lockBusy:bool}
  */
-function buildLdrawSetRenderProgressPayload(array $state, bool $done): array
+function buildLdrawSetRenderProgressPayload(array $state, bool $done, bool $lockBusy = false): array
 {
     $total = count($state['pairs']);
     $processed = $state['stats']['processed'];
@@ -662,6 +676,7 @@ function buildLdrawSetRenderProgressPayload(array $state, bool $done): array
         'percent' => $done ? 100 : $percent,
         'processed' => $processed,
         'total' => $total,
+        'lockBusy' => $lockBusy,
         'rendered' => $state['stats']['rendered'],
         'skipped' => $state['stats']['skipped'],
         'errors' => $state['stats']['errors'],
@@ -761,7 +776,12 @@ function renderLdrawRenderOverlay(int $inventoryId): string
         messageLabel.textContent = data.message || texts.errorMessage;
         return;
       }
-      setTimeout(loop, 50);
+      // A single render legitimately takes 60-120s, so a tick that lost the
+      // render.lock race (another set page is already working) has no
+      // reason to ask again in under a couple of seconds — with several set
+      // pages open at once, all polling as fast as possible here is exactly
+      // what turned into a request flood against the server.
+      setTimeout(loop, data.lockBusy ? 3000 : 500);
     }).catch(function() {
       consecutiveFailures++;
       if (consecutiveFailures <= maxAutoRetries) {

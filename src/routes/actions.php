@@ -208,7 +208,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw
         $result = stepLdrawSetRenderBatch($state);
         $_SESSION[$sessionKey] = $state;
 
-        $payload = buildLdrawSetRenderProgressPayload($state, $result['done']);
+        $payload = buildLdrawSetRenderProgressPayload($state, $result['done'], $result['lockBusy'] ?? false);
 
         if ($result['done']) {
             unset($_SESSION[$sessionKey]);
