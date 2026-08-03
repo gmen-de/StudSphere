@@ -519,14 +519,21 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
     }
     unset($set);
 
+    // pci (part_color_images) joins on c.color_id — Rebrickable's own
+    // numbering — not si.color_id/c.id (the colors.id surrogate PK
+    // storage_items uses); same distinction getSetPartsList() documents.
+    // ldraw_thumbnail is the color-correct image where one's been cached;
+    // callers fall back to a generic (not color-specific) thumbnail when
+    // it's null, same priority order getSetPartsList() uses.
     $partsStmt = $pdo->prepare(
         "SELECT si.part_id, p.part_num, p.name AS part_name, pc.name AS category_name,
-                c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb,
-                si.condition_type, si.quantity
+                c.id AS color_id, c.color_id AS rebrickable_color_id, c.name AS color_name, c.rgb AS color_rgb,
+                si.condition_type, si.quantity, pci.local_image_path AS ldraw_thumbnail
          FROM storage_items si
          INNER JOIN parts p ON p.id = si.part_id
          LEFT JOIN part_categories pc ON pc.part_cat_id = p.part_category
          LEFT JOIN colors c ON c.id = si.color_id
+         LEFT JOIN part_color_images pci ON pci.part_id = si.part_id AND pci.color_id = c.color_id
          WHERE si.location_id IN ($loosePlaceholders) AND si.quantity > 0
          ORDER BY pc.name IS NULL, pc.name, p.part_num"
     );
@@ -535,6 +542,7 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
     foreach ($partsStmt->fetchAll() as $row) {
         $row['part_id'] = (int) $row['part_id'];
         $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
+        $row['rebrickable_color_id'] = $row['rebrickable_color_id'] !== null ? (int) $row['rebrickable_color_id'] : null;
         $row['quantity'] = (int) $row['quantity'];
         $category = $row['category_name']; // null stays null; caller supplies the fallback label
         $partsByCategory[$category ?? ''][] = $row;

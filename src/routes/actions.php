@@ -412,12 +412,19 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
             $allPartIds[] = $part['part_id'];
         }
     }
-    $thumbnails = getPartThumbnails($pdo, array_values(array_unique($allPartIds)));
+    $allPartIds = array_values(array_unique($allPartIds));
+    // Generic (not color-specific) fallback for wherever ldraw_thumbnail
+    // (the color-correct image, already fetched in getLocationContentRecursive())
+    // isn't cached yet — same two-tier priority getSetPartsList() uses.
+    $thumbnails = getPartThumbnails($pdo, $allPartIds);
+    $translations = getLocale() !== 'en' ? getPartTranslations($pdo, $allPartIds, getLocale()) : [];
 
     $categories = [];
     foreach ($content['partsByCategory'] as $categoryName => $parts) {
         foreach ($parts as &$part) {
-            $part['thumbnail'] = $thumbnails[$part['part_id']] ?? null;
+            $part['part_name'] = $translations[$part['part_id']] ?? $part['part_name'];
+            $part['thumbnail'] = $part['ldraw_thumbnail'] ?? ($thumbnails[$part['part_id']] ?? null);
+            unset($part['ldraw_thumbnail'], $part['rebrickable_color_id']);
         }
         unset($part);
         $categories[] = [
