@@ -540,7 +540,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $types = getLocationTypes();
 
     $content = '<h1>' . htmlspecialchars(t('locations_title')) . '</h1>';
-    $content .= '<p>' . htmlspecialchars(t('locations_help')) . '</p>';
     if ($locationMessage !== '') {
         $content .= '<p><strong>' . htmlspecialchars($locationMessage) . '</strong></p>';
     }
@@ -1119,13 +1118,35 @@ SCRIPT;
       }
       var rect = explorer.getBoundingClientRect();
       var percent = ((e.clientX - rect.left) / rect.width) * 100;
-      percent = Math.max(20, Math.min(70, percent));
+      percent = Math.max(15, Math.min(60, percent));
       treePane.style.width = percent + '%';
     });
     document.addEventListener('mouseup', function() {
       dragging = false;
     });
   }
+
+  // Fills whatever's actually left of the viewport below the explorer,
+  // rather than a fixed guess at how tall the nav/breadcrumbs/heading above
+  // it happen to be (which varies with wrapping, locale, etc.) — matches
+  // .location-explorer's own min-height fallback in style.css for before
+  // this runs. The 800px check mirrors that stylesheet's own mobile
+  // breakpoint, where the panes stack instead of sitting side by side and
+  // should size to their content (height:auto), not a computed pixel value.
+  function sizeExplorer() {
+    if (!explorer) {
+      return;
+    }
+    if (window.innerWidth <= 800) {
+      explorer.style.height = '';
+      return;
+    }
+    var top = explorer.getBoundingClientRect().top;
+    var height = window.innerHeight - top - 24;
+    explorer.style.height = Math.max(320, height) + 'px';
+  }
+  sizeExplorer();
+  window.addEventListener('resize', sizeExplorer);
 })();
 </script>
 SCRIPT;

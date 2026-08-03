@@ -920,7 +920,12 @@ button[type='submit'] {
    their own independent scroll region instead of the whole page growing. */
 .location-explorer {
   display: flex;
-  height: 32rem;
+  /* Fallback for before the sizing script (see renderLocationExplorer's
+     inline script) runs on load — it sets an explicit inline height,
+     filling whatever's actually left of the viewport below this element,
+     which a fixed rem value here could never get right across screen
+     sizes/zoom levels. */
+  min-height: 20rem;
   border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: 0.85rem;
   overflow: hidden;
@@ -928,7 +933,7 @@ button[type='submit'] {
 }
 
 .location-explorer-tree-pane {
-  width: 40%;
+  width: 20%;
   min-width: 12rem;
   max-width: 78%;
   flex-shrink: 0;
@@ -938,7 +943,11 @@ button[type='submit'] {
 }
 
 .location-explorer-resize-handle {
-  width: 0;
+  /* A real hit-box, not 0 — at 0 width the icon only overflowed visually
+     into the two neighboring panes, but each pane still owns its own actual
+     box right up to that point and intercepted the drag on whichever side
+     painted on top, making the handle unreliable to grab. */
+  width: 12px;
   position: relative;
   flex-shrink: 0;
   cursor: col-resize;
@@ -1086,6 +1095,15 @@ button[type='submit'] {
 .location-tree-children {
   display: flex;
   flex-direction: column;
+}
+
+/* Own display:flex above otherwise beats the [hidden] attribute's UA-default
+   display:none (author styles always win over the UA stylesheet, regardless
+   of specificity) — the exact same bug already hit once on
+   .dashboard-widget-add-menu; without this every node renders expanded from
+   the start regardless of the JS-toggled .hidden property. */
+.location-tree-children[hidden] {
+  display: none;
 }
 
 .location-content-group {

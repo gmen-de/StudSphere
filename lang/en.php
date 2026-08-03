@@ -216,7 +216,6 @@ return [
     'settings_rebrickable_save_button' => 'Save',
     'settings_rebrickable_saved' => 'Rebrickable settings saved.',
     'locations_title' => 'Storage Locations',
-    'locations_help' => 'Manage nested storage locations (e.g. Office -> Parts Organizer #1 -> Drawer 5) for your bricks.',
     'locations_tree_title' => 'Existing Locations',
     'locations_tree_empty' => 'No storage locations yet.',
     'location_detail_not_found_title' => 'Location not found',

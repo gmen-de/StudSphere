@@ -216,7 +216,6 @@ return [
     'settings_rebrickable_save_button' => 'Speichern',
     'settings_rebrickable_saved' => 'Rebrickable-Einstellungen gespeichert.',
     'locations_title' => 'Lagerorte',
-    'locations_help' => 'Verwalten Sie verschachtelte Lagerorte (z. B. Büro -> Kleinteilesortiment #1 -> Schublade 5) für Ihre Klemmbausteine.',
     'locations_tree_title' => 'Vorhandene Lagerorte',
     'locations_tree_empty' => 'Noch keine Lagerorte angelegt.',
     'location_detail_not_found_title' => 'Lagerort nicht gefunden',
