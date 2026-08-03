@@ -996,7 +996,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     (node.children || []).forEach(function(child) {
       childrenWrap.appendChild(buildRow(child, depth + 1));
     });
-    childrenWrap.appendChild(buildNewChildRow(node.id, node.name, depth + 1));
+    childrenWrap.appendChild(buildNewChildRow(node.id, node.name, depth));
     wrap.appendChild(childrenWrap);
 
     function toggleExpand() {
