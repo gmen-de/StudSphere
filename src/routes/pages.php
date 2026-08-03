@@ -672,6 +672,12 @@ SCRIPT;
         'minifigsEmpty' => t('location_content_minifigs_empty'),
         'conditionNew' => t('condition_new'),
         'conditionUsed' => t('condition_used'),
+        // Reuses the set-detail page's own LDraw render-progress wording
+        // (see renderLdrawRenderOverlay() in src/ldraw.php) — same
+        // {part}/{count} template, left unsubstituted here for the same
+        // reason: filled in client-side on every poll.
+        'ldrawCurrent' => t('ldraw_set_render_current'),
+        'ldrawWaiting' => t('ldraw_set_render_waiting'),
         'typeLabels' => $typeLabels,
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
@@ -816,11 +822,36 @@ SCRIPT;
     return grid;
   }
 
-  function renderContent(name, data) {
+  function renderContent(id, name, data) {
     contentEl.innerHTML = '';
     var heading = document.createElement('h2');
     heading.textContent = name;
     contentEl.appendChild(heading);
+
+    if (data.ldraw && data.ldraw.missingCount > 0) {
+      var status = document.createElement('p');
+      status.className = 'hint location-ldraw-status';
+      if (data.ldraw.currentPart) {
+        status.textContent = texts.ldrawCurrent
+          .replace('{part}', data.ldraw.currentPart)
+          .replace('{count}', data.ldraw.queueDepth);
+      } else {
+        status.textContent = texts.ldrawWaiting;
+      }
+      contentEl.appendChild(status);
+      // Missing color-correct images (see getMissingLdrawRenderPairs() in
+      // src/ldraw.php) were already enqueued server-side by this same
+      // request — just keep polling the same content until none are left,
+      // same ~1s pacing the set-detail page's render overlay uses. Guarded
+      // by loadToken so a poll for a location the user has since navigated
+      // away from never overwrites what's currently shown.
+      var myToken = loadToken;
+      window.setTimeout(function() {
+        if (myToken === loadToken) {
+          loadContent(id, name);
+        }
+      }, 1000);
+    }
 
     if (data.sets.length > 0) {
       contentEl.appendChild(buildGroup(texts.groupSets, buildSetsList(data.sets)));
@@ -841,13 +872,23 @@ SCRIPT;
     contentEl.appendChild(buildGroup(texts.groupMinifigs, minifigsBody));
   }
 
+  var loadToken = 0;
+
   function loadContent(id, name) {
+    loadToken++;
+    var myToken = loadToken;
     contentEl.innerHTML = '<p class="hint">' + texts.loading + '</p>';
     fetch('?action=location_content&location_id=' + id, { credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
-      .then(function(data) { renderContent(name, data); })
+      .then(function(data) {
+        if (myToken === loadToken) {
+          renderContent(id, name, data);
+        }
+      })
       .catch(function() {
-        contentEl.innerHTML = '<p class="hint">' + texts.errorRetry + '</p>';
+        if (myToken === loadToken) {
+          contentEl.innerHTML = '<p class="hint">' + texts.errorRetry + '</p>';
+        }
       });
   }
 

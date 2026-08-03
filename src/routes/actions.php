@@ -406,13 +406,29 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
 
     $content = getLocationContentRecursive($pdo, $locationId);
 
-    $allPartIds = [];
+    $allPartsFlat = [];
     foreach ($content['partsByCategory'] as $parts) {
-        foreach ($parts as $part) {
-            $allPartIds[] = $part['part_id'];
-        }
+        $allPartsFlat = array_merge($allPartsFlat, $parts);
     }
-    $allPartIds = array_values(array_unique($allPartIds));
+
+    // Enqueue whatever's missing a color-correct image with the same
+    // persistent worker the set-detail page uses (see getLdrawSetRenderProgress()
+    // in src/ldraw.php) — this was the only gap: nothing outside the set-detail
+    // page ever called into the render queue, so loose parts viewed here never
+    // got their missing images generated at all, however long you waited.
+    $ldrawStatus = null;
+    if (ldrawContextualRenderingReady()) {
+        $missingLdrawPairs = getMissingLdrawRenderPairs($pdo, $allPartsFlat);
+        enqueueLdrawRenders($pdo, $missingLdrawPairs);
+        $queueStatus = getLdrawQueueStatus($pdo);
+        $ldrawStatus = [
+            'missingCount' => count($missingLdrawPairs),
+            'currentPart' => $queueStatus['currentPart'],
+            'queueDepth' => $queueStatus['queueDepth'],
+        ];
+    }
+
+    $allPartIds = array_values(array_unique(array_column($allPartsFlat, 'part_id')));
     $translations = getLocale() !== 'en' ? getPartTranslations($pdo, $allPartIds, getLocale()) : [];
 
     $categories = [];
@@ -442,6 +458,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
         'sets' => $content['sets'],
         'categories' => $categories,
         'minifigs' => $content['minifigs'],
+        'ldraw' => $ldrawStatus,
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }

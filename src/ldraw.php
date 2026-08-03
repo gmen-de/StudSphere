@@ -519,7 +519,28 @@ function getLdrawSetRenderProgress(PDO $pdo, array $items): array
 
     $done = $total - count($missing);
     $percent = $total > 0 ? (int) round(min(1.0, $done / $total) * 100) : 100;
+    $queueStatus = getLdrawQueueStatus($pdo);
 
+    return [
+        'status' => count($missing) > 0 ? 'running' : 'done',
+        'percent' => $percent,
+        'done' => $done,
+        'total' => $total,
+        'currentPart' => $queueStatus['currentPart'],
+        'queueDepth' => $queueStatus['queueDepth'],
+    ];
+}
+
+/**
+ * What the persistent render worker is doing right now — shared by
+ * getLdrawSetRenderProgress() and any other caller that enqueues renders
+ * and wants to show live status (see the location Explorer's loose-parts
+ * enqueueing in src/routes/actions.php).
+ *
+ * @return array{currentPart: ?string, queueDepth: int}
+ */
+function getLdrawQueueStatus(PDO $pdo): array
+{
     $currentPart = $pdo->query(
         "SELECT p.part_num FROM ldraw_render_queue q
          INNER JOIN parts p ON p.id = q.part_id
@@ -536,10 +557,6 @@ function getLdrawSetRenderProgress(PDO $pdo, array $items): array
     $queueDepth = $currentPart !== false ? max(0, $totalQueued - 1) : $totalQueued;
 
     return [
-        'status' => count($missing) > 0 ? 'running' : 'done',
-        'percent' => $percent,
-        'done' => $done,
-        'total' => $total,
         'currentPart' => $currentPart !== false ? (string) $currentPart : null,
         'queueDepth' => $queueDepth,
     ];
