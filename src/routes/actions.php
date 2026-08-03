@@ -271,12 +271,19 @@ $locationMessage = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_location') {
     $name = trim($_POST['name'] ?? '');
     $parentId = trim($_POST['parent_id'] ?? '') !== '' ? (int) $_POST['parent_id'] : null;
+    $bulkEnabled = ($_POST['bulk_enabled'] ?? '') === '1';
+    $childCount = (int) ($_POST['child_count'] ?? 0);
+    $namingPattern = trim($_POST['naming_pattern'] ?? '');
 
     if ($name === '') {
         $locationMessage = t('location_name_required');
     } else {
         try {
-            createStorageLocation($parentId, $name);
+            if ($bulkEnabled && $childCount > 0 && $namingPattern !== '') {
+                createStorageLocationWithChildren($parentId, $name, $childCount, $namingPattern);
+            } else {
+                createStorageLocation($parentId, $name);
+            }
             $locationMessage = t('location_added_message', ['name' => $name]);
         } catch (Throwable $e) {
             $locationMessage = t('location_save_failed', ['message' => $e->getMessage()]);

@@ -28,6 +28,31 @@ function renameStorageLocation(int $id, string $name): void
 }
 
 /**
+ * Creates a location and immediately populates it with $childCount numbered
+ * children (e.g. "Fach 1".."Fach 8" from the pattern "Fach {n}") — no longer
+ * gated behind a location "type" choice (removed entirely), just an explicit
+ * checkbox in the add-location modal. Runs in a transaction so a failure
+ * partway through can't leave a half-created set of children behind.
+ */
+function createStorageLocationWithChildren(?int $parentId, string $name, int $childCount, string $namingPattern): int
+{
+    $pdo = getPDO();
+    $pdo->beginTransaction();
+    try {
+        $id = createStorageLocation($parentId, $name);
+        for ($i = 1; $i <= $childCount; $i++) {
+            $childName = str_replace('{n}', (string) $i, $namingPattern);
+            createStorageLocation($id, $childName);
+        }
+        $pdo->commit();
+        return $id;
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/**
  * Re-parents a location node — used by owned_set_detail's "Verschieben"
  * action to move a set instance's storage node to a different place in the
  * tree (the node itself, its stock, and its parts stay exactly as they are;

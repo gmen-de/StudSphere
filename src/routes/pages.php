@@ -607,6 +607,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $content .= '<input type="hidden" name="action" value="add_location">';
     $content .= '<input type="hidden" name="parent_id" id="location-add-parent-id" value="">';
     $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" required></label>';
+    $content .= '<label class="checkbox-label"><input type="checkbox" id="location-add-bulk-toggle" name="bulk_enabled" value="1"> ' . htmlspecialchars(t('location_bulk_toggle_label')) . '</label>';
+    $content .= '<div id="location-add-bulk-fields" style="display:none;">';
+    $content .= '<label>' . htmlspecialchars(t('location_bulk_count_label')) . '<input type="number" name="child_count" min="1" value="1" id="location-add-bulk-count"></label>';
+    $content .= '<label>' . htmlspecialchars(t('location_bulk_naming_label')) . '<input type="text" name="naming_pattern" id="location-add-naming-pattern" value="' . htmlspecialchars(t('location_bulk_naming_default')) . '"></label>';
+    $content .= '</div>';
     $content .= '<button type="submit">' . htmlspecialchars(t('location_add_button')) . '</button>';
     $content .= '</form></div></div>';
 
@@ -670,6 +675,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     openAddModal = function(parentId, parentName) {
       addParentIdField.value = parentId === null ? '' : parentId;
       addModalHeading.textContent = texts.addModalHeading.replace('{parent}', parentName);
+      if (addBulkToggle && addBulkFields) {
+        addBulkToggle.checked = false;
+        addBulkFields.style.display = 'none';
+      }
       addModal.style.display = 'flex';
     };
     addModalClose.addEventListener('click', closeAddModal);
@@ -682,6 +691,14 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       if (e.key === 'Escape' && addModal.style.display !== 'none') {
         closeAddModal();
       }
+    });
+  }
+
+  var addBulkToggle = document.getElementById('location-add-bulk-toggle');
+  var addBulkFields = document.getElementById('location-add-bulk-fields');
+  if (addBulkToggle && addBulkFields) {
+    addBulkToggle.addEventListener('change', function() {
+      addBulkFields.style.display = addBulkToggle.checked ? 'block' : 'none';
     });
   }
 
