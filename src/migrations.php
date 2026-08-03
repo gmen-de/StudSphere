@@ -160,9 +160,9 @@ function getSchemaMigrations(): array
         13 => function (PDO $pdo): void {
             // Owned set instances ("my collection") — one row per physical
             // copy. Each instance gets its own storage_locations node
-            // (location_type 'owned_set', never offered in the manual "add
-            // location" UI — see getLocationTypes()) so its parts show up as
-            // real storage_items stock through the exact same location/part
+            // (location_type 'owned_set', an internal marker never exposed
+            // to or chosen by a user) so its parts show up as real
+            // storage_items stock through the exact same location/part
             // lookup machinery already used for loose parts, instead of a
             // parallel "virtual location" concept. No separate
             // missing-parts table: the set's nominal quantities come from

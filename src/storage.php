@@ -5,31 +5,14 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 
 /**
- * Location types are a small fixed vocabulary in code, not a DB-enforced ENUM —
- * new types can be added here later without a schema migration. A non-null
- * 'bulkChildKey' means the "add location" form offers to auto-create N numbered
- * child locations right away, using that translation key as the default naming
- * pattern (contains a literal "{n}" placeholder, replaced per child).
+ * $type is only ever a real user-facing classification for backward
+ * compatibility with rows created before that concept was removed — the
+ * only value anything in this codebase still sets deliberately is the
+ * internal 'owned_set' marker (see addOwnedSet() in src/owned_sets.php),
+ * never exposed to or chosen by a user. Kept as a parameter (not just
+ * hardcoded to null here) purely so that one caller can still pass it.
  */
-function getLocationTypes(): array
-{
-    return [
-        'room' => ['labelKey' => 'location_type_room', 'bulkChildKey' => null],
-        'shelf' => ['labelKey' => 'location_type_shelf', 'bulkChildKey' => 'location_child_pattern_shelf_board'],
-        'small_parts_organizer' => ['labelKey' => 'location_type_organizer', 'bulkChildKey' => 'location_child_pattern_drawer'],
-        'drawer' => ['labelKey' => 'location_type_drawer', 'bulkChildKey' => 'location_child_pattern_compartment'],
-        'box' => ['labelKey' => 'location_type_box', 'bulkChildKey' => null],
-        'bag' => ['labelKey' => 'location_type_bag', 'bulkChildKey' => null],
-        'other' => ['labelKey' => 'location_type_other', 'bulkChildKey' => 'location_child_pattern_generic'],
-    ];
-}
-
-function isValidLocationType(?string $type): bool
-{
-    return $type !== null && array_key_exists($type, getLocationTypes());
-}
-
-function createStorageLocation(?int $parentId, string $name, ?string $type): int
+function createStorageLocation(?int $parentId, string $name, ?string $type = null): int
 {
     $pdo = getPDO();
     $stmt = $pdo->prepare('INSERT INTO storage_locations (parent_id, name, location_type) VALUES (?, ?, ?)');
@@ -37,35 +20,11 @@ function createStorageLocation(?int $parentId, string $name, ?string $type): int
     return (int) $pdo->lastInsertId();
 }
 
-/**
- * Creates a location and, if $childCount > 0, immediately populates it with
- * that many numbered children (e.g. "Schublade 1".."Schublade 8" from the
- * pattern "Schublade {n}"). Runs in a transaction so a failure partway through
- * can't leave a half-created set of children behind.
- */
-function createStorageLocationWithChildren(?int $parentId, string $name, ?string $type, int $childCount, string $namingPattern): int
+function renameStorageLocation(int $id, string $name): void
 {
     $pdo = getPDO();
-    $pdo->beginTransaction();
-    try {
-        $id = createStorageLocation($parentId, $name, $type);
-        for ($i = 1; $i <= $childCount; $i++) {
-            $childName = str_replace('{n}', (string) $i, $namingPattern);
-            createStorageLocation($id, $childName, null);
-        }
-        $pdo->commit();
-        return $id;
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
-}
-
-function renameStorageLocation(int $id, string $name, ?string $type): void
-{
-    $pdo = getPDO();
-    $stmt = $pdo->prepare('UPDATE storage_locations SET name = ?, location_type = ? WHERE id = ?');
-    $stmt->execute([$name, $type, $id]);
+    $stmt = $pdo->prepare('UPDATE storage_locations SET name = ? WHERE id = ?');
+    $stmt->execute([$name, $id]);
 }
 
 /**

@@ -270,23 +270,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 $locationMessage = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_location') {
     $name = trim($_POST['name'] ?? '');
-    $type = trim($_POST['type'] ?? '');
-    $type = isValidLocationType($type) ? $type : null;
     $parentId = trim($_POST['parent_id'] ?? '') !== '' ? (int) $_POST['parent_id'] : null;
-    $childCount = (int) ($_POST['child_count'] ?? 0);
-    $namingPattern = trim($_POST['naming_pattern'] ?? '');
 
     if ($name === '') {
         $locationMessage = t('location_name_required');
     } else {
         try {
-            $types = getLocationTypes();
-            $supportsBulk = $type !== null && $types[$type]['bulkChildKey'] !== null;
-            if ($supportsBulk && $childCount > 0 && $namingPattern !== '') {
-                createStorageLocationWithChildren($parentId, $name, $type, $childCount, $namingPattern);
-            } else {
-                createStorageLocation($parentId, $name, $type);
-            }
+            createStorageLocation($parentId, $name);
             $locationMessage = t('location_added_message', ['name' => $name]);
         } catch (Throwable $e) {
             $locationMessage = t('location_save_failed', ['message' => $e->getMessage()]);
@@ -353,14 +343,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rename_location') {
     $locationId = (int) ($_POST['location_id'] ?? 0);
     $name = trim($_POST['name'] ?? '');
-    $type = trim($_POST['type'] ?? '');
-    $type = isValidLocationType($type) ? $type : null;
 
     if ($name === '') {
         $locationMessage = t('location_name_required');
     } else {
         try {
-            renameStorageLocation($locationId, $name, $type);
+            renameStorageLocation($locationId, $name);
             $locationMessage = t('location_updated_message');
         } catch (Throwable $e) {
             $locationMessage = t('location_save_failed', ['message' => $e->getMessage()]);

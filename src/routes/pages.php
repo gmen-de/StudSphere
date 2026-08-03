@@ -536,7 +536,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : null;
     $editLocation = $editId !== null ? getStorageLocation($editId) : null;
     $isEdit = $editLocation !== null;
-    $types = getLocationTypes();
 
     $content = '<h1>' . htmlspecialchars(t('locations_title')) . '</h1>';
     if ($locationMessage !== '') {
@@ -555,13 +554,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         $content .= '<input type="hidden" name="action" value="rename_location">';
         $content .= '<input type="hidden" name="location_id" value="' . (int) $editLocation['id'] . '">';
         $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" value="' . htmlspecialchars($editLocation['name']) . '" required></label>';
-        $content .= '<label>' . htmlspecialchars(t('location_type_label')) . '<select name="type" id="location-type-select">';
-        $content .= '<option value="">' . htmlspecialchars(t('location_type_none')) . '</option>';
-        foreach ($types as $typeKey => $typeConfig) {
-            $selected = $typeKey === $editLocation['location_type'] ? ' selected' : '';
-            $content .= '<option value="' . htmlspecialchars($typeKey) . '"' . $selected . '>' . htmlspecialchars(t($typeConfig['labelKey'])) . '</option>';
-        }
-        $content .= '</select></label>';
         $content .= '<button type="submit">' . htmlspecialchars(t('location_save_button')) . '</button>';
         $content .= ' <a href="?page=locations">' . htmlspecialchars(t('location_cancel_edit')) . '</a>';
         $content .= '</form></details>';
@@ -585,11 +577,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         'children' => $tree,
     ];
     $treeJson = json_encode($treeRoot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-
-    $typeLabels = [];
-    foreach ($types as $typeKey => $typeConfig) {
-        $typeLabels[$typeKey] = t($typeConfig['labelKey']);
-    }
 
     $content .= '<div class="location-explorer" id="location-explorer">';
     $content .= '<div class="location-explorer-tree-pane" id="location-explorer-tree-pane">';
@@ -620,23 +607,8 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $content .= '<input type="hidden" name="action" value="add_location">';
     $content .= '<input type="hidden" name="parent_id" id="location-add-parent-id" value="">';
     $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" required></label>';
-    $content .= '<label>' . htmlspecialchars(t('location_type_label')) . '<select name="type" id="location-add-type-select">';
-    $content .= '<option value="">' . htmlspecialchars(t('location_type_none')) . '</option>';
-    foreach ($types as $typeKey => $typeConfig) {
-        $content .= '<option value="' . htmlspecialchars($typeKey) . '">' . htmlspecialchars(t($typeConfig['labelKey'])) . '</option>';
-    }
-    $content .= '</select></label>';
-    $content .= '<div id="location-add-bulk-fields" style="display:none;">';
-    $content .= '<label>' . htmlspecialchars(t('location_bulk_count_label')) . '<input type="number" name="child_count" min="0" value="0"></label>';
-    $content .= '<label>' . htmlspecialchars(t('location_bulk_naming_label')) . '<input type="text" name="naming_pattern" id="location-add-naming-pattern" value=""></label>';
-    $content .= '</div>';
     $content .= '<button type="submit">' . htmlspecialchars(t('location_add_button')) . '</button>';
     $content .= '</form></div></div>';
-
-    $bulkPatterns = [];
-    foreach ($types as $typeKey => $typeConfig) {
-        $bulkPatterns[$typeKey] = $typeConfig['bulkChildKey'] !== null ? t($typeConfig['bulkChildKey']) : null;
-    }
 
     $explorerLabelsJson = json_encode([
         'chevronIcon' => getActionIcon('chevron_right'),
@@ -661,11 +633,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         // reason: filled in client-side on every poll.
         'ldrawCurrent' => t('ldraw_set_render_current'),
         'ldrawWaiting' => t('ldraw_set_render_waiting'),
-        'typeLabels' => $typeLabels,
         'addIcon' => getActionIcon('add'),
         'newChildLabel' => t('locations_tree_new_child_label'),
         'addModalHeading' => t('location_add_modal_heading'),
-        'bulkPatterns' => $bulkPatterns,
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $content .= <<<SCRIPT
@@ -684,9 +654,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
   var addModalClose = document.getElementById('location-add-modal-close');
   var addModalHeading = document.getElementById('location-add-modal-heading');
   var addParentIdField = document.getElementById('location-add-parent-id');
-  var addTypeSelect = document.getElementById('location-add-type-select');
-  var addBulkFields = document.getElementById('location-add-bulk-fields');
-  var addNamingInput = document.getElementById('location-add-naming-pattern');
   if (!contentEl) {
     return;
   }
@@ -714,19 +681,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape' && addModal.style.display !== 'none') {
         closeAddModal();
-      }
-    });
-  }
-
-  if (addTypeSelect && addBulkFields && addNamingInput) {
-    addTypeSelect.addEventListener('change', function() {
-      var pattern = texts.bulkPatterns[addTypeSelect.value];
-      if (pattern) {
-        addBulkFields.style.display = 'block';
-        addNamingInput.value = pattern;
-      } else {
-        addBulkFields.style.display = 'none';
-        addNamingInput.value = '';
       }
     });
   }
@@ -969,13 +923,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     nameBtn.className = 'location-tree-name' + (isRoot ? ' location-tree-name-root' : '');
     nameBtn.textContent = node.name;
     row.appendChild(nameBtn);
-
-    if (node.location_type && texts.typeLabels[node.location_type]) {
-      var badge = document.createElement('span');
-      badge.className = 'location-type-badge';
-      badge.textContent = texts.typeLabels[node.location_type];
-      row.appendChild(badge);
-    }
 
     if (!isRoot) {
       var actions = document.createElement('span');

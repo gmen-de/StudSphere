@@ -743,10 +743,10 @@ function materializeOwnedSetMinifigs(PDO $pdo, int $ownedSetId, int $inventoryId
 
 /**
  * Creates a new owned-set instance: a dedicated storage_locations node
- * (location_type 'owned_set', never offered in the manual "add location"
- * form — see getLocationTypes()) as a child of $parentLocationId, the
- * owned_sets metadata row, and materializes the set's parts into that new
- * location's stock.
+ * (location_type 'owned_set', an internal marker never exposed to or
+ * chosen by a user) as a child of $parentLocationId, the owned_sets
+ * metadata row, and materializes the set's parts into that new location's
+ * stock.
  */
 function addOwnedSet(
     PDO $pdo,
