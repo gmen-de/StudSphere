@@ -1060,6 +1060,28 @@ button[type='submit'] {
   cursor: pointer;
 }
 
+.location-tree-row-new {
+  opacity: 0.75;
+}
+
+.location-tree-row-new:hover {
+  opacity: 1;
+}
+
+.location-tree-name-new {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-style: italic;
+  color: #2563eb;
+}
+
+.location-tree-name-new svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 .location-tree-row-actions {
   display: none;
   align-items: center;

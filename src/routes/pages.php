@@ -607,6 +607,37 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $content .= '</div>';
     $content .= '</div>';
 
+    // Reached via the "(Neu)" row every tree node gets (see buildRow() below)
+    // — one shared modal, not one per node; opening it just points the
+    // hidden parent_id field at whichever node was clicked. A plain form
+    // POST (action=add_location, unchanged since before this page's
+    // redesign), not fetch — the simplest way to have the tree reflect the
+    // new location afterward is the page reloading normally.
+    $content .= '<div class="modal-overlay" id="location-add-modal" style="display:none;">';
+    $content .= '<div class="modal-box"><button type="button" class="modal-close" id="location-add-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $content .= '<h2 id="location-add-modal-heading"></h2>';
+    $content .= '<form method="post" id="location-add-form">';
+    $content .= '<input type="hidden" name="action" value="add_location">';
+    $content .= '<input type="hidden" name="parent_id" id="location-add-parent-id" value="">';
+    $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" required></label>';
+    $content .= '<label>' . htmlspecialchars(t('location_type_label')) . '<select name="type" id="location-add-type-select">';
+    $content .= '<option value="">' . htmlspecialchars(t('location_type_none')) . '</option>';
+    foreach ($types as $typeKey => $typeConfig) {
+        $content .= '<option value="' . htmlspecialchars($typeKey) . '">' . htmlspecialchars(t($typeConfig['labelKey'])) . '</option>';
+    }
+    $content .= '</select></label>';
+    $content .= '<div id="location-add-bulk-fields" style="display:none;">';
+    $content .= '<label>' . htmlspecialchars(t('location_bulk_count_label')) . '<input type="number" name="child_count" min="0" value="0"></label>';
+    $content .= '<label>' . htmlspecialchars(t('location_bulk_naming_label')) . '<input type="text" name="naming_pattern" id="location-add-naming-pattern" value=""></label>';
+    $content .= '</div>';
+    $content .= '<button type="submit">' . htmlspecialchars(t('location_add_button')) . '</button>';
+    $content .= '</form></div></div>';
+
+    $bulkPatterns = [];
+    foreach ($types as $typeKey => $typeConfig) {
+        $bulkPatterns[$typeKey] = $typeConfig['bulkChildKey'] !== null ? t($typeConfig['bulkChildKey']) : null;
+    }
+
     $explorerLabelsJson = json_encode([
         'chevronIcon' => getActionIcon('chevron_right'),
         'editIcon' => getActionIcon('edit'),
@@ -631,6 +662,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         'ldrawCurrent' => t('ldraw_set_render_current'),
         'ldrawWaiting' => t('ldraw_set_render_waiting'),
         'typeLabels' => $typeLabels,
+        'addIcon' => getActionIcon('add'),
+        'newChildLabel' => t('locations_tree_new_child_label'),
+        'addModalHeading' => t('location_add_modal_heading'),
+        'bulkPatterns' => $bulkPatterns,
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $content .= <<<SCRIPT
@@ -645,8 +680,55 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
   var explorer = document.getElementById('location-explorer');
   var treePane = document.getElementById('location-explorer-tree-pane');
   var resizeHandle = document.getElementById('location-explorer-resize-handle');
+  var addModal = document.getElementById('location-add-modal');
+  var addModalClose = document.getElementById('location-add-modal-close');
+  var addModalHeading = document.getElementById('location-add-modal-heading');
+  var addParentIdField = document.getElementById('location-add-parent-id');
+  var addTypeSelect = document.getElementById('location-add-type-select');
+  var addBulkFields = document.getElementById('location-add-bulk-fields');
+  var addNamingInput = document.getElementById('location-add-naming-pattern');
   if (!contentEl) {
     return;
+  }
+
+  // Declared here (not inside the if below) so buildNewChildRow() can call
+  // it regardless of scope order — stays a no-op if the modal's own markup
+  // is somehow missing from the page.
+  var openAddModal = function() {};
+
+  if (addModal && addModalClose && addModalHeading && addParentIdField) {
+    var closeAddModal = function() {
+      addModal.style.display = 'none';
+    };
+    openAddModal = function(parentId, parentName) {
+      addParentIdField.value = parentId === null ? '' : parentId;
+      addModalHeading.textContent = texts.addModalHeading.replace('{parent}', parentName);
+      addModal.style.display = 'flex';
+    };
+    addModalClose.addEventListener('click', closeAddModal);
+    addModal.addEventListener('click', function(e) {
+      if (e.target === addModal) {
+        closeAddModal();
+      }
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && addModal.style.display !== 'none') {
+        closeAddModal();
+      }
+    });
+  }
+
+  if (addTypeSelect && addBulkFields && addNamingInput) {
+    addTypeSelect.addEventListener('change', function() {
+      var pattern = texts.bulkPatterns[addTypeSelect.value];
+      if (pattern) {
+        addBulkFields.style.display = 'block';
+        addNamingInput.value = pattern;
+      } else {
+        addBulkFields.style.display = 'none';
+        addNamingInput.value = '';
+      }
+    });
   }
 
   var selectedRow = null;
@@ -813,6 +895,30 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       });
   }
 
+  function buildNewChildRow(parentId, parentName, depth) {
+    var row = document.createElement('div');
+    row.className = 'location-tree-row location-tree-row-new';
+    row.style.paddingLeft = (depth * 1.25 + 0.25) + 'rem';
+
+    var spacer = document.createElement('span');
+    spacer.className = 'location-tree-arrow location-tree-arrow-empty';
+    row.appendChild(spacer);
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'location-tree-name location-tree-name-new';
+    btn.innerHTML = texts.addIcon;
+    var label = document.createElement('span');
+    label.textContent = texts.newChildLabel;
+    btn.appendChild(label);
+    btn.addEventListener('click', function() {
+      openAddModal(parentId, parentName);
+    });
+    row.appendChild(btn);
+
+    return row;
+  }
+
   function buildRow(node, depth) {
     var wrap = document.createElement('div');
     wrap.className = 'location-tree-node';
@@ -825,20 +931,15 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     // row — see its construction in src/routes/pages.php) is a pure grouping
     // label: no edit/delete (nothing to edit), and its name toggles expand
     // instead of loading content, since there's no location_content to load
-    // for it.
+    // for it. Every node — root included — always has at least one child now:
+    // the synthetic "(Neu)" row appended below, so the arrow is always live.
     var isRoot = node.id === null;
-    var hasChildren = node.children && node.children.length > 0;
 
     var arrow = document.createElement('button');
     arrow.type = 'button';
-    arrow.className = 'location-tree-arrow' + (hasChildren ? '' : ' location-tree-arrow-empty');
-    if (hasChildren) {
-      arrow.innerHTML = texts.chevronIcon;
-      arrow.setAttribute('aria-label', texts.expandLabel);
-    } else {
-      arrow.disabled = true;
-      arrow.tabIndex = -1;
-    }
+    arrow.className = 'location-tree-arrow';
+    arrow.innerHTML = texts.chevronIcon;
+    arrow.setAttribute('aria-label', texts.expandLabel);
     row.appendChild(arrow);
 
     var nameBtn = document.createElement('button');
@@ -886,24 +987,19 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
 
     wrap.appendChild(row);
 
-    var childrenWrap = null;
-    if (hasChildren) {
-      childrenWrap = document.createElement('div');
-      childrenWrap.className = 'location-tree-children';
-      childrenWrap.hidden = !isRoot;
-      if (isRoot) {
-        arrow.classList.add('location-tree-arrow-open');
-      }
-      node.children.forEach(function(child) {
-        childrenWrap.appendChild(buildRow(child, depth + 1));
-      });
-      wrap.appendChild(childrenWrap);
+    var childrenWrap = document.createElement('div');
+    childrenWrap.className = 'location-tree-children';
+    childrenWrap.hidden = !isRoot;
+    if (isRoot) {
+      arrow.classList.add('location-tree-arrow-open');
     }
+    (node.children || []).forEach(function(child) {
+      childrenWrap.appendChild(buildRow(child, depth + 1));
+    });
+    childrenWrap.appendChild(buildNewChildRow(node.id, node.name, depth + 1));
+    wrap.appendChild(childrenWrap);
 
     function toggleExpand() {
-      if (!childrenWrap) {
-        return;
-      }
       childrenWrap.hidden = !childrenWrap.hidden;
       arrow.classList.toggle('location-tree-arrow-open', !childrenWrap.hidden);
     }
