@@ -392,6 +392,81 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_children') {
     exit;
 }
 
+// The location Explorer's right pane (src/routes/pages.php's ?page=locations,
+// see renderLocationExplorer() there) — everything stored anywhere under the
+// clicked location, recursively, grouped for display.
+if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
+    header('Content-Type: application/json');
+    $locationId = (int) ($_GET['location_id'] ?? 0);
+    if (getStorageLocation($locationId) === null) {
+        http_response_code(404);
+        echo json_encode(['error' => t('location_detail_not_found')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $content = getLocationContentRecursive($pdo, $locationId);
+
+    $allPartIds = [];
+    foreach ($content['partsByCategory'] as $parts) {
+        foreach ($parts as $part) {
+            $allPartIds[] = $part['part_id'];
+        }
+    }
+    $thumbnails = getPartThumbnails($pdo, array_values(array_unique($allPartIds)));
+
+    $categories = [];
+    foreach ($content['partsByCategory'] as $categoryName => $parts) {
+        foreach ($parts as &$part) {
+            $part['thumbnail'] = $thumbnails[$part['part_id']] ?? null;
+        }
+        unset($part);
+        $categories[] = [
+            'name' => $categoryName !== '' ? $categoryName : t('location_content_uncategorized'),
+            'parts' => $parts,
+        ];
+    }
+
+    echo json_encode([
+        'sets' => $content['sets'],
+        'categories' => $categories,
+        'minifigs' => $content['minifigs'],
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// Typeahead for the "add loose minifig" form in the location Explorer's
+// right pane — reuses searchMinifigs() (the same catalog search the minifigs
+// browse page uses) with no theme filter and a small page size, since this
+// only needs a handful of matches, not a full paginated result set.
+if (isset($_GET['action']) && $_GET['action'] === 'minifig_search') {
+    header('Content-Type: application/json');
+    $query = trim((string) ($_GET['q'] ?? ''));
+    $results = $query !== '' ? searchMinifigs($pdo, $query, [], 1, 15) : ['items' => []];
+    echo json_encode(['items' => $results['items']], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_minifig_stock') {
+    header('Content-Type: application/json');
+    try {
+        $locationId = (int) ($_POST['location_id'] ?? 0);
+        $minifigId = (int) ($_POST['minifig_id'] ?? 0);
+        $conditionType = ($_POST['condition_type'] ?? '') === 'new' ? 'new' : 'used';
+        $quantity = (int) ($_POST['quantity'] ?? 0);
+
+        if (getStorageLocation($locationId) === null || $minifigId <= 0 || $quantity <= 0) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        $resultingQuantity = addMinifigStock($locationId, $minifigId, $conditionType, $quantity);
+        echo json_encode(['success' => true, 'resultingQuantity' => $resultingQuantity], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
     header('Content-Type: application/json');
     $partId = (int) ($_GET['part_id'] ?? 0);

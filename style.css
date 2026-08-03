@@ -787,29 +787,6 @@ button[type='submit'] {
   font-weight: 600;
 }
 
-.location-tree,
-.location-tree ul {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 1.35rem;
-}
-
-.location-tree {
-  padding-left: 0;
-}
-
-.location-tree li {
-  padding: 0.4rem 0;
-  border-left: 1px dashed #cbd5e1;
-  padding-left: 1rem;
-  margin-left: 0.1rem;
-}
-
-.location-name {
-  font-weight: 600;
-  color: #0f172a;
-}
-
 .location-type-badge {
   display: inline-block;
   background: #eff6ff;
@@ -841,10 +818,6 @@ button[type='submit'] {
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
   margin-left: 0.35rem;
-}
-
-.location-delete-form {
-  display: inline;
 }
 
 .location-detail-path {
@@ -920,6 +893,333 @@ button[type='submit'] {
 .location-detail-card-meta {
   font-size: 0.75rem;
   color: #94a3b8;
+}
+
+.location-add-form-details {
+  margin-bottom: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.85rem;
+  padding: 0.75rem 1rem;
+  background: #ffffff;
+}
+
+.location-add-form-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.location-add-form-details[open] summary {
+  margin-bottom: 0.75rem;
+}
+
+/* Windows-Explorer-style split view: a fixed-height two-pane layout (tree on
+   the left, selected location's content on the right) rather than part of
+   the normal page scroll — a resizable divider between them (see
+   .location-explorer-resize-handle) is only worth having if both panes keep
+   their own independent scroll region instead of the whole page growing. */
+.location-explorer {
+  display: flex;
+  height: 32rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.location-explorer-tree-pane {
+  width: 40%;
+  min-width: 12rem;
+  max-width: 78%;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 0.75rem;
+  border-right: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.location-explorer-resize-handle {
+  width: 0;
+  position: relative;
+  flex-shrink: 0;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  background: transparent;
+}
+
+.location-explorer-resize-handle svg {
+  width: 22px;
+  height: 22px;
+  position: relative;
+  z-index: 1;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.3);
+}
+
+.location-explorer-resize-handle:hover,
+.location-explorer-resize-handle:focus-visible {
+  color: #2563eb;
+}
+
+.location-explorer-content-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+}
+
+.location-tree-node {
+  display: flex;
+  flex-direction: column;
+}
+
+.location-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.location-tree-row:hover {
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.location-tree-row-selected {
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.location-tree-arrow {
+  width: 1.4rem;
+  height: 1.4rem;
+  flex-shrink: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.35rem;
+  transition: transform 0.12s ease;
+}
+
+.location-tree-arrow svg {
+  width: 14px;
+  height: 14px;
+}
+
+.location-tree-arrow:hover {
+  background: rgba(100, 116, 139, 0.12);
+}
+
+.location-tree-arrow-empty {
+  visibility: hidden;
+  cursor: default;
+}
+
+.location-tree-arrow-open {
+  transform: rotate(90deg);
+}
+
+.location-tree-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-tree-row-actions {
+  display: none;
+  align-items: center;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+
+.location-tree-row:hover .location-tree-row-actions,
+.location-tree-row:focus-within .location-tree-row-actions {
+  display: flex;
+}
+
+.location-tree-edit,
+.location-tree-delete {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.35rem;
+  background: transparent;
+  border: none;
+  color: #64748b;
+}
+
+.location-tree-edit svg,
+.location-tree-delete svg {
+  width: 14px;
+  height: 14px;
+}
+
+.location-tree-edit:hover {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+.location-tree-delete:hover {
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+}
+
+.location-tree-children {
+  display: flex;
+  flex-direction: column;
+}
+
+.location-content-group {
+  margin-bottom: 1.5rem;
+}
+
+.location-content-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.location-content-group-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.location-add-minifig {
+  position: relative;
+}
+
+.location-add-minifig-toggle {
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.1);
+  border: none;
+  color: #2563eb;
+}
+
+.location-add-minifig-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.location-add-minifig-toggle:hover {
+  background: rgba(37, 99, 235, 0.2);
+}
+
+.location-add-minifig-panel {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 20;
+  width: 16rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.75rem;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
+}
+
+.location-add-minifig-panel label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.location-add-minifig-panel input[type='number'] {
+  width: 5rem;
+}
+
+.location-add-minifig-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.location-add-minifig-result {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.4rem;
+  font-size: 0.8rem;
+  color: #1e293b;
+}
+
+.location-add-minifig-result:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.location-add-minifig-selected {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1e293b;
+  min-height: 1.1em;
+}
+
+.location-add-minifig-panel button[type='button']:last-of-type {
+  width: 100%;
+}
+
+.location-add-minifig-message {
+  font-size: 0.78rem;
+  color: #dc2626;
+  min-height: 1.1em;
+}
+
+@media (max-width: 800px) {
+  .location-explorer {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .location-explorer-tree-pane {
+    width: 100% !important;
+    max-width: none;
+    border-right: none;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+    max-height: 16rem;
+  }
+
+  .location-explorer-resize-handle {
+    display: none;
+  }
+
+  .location-explorer-content-pane {
+    max-height: 24rem;
+  }
 }
 
 .link-button {

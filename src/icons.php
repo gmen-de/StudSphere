@@ -77,6 +77,13 @@ function getActionIcon(string $key): string
         'download' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>',
         'pick_list' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="12" height="16" rx="1.5"/><path d="M7 8h6"/><path d="M7 11.5h6"/><path d="M7 15h3.5"/><circle cx="16.5" cy="16.5" r="3"/><path d="M18.8 18.8L21 21"/></svg>',
         'add' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
+        // The location Explorer's tree expand/collapse arrow (src/routes/pages.php)
+        // — CSS rotates it 90° when expanded rather than swapping in a
+        // second "chevron-down" icon.
+        'chevron_right' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+        // The location Explorer's column-resize handle: a circle with a
+        // left arrow and a right arrow separated by a vertical divider.
+        'resize_handle' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M10.5 8l-3 4 3 4"/><path d="M12 7v10"/><path d="M13.5 8l3 4-3 4"/></svg>',
     ];
 
     return $icons[$key] ?? '';

@@ -442,6 +442,127 @@ function getLocationStock(int $locationId): array
 }
 
 /**
+ * All descendant location ids of $locationId, including itself and (unlike
+ * getStorageLocationTree()) owned-set instance locations too — content
+ * aggregation (see getLocationContentRecursive()) needs to count e.g. spare
+ * parts sitting inside a set's own auto-generated sub-location as part of
+ * that set's parent location's content, even though that sub-location isn't
+ * shown as its own node in the navigable tree. A per-level walk, not a
+ * recursive CTE, for the same shared-hosting MariaDB-version reason as
+ * getStorageLocationPath().
+ *
+ * @return int[]
+ */
+function getLocationSubtreeIds(int $locationId): array
+{
+    $pdo = getPDO();
+    $ids = [$locationId];
+    $frontier = [$locationId];
+    $guard = 0;
+    while (!empty($frontier) && $guard++ < 50) {
+        $placeholders = implode(',', array_fill(0, count($frontier), '?'));
+        $stmt = $pdo->prepare("SELECT id FROM storage_locations WHERE parent_id IN ($placeholders)");
+        $stmt->execute($frontier);
+        $frontier = array_map('intval', array_column($stmt->fetchAll(), 'id'));
+        $ids = array_merge($ids, $frontier);
+    }
+    return $ids;
+}
+
+/**
+ * Everything stored anywhere under $locationId — itself plus every
+ * descendant location, recursively (see getLocationSubtreeIds()) — grouped
+ * into the three buckets the location Explorer's right pane renders as
+ * separate sections. Parts are further grouped by their top-level category
+ * (category_name is null for a part with no category at all; the caller
+ * decides the fallback label for that group).
+ *
+ * @return array{sets: array, partsByCategory: array<string, array>, minifigs: array}
+ */
+function getLocationContentRecursive(PDO $pdo, int $locationId): array
+{
+    $ids = getLocationSubtreeIds($locationId);
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+    $setsStmt = $pdo->prepare(
+        "SELECT os.id, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
+         FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id
+         WHERE os.location_id IN ($placeholders)
+         ORDER BY s.name"
+    );
+    $setsStmt->execute($ids);
+    $sets = $setsStmt->fetchAll();
+    foreach ($sets as &$set) {
+        $set['id'] = (int) $set['id'];
+    }
+    unset($set);
+
+    $partsStmt = $pdo->prepare(
+        "SELECT si.part_id, p.part_num, p.name AS part_name, pc.name AS category_name,
+                c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb,
+                si.condition_type, si.quantity
+         FROM storage_items si
+         INNER JOIN parts p ON p.id = si.part_id
+         LEFT JOIN part_categories pc ON pc.part_cat_id = p.part_category
+         LEFT JOIN colors c ON c.id = si.color_id
+         WHERE si.location_id IN ($placeholders) AND si.quantity > 0
+         ORDER BY pc.name IS NULL, pc.name, p.part_num"
+    );
+    $partsStmt->execute($ids);
+    $partsByCategory = [];
+    foreach ($partsStmt->fetchAll() as $row) {
+        $row['part_id'] = (int) $row['part_id'];
+        $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
+        $row['quantity'] = (int) $row['quantity'];
+        $category = $row['category_name']; // null stays null; caller supplies the fallback label
+        $partsByCategory[$category ?? ''][] = $row;
+    }
+
+    $minifigsStmt = $pdo->prepare(
+        "SELECT msi.minifig_id, m.fig_num, m.name AS minifig_name, m.local_image_path AS thumbnail,
+                msi.condition_type, msi.quantity
+         FROM minifig_storage_items msi
+         INNER JOIN minifigs m ON m.id = msi.minifig_id
+         WHERE msi.location_id IN ($placeholders) AND msi.quantity > 0
+         ORDER BY m.name"
+    );
+    $minifigsStmt->execute($ids);
+    $minifigs = $minifigsStmt->fetchAll();
+    foreach ($minifigs as &$fig) {
+        $fig['minifig_id'] = (int) $fig['minifig_id'];
+        $fig['quantity'] = (int) $fig['quantity'];
+    }
+    unset($fig);
+
+    return ['sets' => $sets, 'partsByCategory' => $partsByCategory, 'minifigs' => $minifigs];
+}
+
+/**
+ * Adds quantity to a specific location/minifig/condition combination
+ * (upsert on the existing UNIQUE KEY) — the loose-minifig counterpart to
+ * addStorageStock(). No storage_movements audit row: that log's schema is
+ * part-specific (part_id/color_id, see its CONSTRAINT fk_movement_part), and
+ * loose-minifig storage is new enough that extending it isn't warranted yet.
+ */
+function addMinifigStock(int $locationId, int $minifigId, string $conditionType, int $quantity): int
+{
+    $pdo = getPDO();
+    $stmt = $pdo->prepare(
+        'INSERT INTO minifig_storage_items (location_id, minifig_id, condition_type, quantity)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)'
+    );
+    $stmt->execute([$locationId, $minifigId, $conditionType, $quantity]);
+
+    $resultStmt = $pdo->prepare(
+        'SELECT quantity FROM minifig_storage_items WHERE location_id = ? AND minifig_id = ? AND condition_type = ?'
+    );
+    $resultStmt->execute([$locationId, $minifigId, $conditionType]);
+    return (int) $resultStmt->fetchColumn();
+}
+
+/**
  * Flat (id => indented label) list for populating a parent-location <select>.
  */
 function getStorageLocationOptions(): array

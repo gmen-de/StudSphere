@@ -191,6 +191,19 @@ CREATE TABLE IF NOT EXISTS storage_items (
     UNIQUE KEY storage_item_unique (location_id, part_id, color_id, condition_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS minifig_storage_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    location_id INT NOT NULL,
+    minifig_id INT NOT NULL,
+    condition_type ENUM('new','used') NOT NULL DEFAULT 'used',
+    quantity INT NOT NULL DEFAULT 0,
+    damaged_quantity INT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_minifigstorageitem_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_minifigstorageitem_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
+    UNIQUE KEY minifig_storage_item_unique (location_id, minifig_id, condition_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS storage_movements (
     id INT AUTO_INCREMENT PRIMARY KEY,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

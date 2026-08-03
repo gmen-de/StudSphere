@@ -535,19 +535,22 @@ SCRIPT;
 if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : null;
     $editLocation = $editId !== null ? getStorageLocation($editId) : null;
+    $isEdit = $editLocation !== null;
+    $locationOptions = getStorageLocationOptions();
+    $types = getLocationTypes();
 
     $content = '<h1>' . htmlspecialchars(t('locations_title')) . '</h1>';
-    $content .= '<p><a href="' . $_SERVER['PHP_SELF'] . '">' . htmlspecialchars(t('settings_back')) . '</a></p>';
     $content .= '<p>' . htmlspecialchars(t('locations_help')) . '</p>';
     if ($locationMessage !== '') {
         $content .= '<p><strong>' . htmlspecialchars($locationMessage) . '</strong></p>';
     }
 
-    $locationOptions = getStorageLocationOptions();
-    $types = getLocationTypes();
-    $isEdit = $editLocation !== null;
-
-    $content .= '<section class="card"><h2>' . htmlspecialchars($isEdit ? t('location_edit_title') : t('location_add_title')) . '</h2>';
+    // Add/edit form: unchanged submit targets (rename_location/add_location,
+    // same as before this page's redesign) — just repositioned into the tree
+    // pane, and collapsed by default via <details> so it doesn't dominate a
+    // pane that's 40% width by default. Forced open while editing.
+    $content .= '<details class="location-add-form-details"' . ($isEdit ? ' open' : '') . '>';
+    $content .= '<summary>' . htmlspecialchars($isEdit ? t('location_edit_title') : t('locations_add_toggle')) . '</summary>';
     $content .= '<form method="post" id="location-form">';
     if ($isEdit) {
         $content .= '<input type="hidden" name="action" value="rename_location">';
@@ -582,7 +585,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     if ($isEdit) {
         $content .= ' <a href="?page=locations">' . htmlspecialchars(t('location_cancel_edit')) . '</a>';
     }
-    $content .= '</form></section>';
+    $content .= '</form></details>';
 
     if (!$isEdit) {
         $bulkPatterns = [];
@@ -617,35 +620,515 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
 SCRIPT;
     }
 
-    $content .= '<section class="card"><h2>' . htmlspecialchars(t('locations_tree_title')) . '</h2>';
+    // Explorer split view: left pane is a client-built tree (from the JSON
+    // below, see getStorageLocationTree() — already excludes owned-set
+    // instance locations, same as before this redesign) with expand/collapse
+    // entirely in the browser, no round trip; right pane is loaded on click
+    // via action=location_content, since a location's full recursive content
+    // (see getLocationContentRecursive()) isn't worth shipping for every
+    // location up front.
     $tree = getStorageLocationTree();
-    if (empty($tree)) {
-        $content .= '<p>' . htmlspecialchars(t('locations_tree_empty')) . '</p>';
-    } else {
-        $renderNode = function (array $nodes) use (&$renderNode, $types): string {
-            $html = '<ul class="location-tree">';
-            foreach ($nodes as $node) {
-                $typeLabel = $node['location_type'] !== null && isset($types[$node['location_type']])
-                    ? t($types[$node['location_type']]['labelKey'])
-                    : '';
-                $html .= '<li>';
-                $html .= '<span class="location-name">' . htmlspecialchars($node['name']) . '</span>';
-                if ($typeLabel !== '') {
-                    $html .= ' <span class="location-type-badge">' . htmlspecialchars($typeLabel) . '</span>';
-                }
-                $html .= ' <a href="?page=locations&edit=' . (int) $node['id'] . '">' . htmlspecialchars(t('location_edit_link')) . '</a>';
-                $html .= ' <form method="post" class="location-delete-form"><input type="hidden" name="action" value="delete_location"><input type="hidden" name="location_id" value="' . (int) $node['id'] . '"><button type="submit" class="link-button">' . htmlspecialchars(t('location_delete_link')) . '</button></form>';
-                if (!empty($node['children'])) {
-                    $html .= $renderNode($node['children']);
-                }
-                $html .= '</li>';
-            }
-            $html .= '</ul>';
-            return $html;
-        };
-        $content .= $renderNode($tree);
+    $treeJson = json_encode($tree, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $typeLabels = [];
+    foreach ($types as $typeKey => $typeConfig) {
+        $typeLabels[$typeKey] = t($typeConfig['labelKey']);
     }
-    $content .= '</section>';
+
+    $content .= '<div class="location-explorer" id="location-explorer">';
+    $content .= '<div class="location-explorer-tree-pane" id="location-explorer-tree-pane">';
+    if (empty($tree)) {
+        $content .= '<p class="hint">' . htmlspecialchars(t('locations_tree_empty')) . '</p>';
+    } else {
+        $content .= '<div class="location-tree-explorer" id="location-tree-explorer"></div>';
+    }
+    $content .= '<form method="post" id="location-delete-form" style="display:none;">';
+    $content .= '<input type="hidden" name="action" value="delete_location">';
+    $content .= '<input type="hidden" name="location_id" id="location-delete-form-id" value="">';
+    $content .= '</form>';
+    $content .= '</div>';
+
+    $content .= '<div class="location-explorer-resize-handle" id="location-explorer-resize-handle" role="separator" aria-orientation="vertical" tabindex="0">' . getActionIcon('resize_handle') . '</div>';
+
+    $content .= '<div class="location-explorer-content-pane" id="location-explorer-content-pane">';
+    $content .= '<div id="location-explorer-content"><p class="hint">' . htmlspecialchars(t('location_explorer_select_hint')) . '</p></div>';
+    $content .= '</div>';
+    $content .= '</div>';
+
+    $explorerLabelsJson = json_encode([
+        'chevronIcon' => getActionIcon('chevron_right'),
+        'editIcon' => getActionIcon('edit'),
+        'deleteIcon' => getActionIcon('delete'),
+        'addIcon' => getActionIcon('add'),
+        'brickIcon' => getNavIcon('bricks'),
+        'minifigIcon' => getNavIcon('minifigs'),
+        'expandLabel' => t('locations_tree_expand_label'),
+        'editLabel' => t('location_edit_link'),
+        'deleteLabel' => t('location_delete_link'),
+        'deleteConfirm' => t('location_delete_confirm'),
+        'loading' => t('location_explorer_loading'),
+        'errorRetry' => t('import_error_retry'),
+        'contentEmpty' => t('location_detail_empty'),
+        'groupSets' => t('location_content_group_sets'),
+        'groupMinifigs' => t('location_content_group_minifigs'),
+        'minifigsEmpty' => t('location_content_minifigs_empty'),
+        'addMinifigLabel' => t('location_add_minifig_label'),
+        'minifigSearchPlaceholder' => t('location_add_minifig_search_placeholder'),
+        'quantityLabel' => t('add_stock_quantity_label'),
+        'conditionLabel' => t('add_stock_condition_label'),
+        'conditionNew' => t('condition_new'),
+        'conditionUsed' => t('condition_used'),
+        'addButton' => t('add_stock_button'),
+        'typeLabels' => $typeLabels,
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $content .= <<<SCRIPT
+<script>
+(function(){
+  var tree = $treeJson;
+  var texts = $explorerLabelsJson;
+  var treeContainer = document.getElementById('location-tree-explorer');
+  var contentEl = document.getElementById('location-explorer-content');
+  var deleteForm = document.getElementById('location-delete-form');
+  var deleteFormId = document.getElementById('location-delete-form-id');
+  var explorer = document.getElementById('location-explorer');
+  var treePane = document.getElementById('location-explorer-tree-pane');
+  var resizeHandle = document.getElementById('location-explorer-resize-handle');
+  if (!contentEl) {
+    return;
+  }
+
+  var selectedRow = null;
+
+  function selectLocation(id, name, row) {
+    if (selectedRow) {
+      selectedRow.classList.remove('location-tree-row-selected');
+    }
+    row.classList.add('location-tree-row-selected');
+    selectedRow = row;
+    loadContent(id, name);
+  }
+
+  function buildGroup(title, bodyEl, extraHeaderEl) {
+    var section = document.createElement('section');
+    section.className = 'location-content-group';
+    var header = document.createElement('div');
+    header.className = 'location-content-group-header';
+    var h = document.createElement('h3');
+    h.textContent = title;
+    header.appendChild(h);
+    if (extraHeaderEl) {
+      header.appendChild(extraHeaderEl);
+    }
+    section.appendChild(header);
+    section.appendChild(bodyEl);
+    return section;
+  }
+
+  function buildSetsList(sets) {
+    var list = document.createElement('ul');
+    list.className = 'dashboard-set-list';
+    sets.forEach(function(set) {
+      var li = document.createElement('li');
+      var a = document.createElement('a');
+      a.href = '?page=owned_set_detail&id=' + set.id;
+      if (set.thumbnail) {
+        var img = document.createElement('img');
+        img.src = set.thumbnail;
+        img.alt = '';
+        img.className = 'dashboard-set-thumb';
+        a.appendChild(img);
+      }
+      var nameSpan = document.createElement('span');
+      nameSpan.className = 'dashboard-set-name';
+      nameSpan.textContent = set.name;
+      a.appendChild(nameSpan);
+      var small = document.createElement('small');
+      small.textContent = set.rebrickable_set_num;
+      a.appendChild(small);
+      li.appendChild(a);
+      list.appendChild(li);
+    });
+    return list;
+  }
+
+  function buildPartsGrid(parts) {
+    var grid = document.createElement('div');
+    grid.className = 'location-detail-grid';
+    parts.forEach(function(item) {
+      var card = document.createElement('div');
+      card.className = 'location-detail-card';
+
+      var thumb = document.createElement('span');
+      thumb.className = 'location-detail-card-thumb';
+      thumb.innerHTML = item.thumbnail ? ('<img src="' + item.thumbnail + '" alt="">') : texts.brickIcon;
+      card.appendChild(thumb);
+
+      var swatch = document.createElement('span');
+      swatch.className = 'location-detail-card-swatch';
+      swatch.style.backgroundColor = '#' + (item.color_rgb || 'cccccc');
+      card.appendChild(swatch);
+
+      var num = document.createElement('span');
+      num.className = 'location-detail-card-num';
+      num.textContent = item.part_num;
+      card.appendChild(num);
+
+      var name = document.createElement('span');
+      name.className = 'location-detail-card-name';
+      name.title = item.part_name;
+      name.textContent = item.part_name;
+      card.appendChild(name);
+
+      var meta = document.createElement('span');
+      meta.className = 'location-detail-card-meta';
+      var condText = item.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
+      meta.textContent = (item.color_name || '') + ' \\u00b7 ' + condText + ' \\u00b7 ' + item.quantity + 'x';
+      card.appendChild(meta);
+
+      grid.appendChild(card);
+    });
+    return grid;
+  }
+
+  function buildMinifigsGrid(minifigs) {
+    var grid = document.createElement('div');
+    grid.className = 'location-detail-grid';
+    minifigs.forEach(function(fig) {
+      var card = document.createElement('div');
+      card.className = 'location-detail-card';
+
+      var thumb = document.createElement('span');
+      thumb.className = 'location-detail-card-thumb';
+      thumb.innerHTML = fig.thumbnail ? ('<img src="' + fig.thumbnail + '" alt="">') : texts.minifigIcon;
+      card.appendChild(thumb);
+
+      var num = document.createElement('span');
+      num.className = 'location-detail-card-num';
+      num.textContent = fig.fig_num;
+      card.appendChild(num);
+
+      var name = document.createElement('span');
+      name.className = 'location-detail-card-name';
+      var figName = fig.minifig_name || fig.fig_num;
+      name.title = figName;
+      name.textContent = figName;
+      card.appendChild(name);
+
+      var meta = document.createElement('span');
+      meta.className = 'location-detail-card-meta';
+      var condText = fig.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
+      meta.textContent = condText + ' \\u00b7 ' + fig.quantity + 'x';
+      card.appendChild(meta);
+
+      grid.appendChild(card);
+    });
+    return grid;
+  }
+
+  function buildAddMinifigControl(locationId, onAdded) {
+    var wrap = document.createElement('span');
+    wrap.className = 'location-add-minifig';
+
+    var toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'location-add-minifig-toggle';
+    toggle.innerHTML = texts.addIcon;
+    toggle.title = texts.addMinifigLabel;
+    toggle.setAttribute('aria-label', texts.addMinifigLabel);
+    wrap.appendChild(toggle);
+
+    var panel = document.createElement('div');
+    panel.className = 'location-add-minifig-panel';
+    panel.hidden = true;
+
+    var searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = texts.minifigSearchPlaceholder;
+    panel.appendChild(searchInput);
+
+    var results = document.createElement('div');
+    results.className = 'location-add-minifig-results';
+    panel.appendChild(results);
+
+    var selectedId = null;
+    var selectedLabel = document.createElement('div');
+    selectedLabel.className = 'location-add-minifig-selected';
+    panel.appendChild(selectedLabel);
+
+    var qtyLabel = document.createElement('label');
+    qtyLabel.textContent = texts.quantityLabel;
+    var qtyInput = document.createElement('input');
+    qtyInput.type = 'number';
+    qtyInput.min = '1';
+    qtyInput.value = '1';
+    qtyLabel.appendChild(qtyInput);
+    panel.appendChild(qtyLabel);
+
+    var condLabel = document.createElement('label');
+    condLabel.textContent = texts.conditionLabel;
+    var condSelect = document.createElement('select');
+    var optUsed = document.createElement('option');
+    optUsed.value = 'used';
+    optUsed.textContent = texts.conditionUsed;
+    optUsed.selected = true;
+    var optNew = document.createElement('option');
+    optNew.value = 'new';
+    optNew.textContent = texts.conditionNew;
+    condSelect.appendChild(optUsed);
+    condSelect.appendChild(optNew);
+    condLabel.appendChild(condSelect);
+    panel.appendChild(condLabel);
+
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.textContent = texts.addButton;
+    submitBtn.disabled = true;
+    panel.appendChild(submitBtn);
+
+    var msg = document.createElement('div');
+    msg.className = 'location-add-minifig-message';
+    panel.appendChild(msg);
+
+    var searchTimer = null;
+    searchInput.addEventListener('input', function() {
+      selectedId = null;
+      submitBtn.disabled = true;
+      selectedLabel.textContent = '';
+      window.clearTimeout(searchTimer);
+      var q = searchInput.value.trim();
+      results.innerHTML = '';
+      if (q === '') {
+        return;
+      }
+      searchTimer = window.setTimeout(function() {
+        fetch('?action=minifig_search&q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            results.innerHTML = '';
+            (data.items || []).forEach(function(fig) {
+              var item = document.createElement('button');
+              item.type = 'button';
+              item.className = 'location-add-minifig-result';
+              item.textContent = (fig.name || fig.fig_num) + ' (' + fig.fig_num + ')';
+              item.addEventListener('click', function() {
+                selectedId = fig.id;
+                selectedLabel.textContent = item.textContent;
+                results.innerHTML = '';
+                searchInput.value = '';
+                submitBtn.disabled = false;
+              });
+              results.appendChild(item);
+            });
+          });
+      }, 300);
+    });
+
+    submitBtn.addEventListener('click', function() {
+      if (!selectedId) {
+        return;
+      }
+      submitBtn.disabled = true;
+      msg.textContent = '';
+      var formData = new FormData();
+      formData.set('action', 'add_minifig_stock');
+      formData.set('location_id', locationId);
+      formData.set('minifig_id', selectedId);
+      formData.set('quantity', qtyInput.value);
+      formData.set('condition_type', condSelect.value);
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            panel.hidden = true;
+            onAdded();
+          } else {
+            msg.textContent = res.message || texts.errorRetry;
+            submitBtn.disabled = false;
+          }
+        })
+        .catch(function() {
+          msg.textContent = texts.errorRetry;
+          submitBtn.disabled = false;
+        });
+    });
+
+    toggle.addEventListener('click', function(e) {
+      e.stopPropagation();
+      panel.hidden = !panel.hidden;
+    });
+    panel.addEventListener('click', function(e) {
+      e.stopPropagation();
+    });
+
+    wrap.appendChild(panel);
+    return wrap;
+  }
+
+  function renderContent(locationId, name, data) {
+    contentEl.innerHTML = '';
+    var heading = document.createElement('h2');
+    heading.textContent = name;
+    contentEl.appendChild(heading);
+
+    if (data.sets.length > 0) {
+      contentEl.appendChild(buildGroup(texts.groupSets, buildSetsList(data.sets)));
+    }
+
+    data.categories.forEach(function(cat) {
+      contentEl.appendChild(buildGroup(cat.name, buildPartsGrid(cat.parts)));
+    });
+
+    var addMinifigControl = buildAddMinifigControl(locationId, function() {
+      loadContent(locationId, name);
+    });
+    var minifigsBody;
+    if (data.minifigs.length > 0) {
+      minifigsBody = buildMinifigsGrid(data.minifigs);
+    } else {
+      minifigsBody = document.createElement('p');
+      minifigsBody.className = 'hint';
+      minifigsBody.textContent = texts.minifigsEmpty;
+    }
+    contentEl.appendChild(buildGroup(texts.groupMinifigs, minifigsBody, addMinifigControl));
+  }
+
+  function loadContent(id, name) {
+    contentEl.innerHTML = '<p class="hint">' + texts.loading + '</p>';
+    fetch('?action=location_content&location_id=' + id, { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) { renderContent(id, name, data); })
+      .catch(function() {
+        contentEl.innerHTML = '<p class="hint">' + texts.errorRetry + '</p>';
+      });
+  }
+
+  function buildRow(node, depth) {
+    var wrap = document.createElement('div');
+    wrap.className = 'location-tree-node';
+
+    var row = document.createElement('div');
+    row.className = 'location-tree-row';
+    row.style.paddingLeft = (depth * 1.25 + 0.25) + 'rem';
+
+    var hasChildren = node.children && node.children.length > 0;
+
+    var arrow = document.createElement('button');
+    arrow.type = 'button';
+    arrow.className = 'location-tree-arrow' + (hasChildren ? '' : ' location-tree-arrow-empty');
+    if (hasChildren) {
+      arrow.innerHTML = texts.chevronIcon;
+      arrow.setAttribute('aria-label', texts.expandLabel);
+    } else {
+      arrow.disabled = true;
+      arrow.tabIndex = -1;
+    }
+    row.appendChild(arrow);
+
+    var nameBtn = document.createElement('button');
+    nameBtn.type = 'button';
+    nameBtn.className = 'location-tree-name';
+    nameBtn.textContent = node.name;
+    row.appendChild(nameBtn);
+
+    if (node.location_type && texts.typeLabels[node.location_type]) {
+      var badge = document.createElement('span');
+      badge.className = 'location-type-badge';
+      badge.textContent = texts.typeLabels[node.location_type];
+      row.appendChild(badge);
+    }
+
+    var actions = document.createElement('span');
+    actions.className = 'location-tree-row-actions';
+
+    var editLink = document.createElement('a');
+    editLink.href = '?page=locations&edit=' + node.id;
+    editLink.className = 'location-tree-edit';
+    editLink.title = texts.editLabel;
+    editLink.setAttribute('aria-label', texts.editLabel);
+    editLink.innerHTML = texts.editIcon;
+    editLink.addEventListener('click', function(e) { e.stopPropagation(); });
+    actions.appendChild(editLink);
+
+    var deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'location-tree-delete';
+    deleteBtn.title = texts.deleteLabel;
+    deleteBtn.setAttribute('aria-label', texts.deleteLabel);
+    deleteBtn.innerHTML = texts.deleteIcon;
+    deleteBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (deleteForm && deleteFormId && window.confirm(texts.deleteConfirm.replace('{name}', node.name))) {
+        deleteFormId.value = node.id;
+        deleteForm.submit();
+      }
+    });
+    actions.appendChild(deleteBtn);
+    row.appendChild(actions);
+
+    wrap.appendChild(row);
+
+    var childrenWrap = null;
+    if (hasChildren) {
+      childrenWrap = document.createElement('div');
+      childrenWrap.className = 'location-tree-children';
+      childrenWrap.hidden = true;
+      node.children.forEach(function(child) {
+        childrenWrap.appendChild(buildRow(child, depth + 1));
+      });
+      wrap.appendChild(childrenWrap);
+    }
+
+    function toggleExpand() {
+      if (!childrenWrap) {
+        return;
+      }
+      childrenWrap.hidden = !childrenWrap.hidden;
+      arrow.classList.toggle('location-tree-arrow-open', !childrenWrap.hidden);
+    }
+
+    arrow.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggleExpand();
+    });
+    nameBtn.addEventListener('click', function() {
+      selectLocation(node.id, node.name, row);
+    });
+    nameBtn.addEventListener('dblclick', function() {
+      toggleExpand();
+    });
+
+    return wrap;
+  }
+
+  if (treeContainer) {
+    tree.forEach(function(node) {
+      treeContainer.appendChild(buildRow(node, 0));
+    });
+  }
+
+  if (resizeHandle && treePane && explorer) {
+    var dragging = false;
+    resizeHandle.addEventListener('mousedown', function(e) {
+      dragging = true;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+      if (!dragging) {
+        return;
+      }
+      var rect = explorer.getBoundingClientRect();
+      var percent = ((e.clientX - rect.left) / rect.width) * 100;
+      percent = Math.max(20, Math.min(70, percent));
+      treePane.style.width = percent + '%';
+    });
+    document.addEventListener('mouseup', function() {
+      dragging = false;
+    });
+  }
+})();
+</script>
+SCRIPT;
 
     renderApp(t('locations_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('locations_title'), 'url' => null]]);
     exit;

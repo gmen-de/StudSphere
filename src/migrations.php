@@ -429,6 +429,30 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        28 => function (PDO $pdo): void {
+            // Loose minifigures stored independently of any owned set — the
+            // per-part equivalent (storage_items) already existed, minifigs
+            // had no counterpart at all (a minifig only ever lived inside an
+            // owned set's own auto-generated location, via
+            // owned_set_minifigs). No spare_quantity columns here unlike
+            // storage_items: that concept is specifically about a SET's own
+            // spares pool, which doesn't apply to a minifig stored on its
+            // own.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS minifig_storage_items (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    location_id INT NOT NULL,
+                    minifig_id INT NOT NULL,
+                    condition_type ENUM(\'new\', \'used\') NOT NULL DEFAULT \'used\',
+                    quantity INT NOT NULL DEFAULT 0,
+                    damaged_quantity INT NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_minifigstorageitem_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_minifigstorageitem_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
+                    UNIQUE KEY minifig_storage_item_unique (location_id, minifig_id, condition_type)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -491,7 +515,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 27;
+const CURRENT_SCHEMA_VERSION = 28;
 
 function getInstalledSchemaVersion(): int
 {
