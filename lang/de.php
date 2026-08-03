@@ -229,6 +229,7 @@ return [
     'location_bulk_count_label' => 'Anzahl',
     'location_bulk_naming_label' => 'Benennung ({n} wird durch die laufende Nummer ersetzt)',
     'location_bulk_naming_default' => 'Unterlagerort {n}',
+    'location_bulk_name_hint' => 'Leer lassen, um nur die nummerierten Lagerorte direkt hier anzulegen, ohne übergeordneten Lagerort.',
     'locations_tree_new_child_label' => '(Neu)',
     'location_name_label' => 'Name',
     'location_save_button' => 'Speichern',

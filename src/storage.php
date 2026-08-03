@@ -53,6 +53,29 @@ function createStorageLocationWithChildren(?int $parentId, string $name, int $ch
 }
 
 /**
+ * Same numbered-children generation as createStorageLocationWithChildren(),
+ * but without the wrapping named location — the numbered locations become
+ * direct children of $parentId themselves. For when the intermediate
+ * container isn't wanted (e.g. a shelf that already exists as a real
+ * location and just needs "Fach 1".."Fach 8" added straight into it).
+ */
+function createBulkStorageLocations(?int $parentId, int $childCount, string $namingPattern): void
+{
+    $pdo = getPDO();
+    $pdo->beginTransaction();
+    try {
+        for ($i = 1; $i <= $childCount; $i++) {
+            $childName = str_replace('{n}', (string) $i, $namingPattern);
+            createStorageLocation($parentId, $childName);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/**
  * Re-parents a location node — used by owned_set_detail's "Verschieben"
  * action to move a set instance's storage node to a different place in the
  * tree (the node itself, its stock, and its parts stay exactly as they are;

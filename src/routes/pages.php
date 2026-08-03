@@ -606,7 +606,8 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $content .= '<form method="post" id="location-add-form">';
     $content .= '<input type="hidden" name="action" value="add_location">';
     $content .= '<input type="hidden" name="parent_id" id="location-add-parent-id" value="">';
-    $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" required></label>';
+    $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" id="location-add-name" required></label>';
+    $content .= '<p class="hint" id="location-add-name-hint"></p>';
     $content .= '<label class="checkbox-label"><input type="checkbox" id="location-add-bulk-toggle" name="bulk_enabled" value="1"> ' . htmlspecialchars(t('location_bulk_toggle_label')) . '</label>';
     $content .= '<div id="location-add-bulk-fields" style="display:none;">';
     $content .= '<label>' . htmlspecialchars(t('location_bulk_count_label')) . '<input type="number" name="child_count" min="1" value="1" id="location-add-bulk-count"></label>';
@@ -641,6 +642,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         'addIcon' => getActionIcon('add'),
         'newChildLabel' => t('locations_tree_new_child_label'),
         'addModalHeading' => t('location_add_modal_heading'),
+        'bulkNameHint' => t('location_bulk_name_hint'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $content .= <<<SCRIPT
@@ -675,9 +677,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     openAddModal = function(parentId, parentName) {
       addParentIdField.value = parentId === null ? '' : parentId;
       addModalHeading.textContent = texts.addModalHeading.replace('{parent}', parentName);
-      if (addBulkToggle && addBulkFields) {
+      if (addBulkToggle && addBulkFields && addNameInput && addNameHint) {
         addBulkToggle.checked = false;
         addBulkFields.style.display = 'none';
+        addNameInput.required = true;
+        addNameHint.textContent = '';
       }
       addModal.style.display = 'flex';
     };
@@ -696,9 +700,18 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
 
   var addBulkToggle = document.getElementById('location-add-bulk-toggle');
   var addBulkFields = document.getElementById('location-add-bulk-fields');
-  if (addBulkToggle && addBulkFields) {
+  var addNameInput = document.getElementById('location-add-name');
+  var addNameHint = document.getElementById('location-add-name-hint');
+  if (addBulkToggle && addBulkFields && addNameInput && addNameHint) {
     addBulkToggle.addEventListener('change', function() {
       addBulkFields.style.display = addBulkToggle.checked ? 'block' : 'none';
+      // While bulk-creating, the name becomes optional: filled in, it's the
+      // wrapping parent's own name (see createStorageLocationWithChildren());
+      // left empty, the numbered locations are created directly under
+      // whichever node "(Neu)" was opened from instead, no wrapper at all
+      // (see createBulkStorageLocations()).
+      addNameInput.required = !addBulkToggle.checked;
+      addNameHint.textContent = addBulkToggle.checked ? texts.bulkNameHint : '';
     });
   }
 

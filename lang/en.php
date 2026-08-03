@@ -229,6 +229,7 @@ return [
     'location_bulk_count_label' => 'Count',
     'location_bulk_naming_label' => 'Naming ({n} is replaced with the running number)',
     'location_bulk_naming_default' => 'Sub-location {n}',
+    'location_bulk_name_hint' => 'Leave empty to create only the numbered locations directly here, without a parent location.',
     'locations_tree_new_child_label' => '(New)',
     'location_name_label' => 'Name',
     'location_save_button' => 'Save',
