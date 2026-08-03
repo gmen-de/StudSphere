@@ -208,7 +208,14 @@ function getStorageLocationAncestors(int $id): array
 function getStorageLocationTree(): array
 {
     $pdo = getPDO();
-    $rows = $pdo->query("SELECT id, parent_id, name, location_type FROM storage_locations WHERE location_type IS NULL OR location_type != 'owned_set' ORDER BY name")->fetchAll();
+    $rows = $pdo->query("SELECT id, parent_id, name, location_type FROM storage_locations WHERE location_type IS NULL OR location_type != 'owned_set'")->fetchAll();
+    // Natural sort ("Fach 2" before "Fach 10"), not SQL's plain lexicographic
+    // ORDER BY — confirmed on real data (a shelf cabinet's numbered
+    // compartments showed up as Fach 1, Fach 10, Fach 11, ..., Fach 2).
+    // Sorting the flat list before the tree below is built (rather than each
+    // node's 'children' array after) is enough: children are appended in
+    // the order this loop encounters them, which follows $rows' order.
+    usort($rows, fn (array $a, array $b): int => strnatcasecmp($a['name'], $b['name']));
 
     $byId = [];
     foreach ($rows as $row) {
@@ -245,12 +252,16 @@ function getChildLocations(?int $parentId): array
 {
     $pdo = getPDO();
     if ($parentId === null) {
-        $stmt = $pdo->query("SELECT id, name, location_type FROM storage_locations WHERE parent_id IS NULL AND (location_type IS NULL OR location_type != 'owned_set') ORDER BY name");
+        $stmt = $pdo->query("SELECT id, name, location_type FROM storage_locations WHERE parent_id IS NULL AND (location_type IS NULL OR location_type != 'owned_set')");
     } else {
-        $stmt = $pdo->prepare("SELECT id, name, location_type FROM storage_locations WHERE parent_id = ? AND (location_type IS NULL OR location_type != 'owned_set') ORDER BY name");
+        $stmt = $pdo->prepare("SELECT id, name, location_type FROM storage_locations WHERE parent_id = ? AND (location_type IS NULL OR location_type != 'owned_set')");
         $stmt->execute([$parentId]);
     }
-    return $stmt->fetchAll();
+    $rows = $stmt->fetchAll();
+    // Natural sort, not SQL's plain lexicographic ORDER BY — same reasoning
+    // as getStorageLocationTree()'s.
+    usort($rows, fn (array $a, array $b): int => strnatcasecmp($a['name'], $b['name']));
+    return $rows;
 }
 
 /**
