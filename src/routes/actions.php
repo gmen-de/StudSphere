@@ -441,39 +441,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     exit;
 }
 
-// Typeahead for the "add loose minifig" form in the location Explorer's
-// right pane — reuses searchMinifigs() (the same catalog search the minifigs
-// browse page uses) with no theme filter and a small page size, since this
-// only needs a handful of matches, not a full paginated result set.
-if (isset($_GET['action']) && $_GET['action'] === 'minifig_search') {
-    header('Content-Type: application/json');
-    $query = trim((string) ($_GET['q'] ?? ''));
-    $results = $query !== '' ? searchMinifigs($pdo, $query, [], 1, 15) : ['items' => []];
-    echo json_encode(['items' => $results['items']], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_minifig_stock') {
-    header('Content-Type: application/json');
-    try {
-        $locationId = (int) ($_POST['location_id'] ?? 0);
-        $minifigId = (int) ($_POST['minifig_id'] ?? 0);
-        $conditionType = ($_POST['condition_type'] ?? '') === 'new' ? 'new' : 'used';
-        $quantity = (int) ($_POST['quantity'] ?? 0);
-
-        if (getStorageLocation($locationId) === null || $minifigId <= 0 || $quantity <= 0) {
-            throw new RuntimeException(t('add_stock_invalid_input'));
-        }
-
-        $resultingQuantity = addMinifigStock($locationId, $minifigId, $conditionType, $quantity);
-        echo json_encode(['success' => true, 'resultingQuantity' => $resultingQuantity], JSON_UNESCAPED_UNICODE);
-    } catch (Throwable $e) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
-    }
-    exit;
-}
-
 if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
     header('Content-Type: application/json');
     $partId = (int) ($_GET['part_id'] ?? 0);

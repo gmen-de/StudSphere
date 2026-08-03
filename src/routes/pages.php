@@ -658,7 +658,6 @@ SCRIPT;
         'chevronIcon' => getActionIcon('chevron_right'),
         'editIcon' => getActionIcon('edit'),
         'deleteIcon' => getActionIcon('delete'),
-        'addIcon' => getActionIcon('add'),
         'brickIcon' => getNavIcon('bricks'),
         'minifigIcon' => getNavIcon('minifigs'),
         'expandLabel' => t('locations_tree_expand_label'),
@@ -671,13 +670,8 @@ SCRIPT;
         'groupSets' => t('location_content_group_sets'),
         'groupMinifigs' => t('location_content_group_minifigs'),
         'minifigsEmpty' => t('location_content_minifigs_empty'),
-        'addMinifigLabel' => t('location_add_minifig_label'),
-        'minifigSearchPlaceholder' => t('location_add_minifig_search_placeholder'),
-        'quantityLabel' => t('add_stock_quantity_label'),
-        'conditionLabel' => t('add_stock_condition_label'),
         'conditionNew' => t('condition_new'),
         'conditionUsed' => t('condition_used'),
-        'addButton' => t('add_stock_button'),
         'typeLabels' => $typeLabels,
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
@@ -708,7 +702,7 @@ SCRIPT;
     loadContent(id, name);
   }
 
-  function buildGroup(title, bodyEl, extraHeaderEl) {
+  function buildGroup(title, bodyEl) {
     var section = document.createElement('section');
     section.className = 'location-content-group';
     var header = document.createElement('div');
@@ -716,9 +710,6 @@ SCRIPT;
     var h = document.createElement('h3');
     h.textContent = title;
     header.appendChild(h);
-    if (extraHeaderEl) {
-      header.appendChild(extraHeaderEl);
-    }
     section.appendChild(header);
     section.appendChild(bodyEl);
     return section;
@@ -825,146 +816,7 @@ SCRIPT;
     return grid;
   }
 
-  function buildAddMinifigControl(locationId, onAdded) {
-    var wrap = document.createElement('span');
-    wrap.className = 'location-add-minifig';
-
-    var toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'location-add-minifig-toggle';
-    toggle.innerHTML = texts.addIcon;
-    toggle.title = texts.addMinifigLabel;
-    toggle.setAttribute('aria-label', texts.addMinifigLabel);
-    wrap.appendChild(toggle);
-
-    var panel = document.createElement('div');
-    panel.className = 'location-add-minifig-panel';
-    panel.hidden = true;
-
-    var searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.placeholder = texts.minifigSearchPlaceholder;
-    panel.appendChild(searchInput);
-
-    var results = document.createElement('div');
-    results.className = 'location-add-minifig-results';
-    panel.appendChild(results);
-
-    var selectedId = null;
-    var selectedLabel = document.createElement('div');
-    selectedLabel.className = 'location-add-minifig-selected';
-    panel.appendChild(selectedLabel);
-
-    var qtyLabel = document.createElement('label');
-    qtyLabel.textContent = texts.quantityLabel;
-    var qtyInput = document.createElement('input');
-    qtyInput.type = 'number';
-    qtyInput.min = '1';
-    qtyInput.value = '1';
-    qtyLabel.appendChild(qtyInput);
-    panel.appendChild(qtyLabel);
-
-    var condLabel = document.createElement('label');
-    condLabel.textContent = texts.conditionLabel;
-    var condSelect = document.createElement('select');
-    var optUsed = document.createElement('option');
-    optUsed.value = 'used';
-    optUsed.textContent = texts.conditionUsed;
-    optUsed.selected = true;
-    var optNew = document.createElement('option');
-    optNew.value = 'new';
-    optNew.textContent = texts.conditionNew;
-    condSelect.appendChild(optUsed);
-    condSelect.appendChild(optNew);
-    condLabel.appendChild(condSelect);
-    panel.appendChild(condLabel);
-
-    var submitBtn = document.createElement('button');
-    submitBtn.type = 'button';
-    submitBtn.textContent = texts.addButton;
-    submitBtn.disabled = true;
-    panel.appendChild(submitBtn);
-
-    var msg = document.createElement('div');
-    msg.className = 'location-add-minifig-message';
-    panel.appendChild(msg);
-
-    var searchTimer = null;
-    searchInput.addEventListener('input', function() {
-      selectedId = null;
-      submitBtn.disabled = true;
-      selectedLabel.textContent = '';
-      window.clearTimeout(searchTimer);
-      var q = searchInput.value.trim();
-      results.innerHTML = '';
-      if (q === '') {
-        return;
-      }
-      searchTimer = window.setTimeout(function() {
-        fetch('?action=minifig_search&q=' + encodeURIComponent(q), { credentials: 'same-origin' })
-          .then(function(r) { return r.json(); })
-          .then(function(data) {
-            results.innerHTML = '';
-            (data.items || []).forEach(function(fig) {
-              var item = document.createElement('button');
-              item.type = 'button';
-              item.className = 'location-add-minifig-result';
-              item.textContent = (fig.name || fig.fig_num) + ' (' + fig.fig_num + ')';
-              item.addEventListener('click', function() {
-                selectedId = fig.id;
-                selectedLabel.textContent = item.textContent;
-                results.innerHTML = '';
-                searchInput.value = '';
-                submitBtn.disabled = false;
-              });
-              results.appendChild(item);
-            });
-          });
-      }, 300);
-    });
-
-    submitBtn.addEventListener('click', function() {
-      if (!selectedId) {
-        return;
-      }
-      submitBtn.disabled = true;
-      msg.textContent = '';
-      var formData = new FormData();
-      formData.set('action', 'add_minifig_stock');
-      formData.set('location_id', locationId);
-      formData.set('minifig_id', selectedId);
-      formData.set('quantity', qtyInput.value);
-      formData.set('condition_type', condSelect.value);
-      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-          if (res.success) {
-            panel.hidden = true;
-            onAdded();
-          } else {
-            msg.textContent = res.message || texts.errorRetry;
-            submitBtn.disabled = false;
-          }
-        })
-        .catch(function() {
-          msg.textContent = texts.errorRetry;
-          submitBtn.disabled = false;
-        });
-    });
-
-    toggle.addEventListener('click', function(e) {
-      e.stopPropagation();
-      panel.hidden = !panel.hidden;
-    });
-    panel.addEventListener('click', function(e) {
-      e.stopPropagation();
-    });
-
-    wrap.appendChild(panel);
-    return wrap;
-  }
-
-  function renderContent(locationId, name, data) {
+  function renderContent(name, data) {
     contentEl.innerHTML = '';
     var heading = document.createElement('h2');
     heading.textContent = name;
@@ -978,9 +830,6 @@ SCRIPT;
       contentEl.appendChild(buildGroup(cat.name, buildPartsGrid(cat.parts)));
     });
 
-    var addMinifigControl = buildAddMinifigControl(locationId, function() {
-      loadContent(locationId, name);
-    });
     var minifigsBody;
     if (data.minifigs.length > 0) {
       minifigsBody = buildMinifigsGrid(data.minifigs);
@@ -989,14 +838,14 @@ SCRIPT;
       minifigsBody.className = 'hint';
       minifigsBody.textContent = texts.minifigsEmpty;
     }
-    contentEl.appendChild(buildGroup(texts.groupMinifigs, minifigsBody, addMinifigControl));
+    contentEl.appendChild(buildGroup(texts.groupMinifigs, minifigsBody));
   }
 
   function loadContent(id, name) {
     contentEl.innerHTML = '<p class="hint">' + texts.loading + '</p>';
     fetch('?action=location_content&location_id=' + id, { credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
-      .then(function(data) { renderContent(id, name, data); })
+      .then(function(data) { renderContent(name, data); })
       .catch(function() {
         contentEl.innerHTML = '<p class="hint">' + texts.errorRetry + '</p>';
       });

@@ -260,8 +260,6 @@ return [
     'location_content_group_sets' => 'Sets',
     'location_content_group_minifigs' => 'Minifiguren',
     'location_content_minifigs_empty' => 'Keine losen Minifiguren an diesem Lagerort.',
-    'location_add_minifig_label' => 'Minifigur hinzufügen',
-    'location_add_minifig_search_placeholder' => 'Minifigur suchen …',
     'location_delete_confirm' => 'Lagerort "{name}" wirklich löschen?',
     'locations_add_toggle' => 'Neuen Lagerort anlegen',
     'locations_tree_expand_label' => 'Aufklappen',

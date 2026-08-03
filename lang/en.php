@@ -260,8 +260,6 @@ return [
     'location_content_group_sets' => 'Sets',
     'location_content_group_minifigs' => 'Minifigures',
     'location_content_minifigs_empty' => 'No loose minifigures at this location.',
-    'location_add_minifig_label' => 'Add minifigure',
-    'location_add_minifig_search_placeholder' => 'Search minifigure …',
     'location_delete_confirm' => 'Really delete location "{name}"?',
     'locations_add_toggle' => 'Add a new storage location',
     'locations_tree_expand_label' => 'Expand',
