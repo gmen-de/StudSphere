@@ -536,7 +536,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : null;
     $editLocation = $editId !== null ? getStorageLocation($editId) : null;
     $isEdit = $editLocation !== null;
-    $locationOptions = getStorageLocationOptions();
     $types = getLocationTypes();
 
     $content = '<h1>' . htmlspecialchars(t('locations_title')) . '</h1>';
@@ -544,79 +543,28 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         $content .= '<p><strong>' . htmlspecialchars($locationMessage) . '</strong></p>';
     }
 
-    // Add/edit form: unchanged submit targets (rename_location/add_location,
-    // same as before this page's redesign) — just repositioned into the tree
-    // pane, and collapsed by default via <details> so it doesn't dominate a
-    // pane that's 40% width by default. Forced open while editing.
-    $content .= '<details class="location-add-form-details"' . ($isEdit ? ' open' : '') . '>';
-    $content .= '<summary>' . htmlspecialchars($isEdit ? t('location_edit_title') : t('locations_add_toggle')) . '</summary>';
-    $content .= '<form method="post" id="location-form">';
+    // Edit form only — the "add a new top-level location" toggle/form was
+    // removed per feedback. action=add_location (src/routes/actions.php)
+    // stays as a valid, working backend action even with no UI entry point
+    // here right now, in case a different one (e.g. a "+" in the tree)
+    // replaces it later.
     if ($isEdit) {
+        $content .= '<details class="location-add-form-details" open>';
+        $content .= '<summary>' . htmlspecialchars(t('location_edit_title')) . '</summary>';
+        $content .= '<form method="post" id="location-form">';
         $content .= '<input type="hidden" name="action" value="rename_location">';
         $content .= '<input type="hidden" name="location_id" value="' . (int) $editLocation['id'] . '">';
-    } else {
-        $content .= '<input type="hidden" name="action" value="add_location">';
-        $content .= '<label>' . htmlspecialchars(t('location_parent_label')) . '<select name="parent_id">';
-        $content .= '<option value="">' . htmlspecialchars(t('location_parent_none')) . '</option>';
-        foreach ($locationOptions as $optId => $optLabel) {
-            $content .= '<option value="' . $optId . '">' . htmlspecialchars($optLabel) . '</option>';
+        $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" value="' . htmlspecialchars($editLocation['name']) . '" required></label>';
+        $content .= '<label>' . htmlspecialchars(t('location_type_label')) . '<select name="type" id="location-type-select">';
+        $content .= '<option value="">' . htmlspecialchars(t('location_type_none')) . '</option>';
+        foreach ($types as $typeKey => $typeConfig) {
+            $selected = $typeKey === $editLocation['location_type'] ? ' selected' : '';
+            $content .= '<option value="' . htmlspecialchars($typeKey) . '"' . $selected . '>' . htmlspecialchars(t($typeConfig['labelKey'])) . '</option>';
         }
         $content .= '</select></label>';
-    }
-    $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" value="' . htmlspecialchars($isEdit ? $editLocation['name'] : '') . '" required></label>';
-    $content .= '<label>' . htmlspecialchars(t('location_type_label')) . '<select name="type" id="location-type-select">';
-    $content .= '<option value="">' . htmlspecialchars(t('location_type_none')) . '</option>';
-    $currentType = $isEdit ? $editLocation['location_type'] : null;
-    foreach ($types as $typeKey => $typeConfig) {
-        $selected = $typeKey === $currentType ? ' selected' : '';
-        $content .= '<option value="' . htmlspecialchars($typeKey) . '"' . $selected . '>' . htmlspecialchars(t($typeConfig['labelKey'])) . '</option>';
-    }
-    $content .= '</select></label>';
-
-    if (!$isEdit) {
-        $content .= '<div id="location-bulk-fields" style="display:none;">';
-        $content .= '<label>' . htmlspecialchars(t('location_bulk_count_label')) . '<input type="number" name="child_count" min="0" value="0"></label>';
-        $content .= '<label>' . htmlspecialchars(t('location_bulk_naming_label')) . '<input type="text" name="naming_pattern" id="location-naming-pattern" value=""></label>';
-        $content .= '</div>';
-    }
-
-    $content .= '<button type="submit">' . htmlspecialchars($isEdit ? t('location_save_button') : t('location_add_button')) . '</button>';
-    if ($isEdit) {
+        $content .= '<button type="submit">' . htmlspecialchars(t('location_save_button')) . '</button>';
         $content .= ' <a href="?page=locations">' . htmlspecialchars(t('location_cancel_edit')) . '</a>';
-    }
-    $content .= '</form></details>';
-
-    if (!$isEdit) {
-        $bulkPatterns = [];
-        foreach ($types as $typeKey => $typeConfig) {
-            $bulkPatterns[$typeKey] = $typeConfig['bulkChildKey'] !== null ? t($typeConfig['bulkChildKey']) : null;
-        }
-        $bulkPatternsJson = json_encode($bulkPatterns, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-        $content .= <<<SCRIPT
-<script>
-(function(){
-  var patterns = $bulkPatternsJson;
-  var typeSelect = document.getElementById("location-type-select");
-  var bulkFields = document.getElementById("location-bulk-fields");
-  var namingInput = document.getElementById("location-naming-pattern");
-  if (!typeSelect || !bulkFields || !namingInput) {
-    return;
-  }
-  function update() {
-    var pattern = patterns[typeSelect.value];
-    if (pattern) {
-      bulkFields.style.display = "block";
-      namingInput.value = pattern;
-    } else {
-      bulkFields.style.display = "none";
-      namingInput.value = "";
-    }
-  }
-  typeSelect.addEventListener("change", update);
-  update();
-})();
-</script>
-SCRIPT;
+        $content .= '</form></details>';
     }
 
     // Explorer split view: left pane is a client-built tree (from the JSON

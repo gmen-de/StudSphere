@@ -201,9 +201,7 @@ function getStorageLocationAncestors(int $id): array
 /**
  * Excludes owned-set instance nodes (location_type 'owned_set') — see
  * getChildLocations()'s doc comment for why: they're not real organizational
- * locations, so they don't belong in the general "Lagerort-Übersicht" tree
- * or the "add location" parent picker (getStorageLocationOptions(), built
- * from this).
+ * locations, so they don't belong in the general "Lagerort-Übersicht" tree.
  *
  * @return array<int, array{id:int, parent_id:?int, name:string, location_type:?string, children: array}>
  */
@@ -558,20 +556,4 @@ function addMinifigStock(int $locationId, int $minifigId, string $conditionType,
     );
     $resultStmt->execute([$locationId, $minifigId, $conditionType]);
     return (int) $resultStmt->fetchColumn();
-}
-
-/**
- * Flat (id => indented label) list for populating a parent-location <select>.
- */
-function getStorageLocationOptions(): array
-{
-    $options = [];
-    $walk = function (array $nodes, int $depth) use (&$walk, &$options): void {
-        foreach ($nodes as $node) {
-            $options[(int) $node['id']] = str_repeat('— ', $depth) . $node['name'];
-            $walk($node['children'], $depth + 1);
-        }
-    };
-    $walk(getStorageLocationTree(), 0);
-    return $options;
 }
