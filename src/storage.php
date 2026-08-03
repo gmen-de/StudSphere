@@ -442,18 +442,27 @@ function getLocationStock(int $locationId): array
 }
 
 /**
- * All descendant location ids of $locationId, including itself and (unlike
- * getStorageLocationTree()) owned-set instance locations too — content
- * aggregation (see getLocationContentRecursive()) needs to count e.g. spare
- * parts sitting inside a set's own auto-generated sub-location as part of
- * that set's parent location's content, even though that sub-location isn't
- * shown as its own node in the navigable tree. A per-level walk, not a
- * recursive CTE, for the same shared-hosting MariaDB-version reason as
- * getStorageLocationPath().
+ * All descendant location ids of $locationId, including itself. An owned
+ * set's own auto-generated location (location_type 'owned_set') is a real
+ * node in this tree (createStorageLocation() nests it under wherever the
+ * set was placed) — $includeOwnedSetLocations controls whether the walk
+ * includes those nodes (and descends into them) at all:
+ * - true: needed to find owned_sets rows at all (owned_sets.location_id
+ *   points at that auto-generated node itself, not its parent) — see
+ *   getLocationContentRecursive()'s "sets" query.
+ * - false: for "what loose stock lives under here" — a set's own spare/
+ *   damaged parts (materializeOwnedSetStock() et al., src/owned_sets.php)
+ *   live at that same auto-generated node, and must NOT be counted as loose
+ *   stock of the location the set happens to sit in. The set itself already
+ *   surfaces in the "Sets" group; its contents only show once someone
+ *   actually opens that set's own inventory page.
+ *
+ * A per-level walk, not a recursive CTE, for the same shared-hosting
+ * MariaDB-version reason as getStorageLocationPath().
  *
  * @return int[]
  */
-function getLocationSubtreeIds(int $locationId): array
+function getLocationSubtreeIds(int $locationId, bool $includeOwnedSetLocations = true): array
 {
     $pdo = getPDO();
     $ids = [$locationId];
@@ -461,7 +470,11 @@ function getLocationSubtreeIds(int $locationId): array
     $guard = 0;
     while (!empty($frontier) && $guard++ < 50) {
         $placeholders = implode(',', array_fill(0, count($frontier), '?'));
-        $stmt = $pdo->prepare("SELECT id FROM storage_locations WHERE parent_id IN ($placeholders)");
+        $sql = "SELECT id FROM storage_locations WHERE parent_id IN ($placeholders)";
+        if (!$includeOwnedSetLocations) {
+            $sql .= " AND (location_type IS NULL OR location_type != 'owned_set')";
+        }
+        $stmt = $pdo->prepare($sql);
         $stmt->execute($frontier);
         $frontier = array_map('intval', array_column($stmt->fetchAll(), 'id'));
         $ids = array_merge($ids, $frontier);
@@ -471,9 +484,14 @@ function getLocationSubtreeIds(int $locationId): array
 
 /**
  * Everything stored anywhere under $locationId — itself plus every
- * descendant location, recursively (see getLocationSubtreeIds()) — grouped
- * into the three buckets the location Explorer's right pane renders as
- * separate sections. Parts are further grouped by their top-level category
+ * descendant location, recursively — grouped into the three buckets the
+ * location Explorer's right pane renders as separate sections. The
+ * Explorer is meant purely for managing LOOSE stock: parts and minifigs
+ * belonging to a set (its constituent inventory, its own spares) never
+ * appear here regardless of nesting, only the set itself does, in the Sets
+ * group — see getLocationSubtreeIds()'s doc comment for why sets need the
+ * full subtree (including owned-set instance nodes) while parts/minifigs
+ * deliberately don't. Parts are further grouped by their top-level category
  * (category_name is null for a part with no category at all; the caller
  * decides the fallback label for that group).
  *
@@ -481,17 +499,20 @@ function getLocationSubtreeIds(int $locationId): array
  */
 function getLocationContentRecursive(PDO $pdo, int $locationId): array
 {
-    $ids = getLocationSubtreeIds($locationId);
-    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $allIds = getLocationSubtreeIds($locationId, true);
+    $allPlaceholders = implode(',', array_fill(0, count($allIds), '?'));
+
+    $looseIds = getLocationSubtreeIds($locationId, false);
+    $loosePlaceholders = implode(',', array_fill(0, count($looseIds), '?'));
 
     $setsStmt = $pdo->prepare(
         "SELECT os.id, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
          FROM owned_sets os
          INNER JOIN sets s ON s.id = os.set_id
-         WHERE os.location_id IN ($placeholders)
+         WHERE os.location_id IN ($allPlaceholders)
          ORDER BY s.name"
     );
-    $setsStmt->execute($ids);
+    $setsStmt->execute($allIds);
     $sets = $setsStmt->fetchAll();
     foreach ($sets as &$set) {
         $set['id'] = (int) $set['id'];
@@ -506,10 +527,10 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
          INNER JOIN parts p ON p.id = si.part_id
          LEFT JOIN part_categories pc ON pc.part_cat_id = p.part_category
          LEFT JOIN colors c ON c.id = si.color_id
-         WHERE si.location_id IN ($placeholders) AND si.quantity > 0
+         WHERE si.location_id IN ($loosePlaceholders) AND si.quantity > 0
          ORDER BY pc.name IS NULL, pc.name, p.part_num"
     );
-    $partsStmt->execute($ids);
+    $partsStmt->execute($looseIds);
     $partsByCategory = [];
     foreach ($partsStmt->fetchAll() as $row) {
         $row['part_id'] = (int) $row['part_id'];
@@ -524,10 +545,10 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
                 msi.condition_type, msi.quantity
          FROM minifig_storage_items msi
          INNER JOIN minifigs m ON m.id = msi.minifig_id
-         WHERE msi.location_id IN ($placeholders) AND msi.quantity > 0
+         WHERE msi.location_id IN ($loosePlaceholders) AND msi.quantity > 0
          ORDER BY m.name"
     );
-    $minifigsStmt->execute($ids);
+    $minifigsStmt->execute($looseIds);
     $minifigs = $minifigsStmt->fetchAll();
     foreach ($minifigs as &$fig) {
         $fig['minifig_id'] = (int) $fig['minifig_id'];
