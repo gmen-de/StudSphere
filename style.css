@@ -1048,6 +1048,16 @@ button[type='submit'] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.location-tree-name-root {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  cursor: pointer;
 }
 
 .location-tree-row-actions {

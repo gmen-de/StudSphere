@@ -625,9 +625,18 @@ SCRIPT;
     // entirely in the browser, no round trip; right pane is loaded on click
     // via action=location_content, since a location's full recursive content
     // (see getLocationContentRecursive()) isn't worth shipping for every
-    // location up front.
+    // location up front. Every real top-level location nests under one
+    // static, non-clickable "Lager" root (id null — not a real
+    // storage_locations row, purely a grouping label the client special-cases)
+    // so the tree always has a single, always-expanded starting point.
     $tree = getStorageLocationTree();
-    $treeJson = json_encode($tree, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $treeRoot = [
+        'id' => null,
+        'name' => t('location_tree_root_label'),
+        'location_type' => null,
+        'children' => $tree,
+    ];
+    $treeJson = json_encode($treeRoot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $typeLabels = [];
     foreach ($types as $typeKey => $typeConfig) {
@@ -636,11 +645,7 @@ SCRIPT;
 
     $content .= '<div class="location-explorer" id="location-explorer">';
     $content .= '<div class="location-explorer-tree-pane" id="location-explorer-tree-pane">';
-    if (empty($tree)) {
-        $content .= '<p class="hint">' . htmlspecialchars(t('locations_tree_empty')) . '</p>';
-    } else {
-        $content .= '<div class="location-tree-explorer" id="location-tree-explorer"></div>';
-    }
+    $content .= '<div class="location-tree-explorer" id="location-tree-explorer"></div>';
     $content .= '<form method="post" id="location-delete-form" style="display:none;">';
     $content .= '<input type="hidden" name="action" value="delete_location">';
     $content .= '<input type="hidden" name="location_id" id="location-delete-form-id" value="">';
@@ -683,7 +688,7 @@ SCRIPT;
     $content .= <<<SCRIPT
 <script>
 (function(){
-  var tree = $treeJson;
+  var treeRoot = $treeJson;
   var texts = $explorerLabelsJson;
   var treeContainer = document.getElementById('location-tree-explorer');
   var contentEl = document.getElementById('location-explorer-content');
@@ -868,6 +873,12 @@ SCRIPT;
     row.className = 'location-tree-row';
     row.style.paddingLeft = (depth * 1.25 + 0.25) + 'rem';
 
+    // The synthetic "Lager" root (id null, not a real storage_locations
+    // row — see its construction in src/routes/pages.php) is a pure grouping
+    // label: no edit/delete (nothing to edit), and its name toggles expand
+    // instead of loading content, since there's no location_content to load
+    // for it.
+    var isRoot = node.id === null;
     var hasChildren = node.children && node.children.length > 0;
 
     var arrow = document.createElement('button');
@@ -884,7 +895,7 @@ SCRIPT;
 
     var nameBtn = document.createElement('button');
     nameBtn.type = 'button';
-    nameBtn.className = 'location-tree-name';
+    nameBtn.className = 'location-tree-name' + (isRoot ? ' location-tree-name-root' : '');
     nameBtn.textContent = node.name;
     row.appendChild(nameBtn);
 
@@ -895,33 +906,35 @@ SCRIPT;
       row.appendChild(badge);
     }
 
-    var actions = document.createElement('span');
-    actions.className = 'location-tree-row-actions';
+    if (!isRoot) {
+      var actions = document.createElement('span');
+      actions.className = 'location-tree-row-actions';
 
-    var editLink = document.createElement('a');
-    editLink.href = '?page=locations&edit=' + node.id;
-    editLink.className = 'location-tree-edit';
-    editLink.title = texts.editLabel;
-    editLink.setAttribute('aria-label', texts.editLabel);
-    editLink.innerHTML = texts.editIcon;
-    editLink.addEventListener('click', function(e) { e.stopPropagation(); });
-    actions.appendChild(editLink);
+      var editLink = document.createElement('a');
+      editLink.href = '?page=locations&edit=' + node.id;
+      editLink.className = 'location-tree-edit';
+      editLink.title = texts.editLabel;
+      editLink.setAttribute('aria-label', texts.editLabel);
+      editLink.innerHTML = texts.editIcon;
+      editLink.addEventListener('click', function(e) { e.stopPropagation(); });
+      actions.appendChild(editLink);
 
-    var deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'location-tree-delete';
-    deleteBtn.title = texts.deleteLabel;
-    deleteBtn.setAttribute('aria-label', texts.deleteLabel);
-    deleteBtn.innerHTML = texts.deleteIcon;
-    deleteBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      if (deleteForm && deleteFormId && window.confirm(texts.deleteConfirm.replace('{name}', node.name))) {
-        deleteFormId.value = node.id;
-        deleteForm.submit();
-      }
-    });
-    actions.appendChild(deleteBtn);
-    row.appendChild(actions);
+      var deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'location-tree-delete';
+      deleteBtn.title = texts.deleteLabel;
+      deleteBtn.setAttribute('aria-label', texts.deleteLabel);
+      deleteBtn.innerHTML = texts.deleteIcon;
+      deleteBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (deleteForm && deleteFormId && window.confirm(texts.deleteConfirm.replace('{name}', node.name))) {
+          deleteFormId.value = node.id;
+          deleteForm.submit();
+        }
+      });
+      actions.appendChild(deleteBtn);
+      row.appendChild(actions);
+    }
 
     wrap.appendChild(row);
 
@@ -929,7 +942,10 @@ SCRIPT;
     if (hasChildren) {
       childrenWrap = document.createElement('div');
       childrenWrap.className = 'location-tree-children';
-      childrenWrap.hidden = true;
+      childrenWrap.hidden = !isRoot;
+      if (isRoot) {
+        arrow.classList.add('location-tree-arrow-open');
+      }
       node.children.forEach(function(child) {
         childrenWrap.appendChild(buildRow(child, depth + 1));
       });
@@ -949,7 +965,11 @@ SCRIPT;
       toggleExpand();
     });
     nameBtn.addEventListener('click', function() {
-      selectLocation(node.id, node.name, row);
+      if (isRoot) {
+        toggleExpand();
+      } else {
+        selectLocation(node.id, node.name, row);
+      }
     });
     nameBtn.addEventListener('dblclick', function() {
       toggleExpand();
@@ -958,10 +978,8 @@ SCRIPT;
     return wrap;
   }
 
-  if (treeContainer) {
-    tree.forEach(function(node) {
-      treeContainer.appendChild(buildRow(node, 0));
-    });
+  if (treeContainer && treeRoot) {
+    treeContainer.appendChild(buildRow(treeRoot, 0));
   }
 
   if (resizeHandle && treePane && explorer) {
