@@ -413,17 +413,22 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
         }
     }
     $allPartIds = array_values(array_unique($allPartIds));
-    // Generic (not color-specific) fallback for wherever ldraw_thumbnail
-    // (the color-correct image, already fetched in getLocationContentRecursive())
-    // isn't cached yet — same two-tier priority getSetPartsList() uses.
-    $thumbnails = getPartThumbnails($pdo, $allPartIds);
     $translations = getLocale() !== 'en' ? getPartTranslations($pdo, $allPartIds, getLocale()) : [];
 
     $categories = [];
     foreach ($content['partsByCategory'] as $categoryName => $parts) {
         foreach ($parts as &$part) {
             $part['part_name'] = $translations[$part['part_id']] ?? $part['part_name'];
-            $part['thumbnail'] = $part['ldraw_thumbnail'] ?? ($thumbnails[$part['part_id']] ?? null);
+            // No getPartThumbnails() fallback here on purpose: that helper
+            // finds *any* image for the part number across the whole
+            // catalog regardless of color (see its own doc comment), which
+            // for a color-specific grid like this one means showing a
+            // plausible-looking but potentially entirely wrong-colored
+            // image — confirmed on real data (part 2420 in Dark Gray, no
+            // cached color image yet, showing up with a blue one instead).
+            // No image at all (client falls back to a generic brick icon)
+            // is honest about not knowing; a wrong color isn't.
+            $part['thumbnail'] = $part['ldraw_thumbnail'];
             unset($part['ldraw_thumbnail'], $part['rebrickable_color_id']);
         }
         unset($part);
