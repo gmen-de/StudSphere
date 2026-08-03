@@ -731,6 +731,28 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     });
   }
 
+  // Which nodes were expanded, so add/delete/edit — all plain form POSTs
+  // that reload the whole page — don't collapse the tree back to its
+  // just-loaded default and force re-opening the same path again. Cleared
+  // when the tab closes (sessionStorage), not meant to persist forever.
+  var EXPANDED_STORAGE_KEY = 'studsphere_location_tree_expanded';
+  var expandedIds = (function() {
+    try {
+      var raw = window.sessionStorage.getItem(EXPANDED_STORAGE_KEY);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch (e) {
+      return new Set();
+    }
+  })();
+  function saveExpandedIds() {
+    try {
+      window.sessionStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(expandedIds)));
+    } catch (e) {
+      // Private browsing / storage disabled — expand state just won't
+      // survive a reload, nothing else depends on this succeeding.
+    }
+  }
+
   var selectedRow = null;
 
   function selectLocation(id, name, row) {
@@ -989,8 +1011,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
 
     var childrenWrap = document.createElement('div');
     childrenWrap.className = 'location-tree-children';
-    childrenWrap.hidden = !isRoot;
-    if (isRoot) {
+    var startExpanded = isRoot || expandedIds.has(String(node.id));
+    childrenWrap.hidden = !startExpanded;
+    if (startExpanded) {
       arrow.classList.add('location-tree-arrow-open');
     }
     (node.children || []).forEach(function(child) {
@@ -1002,6 +1025,14 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     function toggleExpand() {
       childrenWrap.hidden = !childrenWrap.hidden;
       arrow.classList.toggle('location-tree-arrow-open', !childrenWrap.hidden);
+      if (!isRoot) {
+        if (childrenWrap.hidden) {
+          expandedIds.delete(String(node.id));
+        } else {
+          expandedIds.add(String(node.id));
+        }
+        saveExpandedIds();
+      }
     }
 
     arrow.addEventListener('click', function(e) {
