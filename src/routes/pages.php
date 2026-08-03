@@ -667,7 +667,6 @@ SCRIPT;
         'loading' => t('location_explorer_loading'),
         'errorRetry' => t('import_error_retry'),
         'contentEmpty' => t('location_detail_empty'),
-        'groupSets' => t('location_content_group_sets'),
         'groupMinifigs' => t('location_content_group_minifigs'),
         'minifigsEmpty' => t('location_content_minifigs_empty'),
         'conditionNew' => t('condition_new'),
@@ -719,33 +718,6 @@ SCRIPT;
     section.appendChild(header);
     section.appendChild(bodyEl);
     return section;
-  }
-
-  function buildSetsList(sets) {
-    var list = document.createElement('ul');
-    list.className = 'dashboard-set-list';
-    sets.forEach(function(set) {
-      var li = document.createElement('li');
-      var a = document.createElement('a');
-      a.href = '?page=owned_set_detail&id=' + set.id;
-      if (set.thumbnail) {
-        var img = document.createElement('img');
-        img.src = set.thumbnail;
-        img.alt = '';
-        img.className = 'dashboard-set-thumb';
-        a.appendChild(img);
-      }
-      var nameSpan = document.createElement('span');
-      nameSpan.className = 'dashboard-set-name';
-      nameSpan.textContent = set.name;
-      a.appendChild(nameSpan);
-      var small = document.createElement('small');
-      small.textContent = set.rebrickable_set_num;
-      a.appendChild(small);
-      li.appendChild(a);
-      list.appendChild(li);
-    });
-    return list;
   }
 
   function buildPartsGrid(parts) {
@@ -851,10 +823,6 @@ SCRIPT;
           loadContent(id, name);
         }
       }, 1000);
-    }
-
-    if (data.sets.length > 0) {
-      contentEl.appendChild(buildGroup(texts.groupSets, buildSetsList(data.sets)));
     }
 
     data.categories.forEach(function(cat) {

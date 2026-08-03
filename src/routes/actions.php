@@ -455,7 +455,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     }
 
     echo json_encode([
-        'sets' => $content['sets'],
         'categories' => $categories,
         'minifigs' => $content['minifigs'],
         'ldraw' => $ldrawStatus,

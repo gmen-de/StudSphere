@@ -442,27 +442,20 @@ function getLocationStock(int $locationId): array
 }
 
 /**
- * All descendant location ids of $locationId, including itself. An owned
- * set's own auto-generated location (location_type 'owned_set') is a real
- * node in this tree (createStorageLocation() nests it under wherever the
- * set was placed) — $includeOwnedSetLocations controls whether the walk
- * includes those nodes (and descends into them) at all:
- * - true: needed to find owned_sets rows at all (owned_sets.location_id
- *   points at that auto-generated node itself, not its parent) — see
- *   getLocationContentRecursive()'s "sets" query.
- * - false: for "what loose stock lives under here" — a set's own spare/
- *   damaged parts (materializeOwnedSetStock() et al., src/owned_sets.php)
- *   live at that same auto-generated node, and must NOT be counted as loose
- *   stock of the location the set happens to sit in. The set itself already
- *   surfaces in the "Sets" group; its contents only show once someone
- *   actually opens that set's own inventory page.
+ * All descendant location ids of $locationId, including itself — excludes
+ * owned-set instance locations (location_type 'owned_set', auto-created by
+ * addOwnedSet() wherever a set was placed) and anything nested inside them:
+ * a set's own spare/damaged parts (materializeOwnedSetStock() et al., src/
+ * owned_sets.php) live at that auto-generated node, and the location
+ * Explorer is purely for LOOSE stock — a set's own contents (and the set
+ * itself) are only ever seen via its own inventory page, never here.
  *
  * A per-level walk, not a recursive CTE, for the same shared-hosting
  * MariaDB-version reason as getStorageLocationPath().
  *
  * @return int[]
  */
-function getLocationSubtreeIds(int $locationId, bool $includeOwnedSetLocations = true): array
+function getLocationSubtreeIds(int $locationId): array
 {
     $pdo = getPDO();
     $ids = [$locationId];
@@ -470,11 +463,9 @@ function getLocationSubtreeIds(int $locationId, bool $includeOwnedSetLocations =
     $guard = 0;
     while (!empty($frontier) && $guard++ < 50) {
         $placeholders = implode(',', array_fill(0, count($frontier), '?'));
-        $sql = "SELECT id FROM storage_locations WHERE parent_id IN ($placeholders)";
-        if (!$includeOwnedSetLocations) {
-            $sql .= " AND (location_type IS NULL OR location_type != 'owned_set')";
-        }
-        $stmt = $pdo->prepare($sql);
+        $stmt = $pdo->prepare(
+            "SELECT id FROM storage_locations WHERE parent_id IN ($placeholders) AND (location_type IS NULL OR location_type != 'owned_set')"
+        );
         $stmt->execute($frontier);
         $frontier = array_map('intval', array_column($stmt->fetchAll(), 'id'));
         $ids = array_merge($ids, $frontier);
@@ -484,40 +475,18 @@ function getLocationSubtreeIds(int $locationId, bool $includeOwnedSetLocations =
 
 /**
  * Everything stored anywhere under $locationId — itself plus every
- * descendant location, recursively — grouped into the three buckets the
- * location Explorer's right pane renders as separate sections. The
- * Explorer is meant purely for managing LOOSE stock: parts and minifigs
- * belonging to a set (its constituent inventory, its own spares) never
- * appear here regardless of nesting, only the set itself does, in the Sets
- * group — see getLocationSubtreeIds()'s doc comment for why sets need the
- * full subtree (including owned-set instance nodes) while parts/minifigs
- * deliberately don't. Parts are further grouped by their top-level category
- * (category_name is null for a part with no category at all; the caller
- * decides the fallback label for that group).
+ * descendant location, recursively — grouped into the two buckets the
+ * location Explorer's right pane renders as separate sections. Parts are
+ * further grouped by their top-level category (category_name is null for a
+ * part with no category at all; the caller decides the fallback label for
+ * that group).
  *
- * @return array{sets: array, partsByCategory: array<string, array>, minifigs: array}
+ * @return array{partsByCategory: array<string, array>, minifigs: array}
  */
 function getLocationContentRecursive(PDO $pdo, int $locationId): array
 {
-    $allIds = getLocationSubtreeIds($locationId, true);
-    $allPlaceholders = implode(',', array_fill(0, count($allIds), '?'));
-
-    $looseIds = getLocationSubtreeIds($locationId, false);
+    $looseIds = getLocationSubtreeIds($locationId);
     $loosePlaceholders = implode(',', array_fill(0, count($looseIds), '?'));
-
-    $setsStmt = $pdo->prepare(
-        "SELECT os.id, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
-         FROM owned_sets os
-         INNER JOIN sets s ON s.id = os.set_id
-         WHERE os.location_id IN ($allPlaceholders)
-         ORDER BY s.name"
-    );
-    $setsStmt->execute($allIds);
-    $sets = $setsStmt->fetchAll();
-    foreach ($sets as &$set) {
-        $set['id'] = (int) $set['id'];
-    }
-    unset($set);
 
     // pci (part_color_images) joins on c.color_id — Rebrickable's own
     // numbering — not si.color_id/c.id (the colors.id surrogate PK
@@ -564,7 +533,7 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
     }
     unset($fig);
 
-    return ['sets' => $sets, 'partsByCategory' => $partsByCategory, 'minifigs' => $minifigs];
+    return ['partsByCategory' => $partsByCategory, 'minifigs' => $minifigs];
 }
 
 /**

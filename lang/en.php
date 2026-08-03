@@ -257,7 +257,6 @@ return [
     'location_save_failed' => 'Action failed: {message}',
     'location_explorer_select_hint' => 'Select a storage location on the left to see its contents.',
     'location_explorer_loading' => 'Loading …',
-    'location_content_group_sets' => 'Sets',
     'location_content_group_minifigs' => 'Minifigures',
     'location_content_minifigs_empty' => 'No loose minifigures at this location.',
     'location_delete_confirm' => 'Really delete location "{name}"?',

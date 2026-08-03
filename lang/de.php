@@ -257,7 +257,6 @@ return [
     'location_save_failed' => 'Aktion fehlgeschlagen: {message}',
     'location_explorer_select_hint' => 'Wähle links einen Lagerort aus, um seinen Inhalt zu sehen.',
     'location_explorer_loading' => 'Wird geladen …',
-    'location_content_group_sets' => 'Sets',
     'location_content_group_minifigs' => 'Minifiguren',
     'location_content_minifigs_empty' => 'Keine losen Minifiguren an diesem Lagerort.',
     'location_delete_confirm' => 'Lagerort "{name}" wirklich löschen?',
