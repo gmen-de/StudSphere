@@ -759,6 +759,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       var card = document.createElement('div');
       card.className = 'location-detail-card';
 
+      var qtyBadge = document.createElement('span');
+      qtyBadge.className = 'location-detail-card-qty';
+      qtyBadge.textContent = item.quantity + 'x';
+      card.appendChild(qtyBadge);
+
       var thumb = document.createElement('span');
       thumb.className = 'location-detail-card-thumb';
       thumb.innerHTML = item.thumbnail ? ('<img src="' + item.thumbnail + '" alt="">') : texts.brickIcon;
@@ -783,7 +788,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       var meta = document.createElement('span');
       meta.className = 'location-detail-card-meta';
       var condText = item.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
-      meta.textContent = (item.color_name || '') + ' \\u00b7 ' + condText + ' \\u00b7 ' + item.quantity + 'x';
+      meta.textContent = (item.color_name || '') + ' \\u00b7 ' + condText;
       card.appendChild(meta);
 
       grid.appendChild(card);
@@ -797,6 +802,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     minifigs.forEach(function(fig) {
       var card = document.createElement('div');
       card.className = 'location-detail-card';
+
+      var qtyBadge = document.createElement('span');
+      qtyBadge.className = 'location-detail-card-qty';
+      qtyBadge.textContent = fig.quantity + 'x';
+      card.appendChild(qtyBadge);
 
       var thumb = document.createElement('span');
       thumb.className = 'location-detail-card-thumb';
@@ -818,7 +828,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       var meta = document.createElement('span');
       meta.className = 'location-detail-card-meta';
       var condText = fig.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
-      meta.textContent = condText + ' \\u00b7 ' + fig.quantity + 'x';
+      meta.textContent = condText;
       card.appendChild(meta);
 
       grid.appendChild(card);
@@ -1109,11 +1119,12 @@ if (isset($_GET['page']) && $_GET['page'] === 'location_detail') {
             $thumbnail = $thumbnails[$item['part_id']] ?? null;
             $condLabel = $item['condition_type'] === 'new' ? t('condition_new') : t('condition_used');
             $content .= '<div class="location-detail-card">';
+            $content .= '<span class="location-detail-card-qty">' . (int) $item['quantity'] . 'x</span>';
             $content .= '<span class="location-detail-card-thumb">' . ($thumbnail !== null ? '<img src="' . htmlspecialchars($thumbnail) . '" alt="">' : getNavIcon('bricks')) . '</span>';
             $content .= '<span class="location-detail-card-swatch" style="background-color:#' . htmlspecialchars($item['color_rgb'] ?? 'cccccc') . ';"></span>';
             $content .= '<span class="location-detail-card-num">' . htmlspecialchars($item['part_num']) . '</span>';
             $content .= '<span class="location-detail-card-name" title="' . htmlspecialchars($item['part_name']) . '">' . htmlspecialchars($item['part_name']) . '</span>';
-            $content .= '<span class="location-detail-card-meta">' . htmlspecialchars(($item['color_name'] ?? '') . ' · ' . $condLabel . ' · ' . $item['quantity'] . 'x') . '</span>';
+            $content .= '<span class="location-detail-card-meta">' . htmlspecialchars(($item['color_name'] ?? '') . ' · ' . $condLabel) . '</span>';
             $content .= '</div>';
         }
         $content .= '</div>';
