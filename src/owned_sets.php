@@ -1241,12 +1241,11 @@ SCRIPT;
 }
 
 /**
- * "Verschieben" modal — the same 3-level cascading location picker as the
- * add-wizard's own location step (renderAddOwnedSetWizardModal() in
- * src/owned_set_wizard.php), duplicated rather than shared (self-contained
- * per-modal script, same convention as everywhere else in this file), but
- * re-parenting the instance's *existing* storage node (moveStorageLocation()
- * in src/storage.php) instead of picking a parent for a brand-new one.
+ * "Verschieben" modal — the same shared window.createLocationPicker() (app.js)
+ * as the add-wizard's own location step (renderAddOwnedSetWizardModal() in
+ * src/owned_set_wizard.php), but re-parenting the instance's *existing*
+ * storage node (moveStorageLocation() in src/storage.php) instead of
+ * picking a parent for a brand-new one.
  */
 function renderOwnedSetMoveModal(array $ownedSet): string
 {
@@ -1261,27 +1260,7 @@ function renderOwnedSetMoveModal(array $ownedSet): string
     $html .= '<input type="hidden" name="action" value="move_owned_set">';
     $html .= '<input type="hidden" name="owned_set_id" value="' . (int) $ownedSet['id'] . '">';
     $html .= '<input type="hidden" name="parent_location_id" id="owned-set-move-parent-id">';
-
-    $locationLevels = [
-        [1, 'add_stock_level1_label'],
-        [2, 'add_stock_level2_label'],
-        [3, 'add_stock_level3_label'],
-    ];
-    foreach ($locationLevels as [$level, $labelKey]) {
-        $html .= '<div class="location-level">';
-        $html .= '<span class="location-level-label">' . htmlspecialchars(t($labelKey)) . '</span>';
-        $html .= '<select id="owned-set-move-location-' . $level . '"' . ($level > 1 ? ' disabled' : '') . '>';
-        $html .= '<option value="">' . htmlspecialchars(t('add_stock_select_placeholder')) . '</option>';
-        if ($level === 1) {
-            foreach (getChildLocations(null) as $loc) {
-                $html .= '<option value="' . (int) $loc['id'] . '">' . htmlspecialchars($loc['name']) . '</option>';
-            }
-        }
-        $html .= '</select>';
-        $html .= '<span class="location-hint" id="owned-set-move-location-' . $level . '-hint"></span>';
-        $html .= '</div>';
-    }
-
+    $html .= '<div class="location-picker" id="owned-set-move-location-picker"></div>';
     $html .= '<p class="owned-set-wizard-error" id="owned-set-move-error"></p>';
     $html .= '<button type="submit">' . htmlspecialchars(t('owned_set_move_button')) . '</button>';
     $html .= '</form>';
@@ -1290,6 +1269,7 @@ function renderOwnedSetMoveModal(array $ownedSet): string
     $labelsJson = json_encode([
         'selectPlaceholder' => t('add_stock_select_placeholder'),
         'noChildren' => t('add_stock_no_children'),
+        'levelLabel' => t('location_picker_level_label'),
         'locationRequired' => t('owned_set_wizard_location_required'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
@@ -1301,58 +1281,16 @@ function renderOwnedSetMoveModal(array $ownedSet): string
   var modal = document.getElementById('owned-set-move-modal');
   var closeBtn = document.getElementById('owned-set-move-modal-close');
   var form = document.getElementById('owned-set-move-form');
-  var loc1 = document.getElementById('owned-set-move-location-1');
-  var loc2 = document.getElementById('owned-set-move-location-2');
-  var loc3 = document.getElementById('owned-set-move-location-3');
-  var loc2Hint = document.getElementById('owned-set-move-location-2-hint');
-  var loc3Hint = document.getElementById('owned-set-move-location-3-hint');
+  var pickerContainer = document.getElementById('owned-set-move-location-picker');
   var parentIdField = document.getElementById('owned-set-move-parent-id');
   var errorEl = document.getElementById('owned-set-move-error');
-  if (!openBtn || !modal || !closeBtn || !form || !loc1 || !loc2 || !loc3) {
+  if (!openBtn || !modal || !closeBtn || !form || !pickerContainer) {
     return;
   }
 
-  function fillLocationSelect(select, hint, parentId) {
-    hint.textContent = '';
-    var params = new URLSearchParams();
-    params.set('action', 'location_children');
-    params.set('parent_id', parentId);
-    return fetch('?' + params.toString(), { credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-        (data.children || []).forEach(function(loc) {
-          var opt = document.createElement('option');
-          opt.value = loc.id;
-          opt.textContent = loc.name;
-          select.appendChild(opt);
-        });
-        var hasChildren = (data.children || []).length > 0;
-        select.disabled = !hasChildren;
-        if (!hasChildren) {
-          hint.textContent = texts.noChildren;
-        }
-      });
-  }
-
-  loc1.addEventListener('change', function() {
-    loc2.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    loc2.disabled = true;
-    loc3.disabled = true;
-    loc2Hint.textContent = '';
-    loc3Hint.textContent = '';
-    if (loc1.value) {
-      fillLocationSelect(loc2, loc2Hint, loc1.value);
-    }
-  });
-  loc2.addEventListener('change', function() {
-    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    loc3.disabled = true;
-    loc3Hint.textContent = '';
-    if (loc2.value) {
-      fillLocationSelect(loc3, loc3Hint, loc2.value);
-    }
+  var selectedLocationId = null;
+  window.createLocationPicker(pickerContainer, texts, function(value) {
+    selectedLocationId = value;
   });
 
   function openModal() {
@@ -1378,13 +1316,12 @@ function renderOwnedSetMoveModal(array $ownedSet): string
   });
 
   form.addEventListener('submit', function(e) {
-    var selected = loc3.value || loc2.value || loc1.value;
-    if (!selected) {
+    if (!selectedLocationId) {
       e.preventDefault();
       errorEl.textContent = texts.locationRequired;
       return;
     }
-    parentIdField.value = selected;
+    parentIdField.value = selectedLocationId;
   });
 })();
 </script>

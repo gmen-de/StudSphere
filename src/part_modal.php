@@ -33,9 +33,7 @@ function renderPartDetailModal(): string
             'conditionLabel' => t('add_stock_condition_label'),
             'conditionNew' => t('condition_new'),
             'conditionUsed' => t('condition_used'),
-            'level1Label' => t('add_stock_level1_label'),
-            'level2Label' => t('add_stock_level2_label'),
-            'level3Label' => t('add_stock_level3_label'),
+            'levelLabel' => t('location_picker_level_label'),
             'selectPlaceholder' => t('add_stock_select_placeholder'),
             'noChildren' => t('add_stock_no_children'),
             'printOfLabel' => t('print_of_label'),
@@ -88,54 +86,6 @@ function renderPartDetailModal(): string
       closeModal();
     }
   });
-
-  function buildLevelSelect(labelText, level) {
-    var wrap = document.createElement('div');
-    wrap.className = 'location-level';
-    var labelSpan = document.createElement('span');
-    labelSpan.className = 'location-level-label';
-    labelSpan.textContent = labelText;
-    wrap.appendChild(labelSpan);
-    var select = document.createElement('select');
-    select.dataset.level = level;
-    select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    wrap.appendChild(select);
-    var hint = document.createElement('span');
-    hint.className = 'location-hint';
-    wrap.appendChild(hint);
-    return wrap;
-  }
-
-  function fillLocationSelect(select, hint, parentId, callback) {
-    hint.textContent = '';
-    var params = new URLSearchParams();
-    params.set('action', 'location_children');
-    if (parentId !== null) {
-      params.set('parent_id', parentId);
-    }
-    fetch('?' + params.toString(), { credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-        (data.children || []).forEach(function(loc) {
-          var opt = document.createElement('option');
-          opt.value = loc.id;
-          opt.textContent = loc.name;
-          select.appendChild(opt);
-        });
-        var hasChildren = (data.children || []).length > 0;
-        select.disabled = !hasChildren;
-        if (!hasChildren) {
-          hint.textContent = texts.noChildren;
-        }
-        if (callback) {
-          callback();
-        }
-      })
-      .catch(function() {
-        hint.textContent = texts.errorRetry;
-      });
-  }
 
   function openPartModal(partId) {
     content.innerHTML = '';
@@ -672,51 +622,12 @@ function renderPartDetailModal(): string
     condLabel.appendChild(condSelect);
     form.appendChild(condLabel);
 
-    var level1Wrap = buildLevelSelect(texts.level1Label, 1);
-    var level2Wrap = buildLevelSelect(texts.level2Label, 2);
-    var level3Wrap = buildLevelSelect(texts.level3Label, 3);
-    var level1Select = level1Wrap.querySelector('select');
-    var level2Select = level2Wrap.querySelector('select');
-    var level3Select = level3Wrap.querySelector('select');
-    var level1Hint = level1Wrap.querySelector('.location-hint');
-    var level2Hint = level2Wrap.querySelector('.location-hint');
-    var level3Hint = level3Wrap.querySelector('.location-hint');
-    level2Select.disabled = true;
-    level3Select.disabled = true;
-    form.appendChild(level1Wrap);
-    form.appendChild(level2Wrap);
-    form.appendChild(level3Wrap);
-
-    level1Select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    (data.rootLocations || []).forEach(function(loc) {
-      var opt = document.createElement('option');
-      opt.value = loc.id;
-      opt.textContent = loc.name;
-      level1Select.appendChild(opt);
-    });
-    if ((data.rootLocations || []).length === 0) {
-      level1Hint.textContent = texts.noChildren;
-    }
-
-    level1Select.addEventListener('change', function() {
-      level2Select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-      level3Select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-      level2Select.disabled = true;
-      level3Select.disabled = true;
-      level2Hint.textContent = '';
-      level3Hint.textContent = '';
-      if (level1Select.value) {
-        fillLocationSelect(level2Select, level2Hint, level1Select.value);
-      }
-    });
-
-    level2Select.addEventListener('change', function() {
-      level3Select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-      level3Select.disabled = true;
-      level3Hint.textContent = '';
-      if (level2Select.value) {
-        fillLocationSelect(level3Select, level3Hint, level2Select.value);
-      }
+    var locationContainer = document.createElement('div');
+    locationContainer.className = 'location-picker';
+    form.appendChild(locationContainer);
+    var selectedLocationId = null;
+    window.createLocationPicker(locationContainer, texts, function(value) {
+      selectedLocationId = value;
     });
 
     var submitBtn = document.createElement('button');
@@ -736,7 +647,7 @@ function renderPartDetailModal(): string
       formData.set('color_id', colorHiddenInput.value);
       formData.set('quantity', qtyInput.value);
       formData.set('condition_type', condSelect.value);
-      formData.set('location_id', level3Select.value);
+      formData.set('location_id', selectedLocationId || '');
 
       fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
         .then(function(r) { return r.json(); })

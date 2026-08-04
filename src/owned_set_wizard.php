@@ -78,25 +78,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
 
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['location'] . '" data-step="' . $stepNames['location'] . '"' . ($hasVersionStep ? ' style="display:none;"' : '') . '>';
     $html .= '<h3>' . htmlspecialchars(t('owned_set_wizard_step1_heading')) . '</h3>';
-    $locationLevels = [
-        [1, 'add_stock_level1_label'],
-        [2, 'add_stock_level2_label'],
-        [3, 'add_stock_level3_label'],
-    ];
-    foreach ($locationLevels as [$level, $labelKey]) {
-        $html .= '<div class="location-level">';
-        $html .= '<span class="location-level-label">' . htmlspecialchars(t($labelKey)) . '</span>';
-        $html .= '<select id="owned-set-wizard-location-' . $level . '"' . ($level > 1 ? ' disabled' : '') . '>';
-        $html .= '<option value="">' . htmlspecialchars(t('add_stock_select_placeholder')) . '</option>';
-        if ($level === 1) {
-            foreach (getChildLocations(null) as $loc) {
-                $html .= '<option value="' . (int) $loc['id'] . '">' . htmlspecialchars($loc['name']) . '</option>';
-            }
-        }
-        $html .= '</select>';
-        $html .= '<span class="location-hint" id="owned-set-wizard-location-' . $level . '-hint"></span>';
-        $html .= '</div>';
-    }
+    $html .= '<div class="location-picker" id="owned-set-wizard-location-picker"></div>';
     $html .= '</div>';
 
     $footerHtml .= '<div class="owned-set-wizard-footer-step" data-step="' . $stepNames['location'] . '" style="display:none;">';
@@ -184,6 +166,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         'errorRetry' => t('import_error_retry'),
         'selectPlaceholder' => t('add_stock_select_placeholder'),
         'noChildren' => t('add_stock_no_children'),
+        'levelLabel' => t('location_picker_level_label'),
         'ownedLabel' => t('owned_set_inventory_owned_label'),
         'damagedLabel' => t('owned_set_wizard_damaged_label'),
         'ownedIcon' => getPartStatusIcon('owned'),
@@ -254,62 +237,19 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   // into the markup like the other steps' static data-back attributes.
   var overviewBackTarget = QUESTION_STEP;
 
-  var loc1 = document.getElementById('owned-set-wizard-location-1');
-  var loc2 = document.getElementById('owned-set-wizard-location-2');
-  var loc3 = document.getElementById('owned-set-wizard-location-3');
-  var loc2Hint = document.getElementById('owned-set-wizard-location-2-hint');
-  var loc3Hint = document.getElementById('owned-set-wizard-location-3-hint');
-
-  function fillLocationSelect(select, hint, parentId) {
-    hint.textContent = '';
-    var params = new URLSearchParams();
-    params.set('action', 'location_children');
-    params.set('parent_id', parentId);
-    return fetch('?' + params.toString(), { credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-        (data.children || []).forEach(function(loc) {
-          var opt = document.createElement('option');
-          opt.value = loc.id;
-          opt.textContent = loc.name;
-          select.appendChild(opt);
-        });
-        var hasChildren = (data.children || []).length > 0;
-        select.disabled = !hasChildren;
-        if (!hasChildren) {
-          hint.textContent = texts.noChildren;
-        }
-      });
-  }
-
   // The deepest level the user actually picked becomes the owned-set's
-  // parent location — drilling all 3 levels isn't required (unlike the
-  // part-detail "add stock" picker, which always needs an exact slot; here
-  // any node in the tree is a valid place to put a whole set).
+  // parent location — drilling to an exact leaf isn't required (unlike the
+  // part-detail "add stock" picker; here any node in the tree is a valid
+  // place to put a whole set).
+  var selectedLocationId = null;
+  var locationPicker = window.createLocationPicker(
+    document.getElementById('owned-set-wizard-location-picker'),
+    texts,
+    function(value) { selectedLocationId = value; }
+  );
   function getSelectedLocationId() {
-    return loc3.value || loc2.value || loc1.value;
+    return selectedLocationId;
   }
-
-  loc1.addEventListener('change', function() {
-    loc2.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    loc2.disabled = true;
-    loc3.disabled = true;
-    loc2Hint.textContent = '';
-    loc3Hint.textContent = '';
-    if (loc1.value) {
-      fillLocationSelect(loc2, loc2Hint, loc1.value);
-    }
-  });
-  loc2.addEventListener('change', function() {
-    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    loc3.disabled = true;
-    loc3Hint.textContent = '';
-    if (loc2.value) {
-      fillLocationSelect(loc3, loc3Hint, loc2.value);
-    }
-  });
 
   function showStep(n) {
     steps.forEach(function(step) {
@@ -336,13 +276,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     totalSteps = QUESTION_STEP;
     var firstVersionRadio = modal.querySelector('input[name="owned-set-wizard-version"]');
     if (firstVersionRadio) { firstVersionRadio.checked = true; }
-    loc1.value = '';
-    loc2.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    loc3.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-    loc2.disabled = true;
-    loc3.disabled = true;
-    loc2Hint.textContent = '';
-    loc3Hint.textContent = '';
+    locationPicker.reset();
     document.getElementById('owned-set-wizard-step1-error').textContent = '';
     document.getElementById('owned-set-wizard-step3-error').textContent = '';
     document.getElementById('owned-set-wizard-step4-error').textContent = '';
@@ -1037,9 +971,7 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   }
 
   function getSelectedLocationLabel() {
-    var select = loc3.value ? loc3 : (loc2.value ? loc2 : loc1);
-    var opt = select.options[select.selectedIndex];
-    return opt ? opt.textContent : '';
+    return locationPicker.getLabel();
   }
 
   // table is a <table class="set-detail-table"> — th=label, td=value,

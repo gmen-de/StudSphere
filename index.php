@@ -268,6 +268,12 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '<title>' . htmlspecialchars($title) . '</title>';
     echo '<link rel="icon" type="image/svg+xml" href="favicon.svg">';
     echo '<link rel="stylesheet" href="style.css?v=' . htmlspecialchars(getCurrentVersion()) . '">';
+    // Not defer: it only defines window.createLocationPicker (touches no DOM
+    // at load time), and several inline <script> blocks later in the body
+    // call that function immediately as the parser reaches them - a
+    // deferred load would run after those, leaving it undefined when they
+    // need it.
+    echo '<script src="app.js?v=' . htmlspecialchars(getCurrentVersion()) . '"></script>';
     echo '</head><body>';
 
     echo '<div class="status-bar-wrap"><div class="status-bar">';

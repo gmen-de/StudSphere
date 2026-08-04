@@ -482,7 +482,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
         'part' => $part,
         'knownColors' => $colors['known'],
         'otherColors' => $colors['other'],
-        'rootLocations' => getChildLocations(null),
         'printParent' => getPrintParent($pdo, $partId),
     ], JSON_UNESCAPED_UNICODE);
     exit;
