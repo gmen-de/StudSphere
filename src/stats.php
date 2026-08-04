@@ -12,11 +12,12 @@ require_once __DIR__ . '/owned_sets.php';
  * - "Bausteine gesamt": every physical piece the household owns, loose or
  *   currently built into an owned set (SUM(quantity) across all of
  *   storage_items).
- * - "einzelne Bausteine": distinct part+color *types* that are actually
- *   loose and free to grab for a build right now — deliberately excludes
- *   stock materialized at an owned-set's own location (location_type
- *   'owned_set', see src/owned_sets.php), since those pieces are "owned"
- *   but not really "available" until the set is taken apart.
+ * - "einzelne Bausteine": total piece count of stock that's actually loose
+ *   and free to grab for a build right now (SUM(quantity), not a
+ *   distinct-type count) — deliberately excludes stock materialized at an
+ *   owned-set's own location (location_type 'owned_set', see
+ *   src/owned_sets.php), since those pieces are "owned" but not really
+ *   "available" until the set is taken apart.
  * - "Sets": how many set instances are in owned_sets (physical copies, so
  *   owning the same set twice counts as 2 — matches "Bausteine gesamt"
  *   being a piece count, not a distinct-item count).
@@ -71,7 +72,7 @@ function refreshAppStatsCache(PDO $pdo): array
     $stats = [
         'bricks_total' => (int) $pdo->query('SELECT COALESCE(SUM(quantity), 0) FROM storage_items')->fetchColumn(),
         'bricks_distinct' => (int) $pdo->query(
-            "SELECT COUNT(DISTINCT si.part_id, si.color_id)
+            "SELECT COALESCE(SUM(si.quantity), 0)
              FROM storage_items si
              INNER JOIN storage_locations sl ON sl.id = si.location_id
              WHERE si.quantity > 0 AND (sl.location_type IS NULL OR sl.location_type != 'owned_set')"
