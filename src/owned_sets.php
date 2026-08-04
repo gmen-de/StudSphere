@@ -3292,7 +3292,7 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
     $html .= '<span class="owned-set-photo-upload-icon">' . getActionIcon('upload') . '</span>';
     $html .= '<span class="owned-set-photo-upload-text">' . htmlspecialchars(t('owned_set_photo_upload_hint')) . '</span>';
     $html .= '<input type="text" id="owned-set-photo-caption-input" class="owned-set-photo-upload-caption" placeholder="' . htmlspecialchars(t('owned_set_photo_caption_placeholder')) . '" maxlength="255">';
-    $html .= '<input type="file" id="owned-set-photo-file-input" accept="image/*" hidden>';
+    $html .= '<input type="file" id="owned-set-photo-file-input" accept="image/*" multiple hidden>';
     $html .= '<span class="instruction-upload-message" id="owned-set-photo-message"></span>';
     $html .= '</div>';
 
@@ -3420,23 +3420,17 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
     grid.appendChild(tile);
   }
 
-  function uploadFile(file) {
-    if (!file) {
-      return;
-    }
-    msg.textContent = texts.uploading;
+  function uploadOne(file) {
     var formData = new FormData();
     formData.set("action", "upload_owned_set_photo");
     formData.set("owned_set_id", "{$ownedSet['id']}");
     formData.set("caption", captionInput.value);
     formData.set("photo_file", file);
 
-    fetch("?", { method: "POST", body: formData, credentials: "same-origin" })
+    return fetch("?", { method: "POST", body: formData, credentials: "same-origin" })
       .then(function(r) { return r.json(); })
       .then(function(res) {
-        msg.textContent = "";
         if (res.success) {
-          captionInput.value = "";
           addPhotoTile(res.photo);
         } else {
           msg.textContent = res.message;
@@ -3447,6 +3441,25 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
       });
   }
 
+  // Uploaded one at a time (not in parallel) so tiles appear in drop order
+  // and a failure partway through a multi-file drop still leaves the
+  // "uploading" message / earlier successes intact instead of racing.
+  function uploadFiles(files) {
+    var list = Array.prototype.slice.call(files || []);
+    if (list.length === 0) {
+      return;
+    }
+    msg.textContent = texts.uploading;
+    var chain = Promise.resolve();
+    list.forEach(function(file) {
+      chain = chain.then(function() { return uploadOne(file); });
+    });
+    chain.then(function() {
+      msg.textContent = "";
+      captionInput.value = "";
+    });
+  }
+
   uploadTile.addEventListener("click", function(e) {
     if (e.target === captionInput) {
       return;
@@ -3454,9 +3467,7 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
     fileInput.click();
   });
   fileInput.addEventListener("change", function() {
-    if (fileInput.files && fileInput.files[0]) {
-      uploadFile(fileInput.files[0]);
-    }
+    uploadFiles(fileInput.files);
     fileInput.value = "";
   });
   captionInput.addEventListener("click", function(e) {
@@ -3482,10 +3493,7 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
     e.preventDefault();
     dragCounter = 0;
     uploadTile.classList.remove("owned-set-photo-upload-dragover");
-    var files = e.dataTransfer && e.dataTransfer.files;
-    if (files && files[0]) {
-      uploadFile(files[0]);
-    }
+    uploadFiles(e.dataTransfer && e.dataTransfer.files);
   });
 })();
 </script>
