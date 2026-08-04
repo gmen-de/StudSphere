@@ -49,12 +49,15 @@ function renderPartDetailModal(): string
             'addButton' => t('add_stock_button'),
             'errorRetry' => t('import_error_retry'),
             'tabStorage' => t('part_tab_storage'),
+            'tabCombinedStorage' => t('part_tab_combined_storage'),
             'tabPurchase' => t('part_tab_purchase'),
             'stockEmpty' => t('part_stock_empty'),
             'stockLocationLabel' => t('part_stock_location_label'),
             'stockColorLabel' => t('part_stock_color_label'),
             'stockConditionLabel' => t('part_stock_condition_label'),
             'stockQuantityLabel' => t('part_stock_quantity_label'),
+            'stockInSetLabel' => t('part_stock_in_set_label'),
+            'backToSummary' => t('part_stock_back_to_summary'),
             'purchasePlaceholder' => t('part_purchase_placeholder'),
             'locationOpenNewTab' => t('location_detail_open_new_tab'),
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
@@ -339,16 +342,148 @@ function renderPartDetailModal(): string
     panelAddStock.className = 'part-modal-tab-panel';
     var panelStorage = document.createElement('div');
     panelStorage.className = 'part-modal-tab-panel';
+    var panelCombinedStorage = document.createElement('div');
+    panelCombinedStorage.className = 'part-modal-tab-panel';
     var panelPurchase = document.createElement('div');
     panelPurchase.className = 'part-modal-tab-panel';
 
     var tabs = [
       { label: texts.addToInventoryTitle, panel: panelAddStock },
       { label: texts.tabStorage, panel: panelStorage },
+      { label: texts.tabCombinedStorage, panel: panelCombinedStorage },
       { label: texts.tabPurchase, panel: panelPurchase }
     ];
     var tabButtons = [];
     var stockLoadedForPart = null;
+    var combinedStockLoadedForPart = null;
+
+    function buildStockCard(row, onActivate) {
+      var card = document.createElement('div');
+      card.className = 'part-stock-card';
+      card.tabIndex = 0;
+      card.setAttribute('role', onActivate.isLink ? 'link' : 'button');
+      card.addEventListener('click', onActivate);
+      card.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onActivate();
+        }
+      });
+
+      var swatch = document.createElement('span');
+      swatch.className = 'part-stock-card-swatch';
+      swatch.style.backgroundColor = row.color_rgb ? '#' + row.color_rgb.replace('#', '') : '#cccccc';
+      card.appendChild(swatch);
+
+      var qty = document.createElement('span');
+      qty.className = 'part-stock-card-qty';
+      qty.textContent = row.quantity + 'x';
+      card.appendChild(qty);
+
+      return card;
+    }
+
+    function loadPartStockSummary() {
+      panelCombinedStorage.innerHTML = '';
+      var grid = document.createElement('div');
+      grid.className = 'part-stock-grid';
+      panelCombinedStorage.appendChild(grid);
+      fetch('?action=part_stock_summary&part_id=' + encodeURIComponent(part.id), { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var rows = data.summary || [];
+          if (rows.length === 0) {
+            grid.textContent = texts.stockEmpty;
+            return;
+          }
+          rows.forEach(function(row) {
+            var card = buildStockCard(row, function() {
+              openPartStockDetail(row);
+            });
+
+            var meta = document.createElement('span');
+            meta.className = 'part-stock-card-meta';
+            meta.textContent = row.color_name || '';
+            card.appendChild(meta);
+
+            grid.appendChild(card);
+          });
+        })
+        .catch(function() {
+          grid.textContent = texts.errorRetry;
+        });
+    }
+
+    function openPartStockDetail(colorRow) {
+      panelCombinedStorage.innerHTML = '';
+
+      var backLink = document.createElement('a');
+      backLink.href = '#';
+      backLink.className = 'part-sets-back';
+      backLink.textContent = texts.backToSummary;
+      backLink.addEventListener('click', function(e) {
+        e.preventDefault();
+        loadPartStockSummary();
+      });
+      panelCombinedStorage.appendChild(backLink);
+
+      var grid = document.createElement('div');
+      grid.className = 'part-stock-grid';
+      panelCombinedStorage.appendChild(grid);
+
+      var params = new URLSearchParams();
+      params.set('action', 'part_stock_detail');
+      params.set('part_id', part.id);
+      if (colorRow.color_id !== null && colorRow.color_id !== undefined) {
+        params.set('color_id', colorRow.color_id);
+      }
+      fetch('?' + params.toString(), { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var rows = data.detail || [];
+          if (rows.length === 0) {
+            grid.textContent = texts.stockEmpty;
+            return;
+          }
+          rows.forEach(function(row) {
+            var isSet = row.owned_set_id !== null && row.owned_set_id !== undefined;
+            var url = isSet
+              ? '?page=owned_set_detail&id=' + encodeURIComponent(row.owned_set_id)
+              : '?page=location_detail&id=' + encodeURIComponent(row.location_id);
+
+            var activate = function() { window.location.href = url; };
+            activate.isLink = true;
+            var card = buildStockCard(row, activate);
+
+            var newTabLink = document.createElement('a');
+            newTabLink.className = 'part-stock-card-newtab';
+            newTabLink.href = url;
+            newTabLink.target = '_blank';
+            newTabLink.rel = 'noopener';
+            newTabLink.title = texts.locationOpenNewTab;
+            newTabLink.setAttribute('aria-label', texts.locationOpenNewTab);
+            newTabLink.addEventListener('click', function(e) {
+              e.stopPropagation();
+            });
+            newTabLink.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>';
+            card.appendChild(newTabLink);
+
+            var meta = document.createElement('span');
+            meta.className = 'part-stock-card-meta';
+            var condText = row.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
+            var placeText = isSet
+              ? texts.stockInSetLabel + ': ' + row.set_name + ' (' + row.set_num + ')'
+              : row.location_path;
+            meta.textContent = condText + ' · ' + placeText;
+            card.appendChild(meta);
+
+            grid.appendChild(card);
+          });
+        })
+        .catch(function() {
+          grid.textContent = texts.errorRetry;
+        });
+    }
 
     function loadPartStock() {
       panelStorage.innerHTML = '';
@@ -366,19 +501,9 @@ function renderPartDetailModal(): string
           rows.forEach(function(row) {
             var url = '?page=location_detail&id=' + encodeURIComponent(row.location_id);
 
-            var card = document.createElement('div');
-            card.className = 'part-stock-card';
-            card.tabIndex = 0;
-            card.setAttribute('role', 'link');
-            card.addEventListener('click', function() {
-              window.location.href = url;
-            });
-            card.addEventListener('keydown', function(e) {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                window.location.href = url;
-              }
-            });
+            var activate = function() { window.location.href = url; };
+            activate.isLink = true;
+            var card = buildStockCard(row, activate);
 
             var newTabLink = document.createElement('a');
             newTabLink.className = 'part-stock-card-newtab';
@@ -392,16 +517,6 @@ function renderPartDetailModal(): string
             });
             newTabLink.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>';
             card.appendChild(newTabLink);
-
-            var swatch = document.createElement('span');
-            swatch.className = 'part-stock-card-swatch';
-            swatch.style.backgroundColor = row.color_rgb ? '#' + row.color_rgb.replace('#', '') : '#cccccc';
-            card.appendChild(swatch);
-
-            var qty = document.createElement('span');
-            qty.className = 'part-stock-card-qty';
-            qty.textContent = row.quantity + 'x';
-            card.appendChild(qty);
 
             var meta = document.createElement('span');
             meta.className = 'part-stock-card-meta';
@@ -425,6 +540,10 @@ function renderPartDetailModal(): string
       if (tabs[index].panel === panelStorage && stockLoadedForPart !== part.id) {
         stockLoadedForPart = part.id;
         loadPartStock();
+      }
+      if (tabs[index].panel === panelCombinedStorage && combinedStockLoadedForPart !== part.id) {
+        combinedStockLoadedForPart = part.id;
+        loadPartStockSummary();
       }
     }
 

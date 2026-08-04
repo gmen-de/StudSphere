@@ -1100,6 +1100,21 @@ if (isset($_GET['action']) && $_GET['action'] === 'part_stock') {
     exit;
 }
 
+if (isset($_GET['action']) && $_GET['action'] === 'part_stock_summary') {
+    header('Content-Type: application/json');
+    $partId = (int) ($_GET['part_id'] ?? 0);
+    echo json_encode(['summary' => getPartStockSummary($partId)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'part_stock_detail') {
+    header('Content-Type: application/json');
+    $partId = (int) ($_GET['part_id'] ?? 0);
+    $colorId = isset($_GET['color_id']) && $_GET['color_id'] !== '' ? (int) $_GET['color_id'] : null;
+    echo json_encode(['detail' => getPartStockDetail($partId, $colorId)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_stock') {
     header('Content-Type: application/json');
     try {

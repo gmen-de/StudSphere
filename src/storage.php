@@ -371,9 +371,12 @@ function setStorageItemSpareQuantity(int $locationId, int $partId, int $colorId,
 }
 
 /**
- * Current stock of one part across all storage locations, for the part
- * detail modal's "Lager" tab — one row per location/color/condition combo
- * that actually holds stock.
+ * Current LOOSE stock of one part across all storage locations, for the
+ * part detail modal's "Teilelager" tab — one row per location/color/
+ * condition combo that actually holds stock. Excludes owned-set instance
+ * locations (location_type 'owned_set') the same way getLocationSubtreeIds()
+ * does, so a part materialized into a set's own inventory doesn't show up
+ * here as if it were separately-stored loose stock.
  *
  * @return array<int, array{location_id:int, location_path:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int}>
  */
@@ -381,12 +384,14 @@ function getPartStock(int $partId): array
 {
     $pdo = getPDO();
     $stmt = $pdo->prepare(
-        'SELECT si.location_id, si.condition_type, si.quantity,
+        "SELECT si.location_id, si.condition_type, si.quantity,
                 c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb
          FROM storage_items si
+         INNER JOIN storage_locations sl ON sl.id = si.location_id
          LEFT JOIN colors c ON c.id = si.color_id
          WHERE si.part_id = ? AND si.quantity > 0
-         ORDER BY si.location_id'
+           AND (sl.location_type IS NULL OR sl.location_type != 'owned_set')
+         ORDER BY si.location_id"
     );
     $stmt->execute([$partId]);
     $rows = $stmt->fetchAll();
@@ -395,6 +400,80 @@ function getPartStock(int $partId): array
         $row['location_path'] = getStorageLocationPath($row['location_id']);
         $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
         $row['quantity'] = (int) $row['quantity'];
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
+ * Per-color totals of one part's stock across BOTH loose locations and
+ * owned sets' materialized inventories, for the part detail modal's
+ * "Set- und Teilelager" tab overview — one summary card per color, with the
+ * per-location/per-set breakdown left to getPartStockDetail() once a card
+ * is clicked.
+ *
+ * @return array<int, array{color_id:?int, color_name:?string, color_rgb:?string, quantity:int}>
+ */
+function getPartStockSummary(int $partId): array
+{
+    $pdo = getPDO();
+    $stmt = $pdo->prepare(
+        'SELECT c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb, SUM(si.quantity) AS quantity
+         FROM storage_items si
+         LEFT JOIN colors c ON c.id = si.color_id
+         WHERE si.part_id = ? AND si.quantity > 0
+         GROUP BY c.id, c.name, c.rgb
+         ORDER BY c.name IS NULL, c.name'
+    );
+    $stmt->execute([$partId]);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
+        $row['quantity'] = (int) $row['quantity'];
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
+ * Same shape as getPartStock(), but without the loose-only filter, and with
+ * owned-set instance rows carrying the owned_sets row they belong to
+ * (ownedSetId/setName/setNum) so the "Set- und Teilelager" tab's drill-down
+ * can link straight to the set's own detail page instead of location_detail
+ * (which owned-set locations were never meant to be reached through — see
+ * addOwnedSet()'s doc comment in owned_sets.php). Optionally scoped to one
+ * color, for the drill-down from a single summary card.
+ *
+ * @return array<int, array{location_id:int, location_path:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int, ownedSetId:?int, setName:?string, setNum:?string}>
+ */
+function getPartStockDetail(int $partId, ?int $colorId): array
+{
+    $pdo = getPDO();
+    $sql = 'SELECT si.location_id, si.condition_type, si.quantity,
+                   c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb,
+                   os.id AS owned_set_id, s.name AS set_name, s.rebrickable_set_num AS set_num
+            FROM storage_items si
+            LEFT JOIN colors c ON c.id = si.color_id
+            LEFT JOIN owned_sets os ON os.location_id = si.location_id
+            LEFT JOIN sets s ON s.id = os.set_id
+            WHERE si.part_id = ? AND si.quantity > 0';
+    $params = [$partId];
+    if ($colorId !== null) {
+        $sql .= ' AND si.color_id = ?';
+        $params[] = $colorId;
+    } else {
+        $sql .= ' AND si.color_id IS NULL';
+    }
+    $sql .= ' ORDER BY si.location_id';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['location_id'] = (int) $row['location_id'];
+        $row['location_path'] = getStorageLocationPath($row['location_id']);
+        $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
+        $row['quantity'] = (int) $row['quantity'];
+        $row['owned_set_id'] = $row['owned_set_id'] !== null ? (int) $row['owned_set_id'] : null;
     }
     unset($row);
     return $rows;
