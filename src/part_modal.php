@@ -79,16 +79,6 @@ function renderPartDetailModal(): string
   }
 
   closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function(e) {
-    if (e.target === modal) {
-      closeModal();
-    }
-  });
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && modal.style.display !== 'none') {
-      closeModal();
-    }
-  });
 
   function openPartModal(partId) {
     content.innerHTML = '';

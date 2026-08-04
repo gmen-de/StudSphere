@@ -1189,16 +1189,6 @@ function renderOwnedSetEditModal(array $ownedSet): string
     openModal();
   });
   closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function(e) {
-    if (e.target === modal) {
-      closeModal();
-    }
-  });
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && modal.style.display !== 'none') {
-      closeModal();
-    }
-  });
 
   var detailPairs = [
     ['instructions', 'owned-set-edit-has-instructions', true],
@@ -1304,16 +1294,6 @@ function renderOwnedSetMoveModal(array $ownedSet): string
     openModal();
   });
   closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function(e) {
-    if (e.target === modal) {
-      closeModal();
-    }
-  });
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && modal.style.display !== 'none') {
-      closeModal();
-    }
-  });
 
   form.addEventListener('submit', function(e) {
     if (!selectedLocationId) {
@@ -1382,16 +1362,6 @@ function renderOwnedSetSellModal(array $ownedSet): string
     openModal();
   });
   closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function(e) {
-    if (e.target === modal) {
-      closeModal();
-    }
-  });
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && modal.style.display !== 'none') {
-      closeModal();
-    }
-  });
 
   form.addEventListener('submit', function(e) {
     if (!window.confirm($confirmJson)) {
@@ -1531,11 +1501,6 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
     modal.style.display = 'none';
   }
   closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function(e) {
-    if (e.target === modal) {
-      closeModal();
-    }
-  });
 
   function showResultModal(xmlText) {
     xmlTextarea.value = xmlText || '';
@@ -1545,11 +1510,6 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
     resultModal.style.display = 'none';
   }
   resultCloseBtn.addEventListener('click', closeResultModal);
-  resultModal.addEventListener('click', function(e) {
-    if (e.target === resultModal) {
-      closeResultModal();
-    }
-  });
 
   var ringCircumference = 2 * Math.PI * 42;
   syncRingFill.style.strokeDasharray = String(ringCircumference);
@@ -1574,24 +1534,6 @@ function renderOwnedSetBricklinkModal(array $ownedSet): string
     syncStatusEl.textContent = done + ' / ' + total;
   }
   syncCloseBtn.addEventListener('click', closeSyncModal);
-  syncModal.addEventListener('click', function(e) {
-    if (e.target === syncModal) {
-      closeSyncModal();
-    }
-  });
-
-  document.addEventListener('keydown', function(e) {
-    if (e.key !== 'Escape') {
-      return;
-    }
-    if (syncModal.style.display !== 'none') {
-      closeSyncModal();
-    } else if (resultModal.style.display !== 'none') {
-      closeResultModal();
-    } else if (modal.style.display !== 'none') {
-      closeModal();
-    }
-  });
 
   function runPartSync(partNums, batchSize) {
     var total = partNums.length;
@@ -2098,16 +2040,6 @@ function renderOwnedSetQuantityModalScript(array $ownedSet, string $ownedField, 
     modalContent.innerHTML = '';
   }
   closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function(e) {
-    if (e.target === modal) {
-      closeModal();
-    }
-  });
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && modal.style.display !== 'none') {
-      closeModal();
-    }
-  });
 
   function buildStepper(minVal, maxVal, value) {
     var wrap = document.createElement('div');
@@ -2391,16 +2323,6 @@ function renderOwnedSetMinifigQuantityModalScript(array $ownedSet): string
     modalContent.innerHTML = '';
   }
   closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function(e) {
-    if (e.target === modal) {
-      closeModal();
-    }
-  });
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && modal.style.display !== 'none') {
-      closeModal();
-    }
-  });
 
   function buildStepper(minVal, maxVal, value) {
     var wrap = document.createElement('div');

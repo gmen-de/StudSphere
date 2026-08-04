@@ -781,16 +781,6 @@ function renderDashboardWidgets(PDO $pdo, int $userId): string
 
   if (setsModal && setsModalTitle && setsModalContent && setsModalClose) {
     setsModalClose.addEventListener('click', closeSetsModal);
-    setsModal.addEventListener('click', function(e) {
-      if (e.target === setsModal) {
-        closeSetsModal();
-      }
-    });
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && setsModal.style.display !== 'none') {
-        closeSetsModal();
-      }
-    });
 
     function openSetsModal(group, value, label) {
       setsModalTitle.textContent = texts.setsModalHeading.replace('{label}', label);

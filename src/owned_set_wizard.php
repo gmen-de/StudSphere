@@ -330,19 +330,6 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     });
   }
   closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function(e) {
-    if (e.target === modal) {
-      closeModal();
-    }
-  });
-  document.addEventListener('keydown', function(e) {
-    if (e.key !== 'Escape') {
-      return;
-    }
-    if (modal.style.display !== 'none') {
-      closeModal();
-    }
-  });
   // Native browser prompt for the "leaving/closing the tab" case (the
   // message itself is browser-controlled, can't be customized) — the modal
   // close confirm above handles the "closing the wizard, staying on the

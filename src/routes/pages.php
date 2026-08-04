@@ -686,16 +686,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       addModal.style.display = 'flex';
     };
     addModalClose.addEventListener('click', closeAddModal);
-    addModal.addEventListener('click', function(e) {
-      if (e.target === addModal) {
-        closeAddModal();
-      }
-    });
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && addModal.style.display !== 'none') {
-        closeAddModal();
-      }
-    });
   }
 
   var addBulkToggle = document.getElementById('location-add-bulk-toggle');
