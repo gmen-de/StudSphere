@@ -34,6 +34,7 @@ function renderPartDetailModal(): string
             'conditionNew' => t('condition_new'),
             'conditionUsed' => t('condition_used'),
             'levelLabel' => t('location_picker_level_label'),
+            'rootLabel' => t('location_picker_root_label'),
             'selectPlaceholder' => t('add_stock_select_placeholder'),
             'noChildren' => t('add_stock_no_children'),
             'printOfLabel' => t('print_of_label'),

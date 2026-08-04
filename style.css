@@ -2363,6 +2363,37 @@ footer {
   font-style: italic;
 }
 
+.location-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.location-breadcrumb-item {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #2563eb;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.location-breadcrumb-item:hover {
+  text-decoration: underline;
+}
+
+.location-breadcrumb-sep {
+  margin: 0 0.35rem;
+  color: #cbd5e1;
+}
+
+.location-breadcrumb-current {
+  color: #334155;
+  font-weight: 600;
+}
+
 .color-combo {
   position: relative;
   margin-top: 0.35rem;

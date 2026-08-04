@@ -536,6 +536,7 @@ return [
     'condition_used' => 'Used',
     'add_stock_select_placeholder' => 'Please select',
     'location_picker_level_label' => 'Level {n}',
+    'location_picker_root_label' => 'Top level',
     'add_stock_button' => 'Add',
     'add_stock_invalid_input' => 'Please fill in all fields.',
     'add_stock_location_not_leaf' => 'Please select a specific storage location, not a parent area.',

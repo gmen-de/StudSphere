@@ -2,18 +2,19 @@
   'use strict';
 
   /**
-   * A location picker that starts with one <select> and grows a new level
-   * each time the current deepest selection turns out to have children (via
-   * action=location_children), stopping once a level has none. Replaces the
-   * fixed-3-level pickers previously duplicated across part_modal.php,
-   * owned_sets.php's "move" modal, and owned_set_wizard.php's location step
-   * — none of them could reach a location nested any deeper than that,
-   * confirmed as a real problem once storage locations routinely went
-   * 4+ levels deep.
+   * A location picker showing exactly one <select> at a time — the children
+   * of whatever's currently selected — with a breadcrumb above it for the
+   * path chosen so far (click an earlier crumb to jump back up). Replaces
+   * the previous "grows a new <select> per level, stacked vertically"
+   * design, which took up too much visual space once locations routinely
+   * went 4+ levels deep (that stacked design itself had replaced an even
+   * older fixed-3-level picker for the same reason — see git history in
+   * part_modal.php, owned_sets.php's "move" modal, and
+   * owned_set_wizard.php's location step, the three places this is used).
    *
-   * @param {HTMLElement} container - emptied and filled with one
-   *   ".location-level" div per level.
-   * @param {{selectPlaceholder:string, noChildren:string, levelLabel:string}} texts
+   * @param {HTMLElement} container - emptied and filled with a
+   *   ".location-breadcrumb" trail plus a single ".location-level" row.
+   * @param {{selectPlaceholder:string, noChildren:string, levelLabel:string, rootLabel:string}} texts
    *   levelLabel is a template containing a literal "{n}" placeholder.
    * @param {function(?string):void} onChange - called with the deepest
    *   currently selected location id (as a string), or null if nothing is
@@ -21,65 +22,103 @@
    * @returns {{getValue: function():?string, getLabel: function():string, reset: function():void}}
    */
   function createLocationPicker(container, texts, onChange) {
-    var levels = [];
+    var path = []; // [{id, name}], deepest last; empty means nothing chosen yet
 
-    function clearFrom(index) {
-      while (levels.length > index) {
-        var level = levels.pop();
-        level.wrap.remove();
-      }
+    function currentParentId() {
+      return path.length > 0 ? path[path.length - 1].id : null;
     }
 
     function deepestValue() {
-      for (var i = levels.length - 1; i >= 0; i--) {
-        if (levels[i].select.value) {
-          return levels[i].select.value;
-        }
-      }
-      return null;
+      return path.length > 0 ? path[path.length - 1].id : null;
     }
 
     function deepestLabel() {
-      for (var i = levels.length - 1; i >= 0; i--) {
-        var select = levels[i].select;
-        if (select.value) {
-          var opt = select.options[select.selectedIndex];
-          return opt ? opt.textContent : '';
-        }
-      }
-      return '';
+      return path.length > 0 ? path[path.length - 1].name : '';
     }
 
-    function addLevel(parentId) {
-      var wrap = document.createElement('div');
-      wrap.className = 'location-level';
+    var breadcrumbEl = document.createElement('div');
+    breadcrumbEl.className = 'location-breadcrumb';
+    breadcrumbEl.style.display = 'none';
+    container.appendChild(breadcrumbEl);
 
-      var labelSpan = document.createElement('span');
-      labelSpan.className = 'location-level-label';
-      labelSpan.textContent = texts.levelLabel.replace('{n}', String(levels.length + 1));
-      wrap.appendChild(labelSpan);
+    var wrap = document.createElement('div');
+    wrap.className = 'location-level';
+    var labelSpan = document.createElement('span');
+    labelSpan.className = 'location-level-label';
+    wrap.appendChild(labelSpan);
+    var select = document.createElement('select');
+    wrap.appendChild(select);
+    var hint = document.createElement('span');
+    hint.className = 'location-hint';
+    wrap.appendChild(hint);
+    container.appendChild(wrap);
 
-      var select = document.createElement('select');
+    function renderBreadcrumb() {
+      breadcrumbEl.innerHTML = '';
+      if (path.length === 0) {
+        breadcrumbEl.style.display = 'none';
+        return;
+      }
+      breadcrumbEl.style.display = 'flex';
+
+      var rootBtn = document.createElement('button');
+      rootBtn.type = 'button';
+      rootBtn.className = 'location-breadcrumb-item';
+      rootBtn.textContent = texts.rootLabel;
+      rootBtn.addEventListener('click', function () {
+        goTo(0);
+      });
+      breadcrumbEl.appendChild(rootBtn);
+
+      path.forEach(function (crumb, i) {
+        var sep = document.createElement('span');
+        sep.className = 'location-breadcrumb-sep';
+        sep.textContent = '/';
+        breadcrumbEl.appendChild(sep);
+
+        if (i === path.length - 1) {
+          var current = document.createElement('span');
+          current.className = 'location-breadcrumb-current';
+          current.textContent = crumb.name;
+          breadcrumbEl.appendChild(current);
+        } else {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'location-breadcrumb-item';
+          btn.textContent = crumb.name;
+          btn.addEventListener('click', function () {
+            goTo(i + 1);
+          });
+          breadcrumbEl.appendChild(btn);
+        }
+      });
+    }
+
+    // select/hint are reused across levels (unlike the old per-level
+    // <select> design), so a slow response from a level the user has since
+    // navigated away from must not be allowed to land on top of whatever
+    // loadLevel() shows now — loadToken guards exactly that.
+    var loadToken = 0;
+
+    function loadLevel() {
+      var token = ++loadToken;
       select.innerHTML = '<option value="">' + texts.selectPlaceholder + '</option>';
-      wrap.appendChild(select);
-
-      var hint = document.createElement('span');
-      hint.className = 'location-hint';
-      wrap.appendChild(hint);
-
-      container.appendChild(wrap);
-
-      var levelIndex = levels.length;
-      levels.push({ wrap: wrap, select: select, hint: hint });
+      select.style.display = '';
+      hint.textContent = '';
+      labelSpan.textContent = texts.levelLabel.replace('{n}', String(path.length + 1));
 
       var params = new URLSearchParams();
       params.set('action', 'location_children');
+      var parentId = currentParentId();
       if (parentId !== null) {
         params.set('parent_id', parentId);
       }
       fetch('?' + params.toString(), { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (data) {
+          if (token !== loadToken) {
+            return;
+          }
           var children = data.children || [];
           children.forEach(function (loc) {
             var opt = document.createElement('option');
@@ -88,31 +127,46 @@
             select.appendChild(opt);
           });
           if (children.length === 0) {
+            select.style.display = 'none';
             hint.textContent = texts.noChildren;
           }
         })
         .catch(function () {
+          if (token !== loadToken) {
+            return;
+          }
+          select.style.display = 'none';
           hint.textContent = texts.noChildren;
         });
-
-      select.addEventListener('change', function () {
-        clearFrom(levelIndex + 1);
-        onChange(deepestValue());
-        if (select.value) {
-          addLevel(select.value);
-        }
-      });
     }
 
-    addLevel(null);
+    function goTo(depth) {
+      path = path.slice(0, depth);
+      renderBreadcrumb();
+      loadLevel();
+      onChange(deepestValue());
+    }
+
+    select.addEventListener('change', function () {
+      if (!select.value) {
+        return;
+      }
+      var opt = select.options[select.selectedIndex];
+      path.push({ id: select.value, name: opt.textContent });
+      renderBreadcrumb();
+      loadLevel();
+      onChange(deepestValue());
+    });
+
+    loadLevel();
 
     return {
       getValue: deepestValue,
       getLabel: deepestLabel,
       reset: function () {
-        container.innerHTML = '';
-        levels = [];
-        addLevel(null);
+        path = [];
+        renderBreadcrumb();
+        loadLevel();
         onChange(null);
       },
     };

@@ -536,6 +536,7 @@ return [
     'condition_used' => 'Gebraucht',
     'add_stock_select_placeholder' => 'Bitte wählen',
     'location_picker_level_label' => 'Ebene {n}',
+    'location_picker_root_label' => 'Oberste Ebene',
     'add_stock_button' => 'Hinzufügen',
     'add_stock_invalid_input' => 'Bitte alle Felder ausfüllen.',
     'add_stock_location_not_leaf' => 'Bitte einen konkreten Lagerort auswählen, keinen übergeordneten Bereich.',

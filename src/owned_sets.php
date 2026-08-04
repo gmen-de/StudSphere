@@ -1260,6 +1260,7 @@ function renderOwnedSetMoveModal(array $ownedSet): string
         'selectPlaceholder' => t('add_stock_select_placeholder'),
         'noChildren' => t('add_stock_no_children'),
         'levelLabel' => t('location_picker_level_label'),
+        'rootLabel' => t('location_picker_root_label'),
         'locationRequired' => t('owned_set_wizard_location_required'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
