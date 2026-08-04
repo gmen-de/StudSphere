@@ -611,7 +611,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $content .= '<label class="checkbox-label"><input type="checkbox" id="location-add-bulk-toggle" name="bulk_enabled" value="1"> ' . htmlspecialchars(t('location_bulk_toggle_label')) . '</label>';
     $content .= '<div id="location-add-bulk-fields" style="display:none;">';
     $content .= '<label>' . htmlspecialchars(t('location_bulk_count_label')) . '<input type="number" name="child_count" min="1" value="1" id="location-add-bulk-count"></label>';
-    $content .= '<label>' . htmlspecialchars(t('location_bulk_naming_label')) . '<input type="text" name="naming_pattern" id="location-add-naming-pattern" value="' . htmlspecialchars(t('location_bulk_naming_default')) . '"></label>';
     $content .= '</div>';
     $content .= '<button type="submit">' . htmlspecialchars(t('location_add_button')) . '</button>';
     $content .= '</form></div></div>';
@@ -643,6 +642,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         'newChildLabel' => t('locations_tree_new_child_label'),
         'addModalHeading' => t('location_add_modal_heading'),
         'bulkNameHint' => t('location_bulk_name_hint'),
+        'bulkNamingDefault' => t('location_bulk_naming_default'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $content .= <<<SCRIPT
@@ -680,7 +680,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       if (addBulkToggle && addBulkFields && addNameInput && addNameHint) {
         addBulkToggle.checked = false;
         addBulkFields.style.display = 'none';
-        addNameInput.required = true;
+        addNameInput.value = '';
         addNameHint.textContent = '';
       }
       addModal.style.display = 'flex';
@@ -705,13 +705,14 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
   if (addBulkToggle && addBulkFields && addNameInput && addNameHint) {
     addBulkToggle.addEventListener('change', function() {
       addBulkFields.style.display = addBulkToggle.checked ? 'block' : 'none';
-      // While bulk-creating, the name becomes optional: filled in, it's the
-      // wrapping parent's own name (see createStorageLocationWithChildren());
-      // left empty, the numbered locations are created directly under
-      // whichever node "(Neu)" was opened from instead, no wrapper at all
-      // (see createBulkStorageLocations()).
-      addNameInput.required = !addBulkToggle.checked;
       addNameHint.textContent = addBulkToggle.checked ? texts.bulkNameHint : '';
+      // No separate "naming pattern" field — bulk mode uses the name field
+      // itself as the pattern (e.g. "Fach {n}"), so pre-fill a sensible
+      // default when there's nothing there yet rather than leaving it blank;
+      // never overwrites something the user already typed.
+      if (addBulkToggle.checked && addNameInput.value === '') {
+        addNameInput.value = texts.bulkNamingDefault;
+      }
     });
   }
 

@@ -273,25 +273,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_l
     $parentId = trim($_POST['parent_id'] ?? '') !== '' ? (int) $_POST['parent_id'] : null;
     $bulkEnabled = ($_POST['bulk_enabled'] ?? '') === '1';
     $childCount = (int) ($_POST['child_count'] ?? 0);
-    $namingPattern = trim($_POST['naming_pattern'] ?? '');
-    // A name is only required for a plain single location, or as the
-    // wrapper's own name when bulk-creating with one — left empty while
-    // bulk is on means "just the numbered locations, no wrapping parent"
-    // (see createBulkStorageLocations()).
-    $bulkValid = $bulkEnabled && $childCount > 0 && $namingPattern !== '';
 
-    if ($name === '' && !$bulkValid) {
+    if ($name === '') {
         $locationMessage = t('location_name_required');
     } else {
         try {
-            if ($bulkValid && $name === '') {
-                createBulkStorageLocations($parentId, $childCount, $namingPattern);
-            } elseif ($bulkValid) {
-                createStorageLocationWithChildren($parentId, $name, $childCount, $namingPattern);
+            // No separate "naming pattern" field — bulk mode just uses the
+            // name itself as the pattern (e.g. "Fach {n}"), creating
+            // $childCount numbered children of $parentId directly.
+            if ($bulkEnabled && $childCount > 0) {
+                createBulkStorageLocations($parentId, $childCount, $name);
             } else {
                 createStorageLocation($parentId, $name);
             }
-            $locationMessage = t('location_added_message', ['name' => $name !== '' ? $name : $namingPattern]);
+            $locationMessage = t('location_added_message', ['name' => $name]);
         } catch (Throwable $e) {
             $locationMessage = t('location_save_failed', ['message' => $e->getMessage()]);
         }

@@ -28,36 +28,11 @@ function renameStorageLocation(int $id, string $name): void
 }
 
 /**
- * Creates a location and immediately populates it with $childCount numbered
- * children (e.g. "Fach 1".."Fach 8" from the pattern "Fach {n}") — no longer
- * gated behind a location "type" choice (removed entirely), just an explicit
- * checkbox in the add-location modal. Runs in a transaction so a failure
- * partway through can't leave a half-created set of children behind.
- */
-function createStorageLocationWithChildren(?int $parentId, string $name, int $childCount, string $namingPattern): int
-{
-    $pdo = getPDO();
-    $pdo->beginTransaction();
-    try {
-        $id = createStorageLocation($parentId, $name);
-        for ($i = 1; $i <= $childCount; $i++) {
-            $childName = str_replace('{n}', (string) $i, $namingPattern);
-            createStorageLocation($id, $childName);
-        }
-        $pdo->commit();
-        return $id;
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
-}
-
-/**
- * Same numbered-children generation as createStorageLocationWithChildren(),
- * but without the wrapping named location — the numbered locations become
- * direct children of $parentId themselves. For when the intermediate
- * container isn't wanted (e.g. a shelf that already exists as a real
- * location and just needs "Fach 1".."Fach 8" added straight into it).
+ * Creates $childCount numbered locations (e.g. "Fach 1".."Fach 8" from the
+ * pattern "Fach {n}") as direct children of $parentId — the add-location
+ * modal's bulk checkbox uses the name field itself as $namingPattern (no
+ * separate "naming pattern" field). Runs in a transaction so a failure
+ * partway through can't leave a half-created set behind.
  */
 function createBulkStorageLocations(?int $parentId, int $childCount, string $namingPattern): void
 {
