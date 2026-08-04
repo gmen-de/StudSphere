@@ -3304,7 +3304,11 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
     $html .= '<div class="modal-overlay owned-set-photo-lightbox" id="owned-set-photo-lightbox" style="display:none;">';
     $html .= '<div class="owned-set-photo-lightbox-inner">';
     $html .= '<button type="button" class="modal-close" id="owned-set-photo-lightbox-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<div class="owned-set-photo-lightbox-stage">';
+    $html .= '<button type="button" class="owned-set-photo-lightbox-nav owned-set-photo-lightbox-prev" id="owned-set-photo-lightbox-prev" aria-label="' . htmlspecialchars(t('owned_set_photo_prev_label')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>';
     $html .= '<img id="owned-set-photo-lightbox-img" src="" alt="">';
+    $html .= '<button type="button" class="owned-set-photo-lightbox-nav owned-set-photo-lightbox-next" id="owned-set-photo-lightbox-next" aria-label="' . htmlspecialchars(t('owned_set_photo_next_label')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>';
+    $html .= '</div>';
     $html .= '<span class="owned-set-photo-lightbox-caption" id="owned-set-photo-lightbox-caption"></span>';
     $html .= '</div></div>';
 
@@ -3327,6 +3331,8 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
   var lightboxClose = document.getElementById("owned-set-photo-lightbox-close");
   var lightboxImg = document.getElementById("owned-set-photo-lightbox-img");
   var lightboxCaption = document.getElementById("owned-set-photo-lightbox-caption");
+  var lightboxPrev = document.getElementById("owned-set-photo-lightbox-prev");
+  var lightboxNext = document.getElementById("owned-set-photo-lightbox-next");
   if (!uploadTile || !fileInput || !msg || !grid) {
     return;
   }
@@ -3351,7 +3357,7 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
   }
   function bindView(btn) {
     btn.addEventListener("click", function() {
-      openLightbox(btn.dataset.src, btn.dataset.caption);
+      openLightbox(btn.dataset.src);
     });
   }
   function bindTile(tile) {
@@ -3366,16 +3372,49 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
   }
   grid.querySelectorAll(".owned-set-photo:not(.owned-set-photo-upload)").forEach(bindTile);
 
-  function openLightbox(src, caption) {
+  var lightboxPhotos = [];
+  var lightboxIndex = -1;
+
+  function collectLightboxPhotos() {
+    return Array.prototype.map.call(grid.querySelectorAll(".owned-set-photo-view"), function(btn) {
+      return { src: btn.dataset.src, caption: btn.dataset.caption };
+    });
+  }
+
+  function showLightboxPhoto(index) {
+    if (lightboxPhotos.length === 0) {
+      return;
+    }
+    lightboxIndex = (index + lightboxPhotos.length) % lightboxPhotos.length;
+    var photo = lightboxPhotos[lightboxIndex];
+    lightboxImg.src = photo.src;
+    lightboxImg.alt = photo.caption || "";
+    if (lightboxCaption) {
+      lightboxCaption.textContent = photo.caption || "";
+      lightboxCaption.hidden = !photo.caption;
+    }
+    var hasMultiple = lightboxPhotos.length > 1;
+    if (lightboxPrev) {
+      lightboxPrev.hidden = !hasMultiple;
+    }
+    if (lightboxNext) {
+      lightboxNext.hidden = !hasMultiple;
+    }
+  }
+
+  function openLightbox(src) {
     if (!lightbox || !lightboxImg) {
       return;
     }
-    lightboxImg.src = src;
-    lightboxImg.alt = caption || "";
-    if (lightboxCaption) {
-      lightboxCaption.textContent = caption || "";
-      lightboxCaption.hidden = !caption;
+    lightboxPhotos = collectLightboxPhotos();
+    var startIndex = 0;
+    for (var i = 0; i < lightboxPhotos.length; i++) {
+      if (lightboxPhotos[i].src === src) {
+        startIndex = i;
+        break;
+      }
     }
+    showLightboxPhoto(startIndex);
     lightbox.style.display = "flex";
   }
   if (lightboxClose) {
@@ -3384,6 +3423,26 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
       lightboxImg.src = "";
     });
   }
+  if (lightboxPrev) {
+    lightboxPrev.addEventListener("click", function() {
+      showLightboxPhoto(lightboxIndex - 1);
+    });
+  }
+  if (lightboxNext) {
+    lightboxNext.addEventListener("click", function() {
+      showLightboxPhoto(lightboxIndex + 1);
+    });
+  }
+  document.addEventListener("keydown", function(e) {
+    if (!lightbox || lightbox.style.display === "none") {
+      return;
+    }
+    if (e.key === "ArrowLeft") {
+      showLightboxPhoto(lightboxIndex - 1);
+    } else if (e.key === "ArrowRight") {
+      showLightboxPhoto(lightboxIndex + 1);
+    }
+  });
 
   function addPhotoTile(photo) {
     var tile = document.createElement("div");

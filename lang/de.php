@@ -471,6 +471,8 @@ return [
     'owned_set_photos_heading' => 'Fotos',
     'owned_set_photo_caption_placeholder' => 'Bildunterschrift (optional)',
     'owned_set_photo_upload_hint' => 'Foto hierher ziehen oder klicken',
+    'owned_set_photo_prev_label' => 'Vorheriges Foto',
+    'owned_set_photo_next_label' => 'Nächstes Foto',
     'owned_set_photo_invalid' => 'Dieses Foto wurde nicht gefunden.',
     'owned_set_photo_invalid_type' => 'Nur Bilddateien (JPG, PNG, WebP, GIF) sind erlaubt.',
     'owned_set_photo_too_large' => 'Die Datei ist zu groß (Limit dieses Servers: {max}).',

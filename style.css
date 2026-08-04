@@ -3714,12 +3714,42 @@ footer {
   max-height: 90vh;
 }
 
+.owned-set-photo-lightbox-stage {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 .owned-set-photo-lightbox-inner img {
-  max-width: 90vw;
+  max-width: 78vw;
   max-height: 80vh;
   object-fit: contain;
   border-radius: 0.5rem;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+
+.owned-set-photo-lightbox-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.15);
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.owned-set-photo-lightbox-nav:hover {
+  background: rgba(248, 250, 252, 0.3);
+}
+
+.owned-set-photo-lightbox-nav svg {
+  width: 1.5rem;
+  height: 1.5rem;
 }
 
 .owned-set-photo-lightbox-caption {
