@@ -453,6 +453,21 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        29 => function (PDO $pdo): void {
+            // DB-backed session storage (src/session_handler.php) — see that
+            // file's doc comment for why: on shared hosting, PHP's own
+            // gc_maxlifetime ini setting doesn't reliably keep a session
+            // alive as long as this app configures, since the save directory
+            // is shared across every site on the host.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS sessions (
+                    id VARCHAR(128) NOT NULL PRIMARY KEY,
+                    data MEDIUMTEXT NOT NULL,
+                    last_activity DATETIME NOT NULL,
+                    INDEX idx_sessions_last_activity (last_activity)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -515,7 +530,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 28;
+const CURRENT_SCHEMA_VERSION = 29;
 
 function getInstalledSchemaVersion(): int
 {

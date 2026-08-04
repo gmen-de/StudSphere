@@ -221,6 +221,13 @@ function installDatabase(): void
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
 
+        'CREATE TABLE IF NOT EXISTS sessions (
+            id VARCHAR(128) NOT NULL PRIMARY KEY,
+            data MEDIUMTEXT NOT NULL,
+            last_activity DATETIME NOT NULL,
+            INDEX idx_sessions_last_activity (last_activity)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
         'CREATE TABLE IF NOT EXISTS dashboard_widgets (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,

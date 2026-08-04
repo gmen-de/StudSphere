@@ -39,18 +39,6 @@ if (empty($config['db']['dbname']) || empty($config['db']['user']) || !canConnec
     exit;
 }
 
-// A login should stay valid for 12 months — both the cookie the browser
-// holds onto and, since PHP's own garbage collection would otherwise still
-// be free to delete the session data much sooner (default ~24 min of
-// inactivity), the server-side session lifetime too. Only 'lifetime' is
-// passed to session_set_cookie_params() so every other cookie attribute
-// (path, domain, secure, httponly, samesite) keeps using the host's own
-// ini defaults rather than this app overriding them.
-const LOGIN_SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 365;
-session_set_cookie_params(['lifetime' => LOGIN_SESSION_LIFETIME_SECONDS]);
-ini_set('session.gc_maxlifetime', (string) LOGIN_SESSION_LIFETIME_SECONDS);
-session_start();
-
 try {
     if (!isInstalled()) {
         installDatabase();
@@ -83,6 +71,22 @@ if (schemaMigrationPending()) {
         exit;
     }
 }
+
+// A login should stay valid for 12 months — both the cookie the browser
+// holds onto and the server-side session lifetime. Only 'lifetime' is
+// passed to session_set_cookie_params() so every other cookie attribute
+// (path, domain, secure, httponly, samesite) keeps using the host's own ini
+// defaults rather than this app overriding them. Must run after the
+// migration check above: registerDatabaseSessionHandler() (src/
+// session_handler.php) needs the "sessions" table to already exist, and on
+// a pre-existing install that's exactly what the migration just above may
+// have just created.
+const LOGIN_SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 365;
+session_set_cookie_params(['lifetime' => LOGIN_SESSION_LIFETIME_SECONDS]);
+ini_set('session.gc_maxlifetime', (string) LOGIN_SESSION_LIFETIME_SECONDS);
+require_once __DIR__ . '/src/session_handler.php';
+registerDatabaseSessionHandler();
+session_start();
 
 $pdo = getPDO();
 
