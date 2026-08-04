@@ -3259,48 +3259,81 @@ SCRIPT;
  * instance is opened. Self-contained, own script, same convention as the
  * other owned_set_detail sections.
  */
+function renderOwnedSetPhoto(array $photo): string
+{
+    $caption = (string) ($photo['caption'] ?? '');
+    $html = '<div class="owned-set-photo" data-id="' . (int) $photo['id'] . '">';
+    $html .= '<button type="button" class="owned-set-photo-view" data-src="' . htmlspecialchars($photo['stored_path']) . '" data-caption="' . htmlspecialchars($caption) . '">';
+    $html .= '<img src="' . htmlspecialchars($photo['stored_path']) . '" alt="' . htmlspecialchars($caption) . '" loading="lazy">';
+    $html .= '</button>';
+    if ($caption !== '') {
+        $html .= '<span class="owned-set-photo-caption">' . htmlspecialchars($caption) . '</span>';
+    }
+    $html .= '<button type="button" class="owned-set-photo-delete" data-id="' . (int) $photo['id'] . '">' . htmlspecialchars(t('set_detail_instructions_delete_button')) . '</button>';
+    $html .= '</div>';
+    return $html;
+}
+
+/**
+ * Photos tab: a tile grid (same size/shape as the .owned-set-photo tiles
+ * it's mixed in with, see .owned-set-photo-upload in style.css) doubling as
+ * a drag-and-drop drop zone, plus a click-to-enlarge lightbox — replaces
+ * the earlier plain upload <form> above a separate grid, per explicit user
+ * feedback that the upload control should look and feel like the photo
+ * tiles themselves, not a bolted-on form row.
+ */
 function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
 {
-    $html = '<form id="owned-set-photo-form" class="instruction-upload-form">';
-    $html .= '<input type="text" id="owned-set-photo-caption-input" placeholder="' . htmlspecialchars(t('owned_set_photo_caption_placeholder')) . '" maxlength="255">';
-    $html .= '<input type="file" id="owned-set-photo-file-input" accept="image/*">';
-    $html .= '<button type="submit">' . htmlspecialchars(t('set_detail_instructions_upload_button')) . '</button>';
-    $html .= '<span class="instruction-upload-message" id="owned-set-photo-message"></span>';
-    $html .= '</form>';
-
     $photos = getOwnedSetPhotos($pdo, $ownedSet['id']);
-    $html .= '<div class="owned-set-photo-grid" id="owned-set-photo-grid">';
+
+    $html = '<div class="owned-set-photo-grid" id="owned-set-photo-grid">';
+
+    $html .= '<div class="owned-set-photo owned-set-photo-upload" id="owned-set-photo-upload-tile">';
+    $html .= '<span class="owned-set-photo-upload-icon">' . getActionIcon('upload') . '</span>';
+    $html .= '<span class="owned-set-photo-upload-text">' . htmlspecialchars(t('owned_set_photo_upload_hint')) . '</span>';
+    $html .= '<input type="text" id="owned-set-photo-caption-input" class="owned-set-photo-upload-caption" placeholder="' . htmlspecialchars(t('owned_set_photo_caption_placeholder')) . '" maxlength="255">';
+    $html .= '<input type="file" id="owned-set-photo-file-input" accept="image/*" hidden>';
+    $html .= '<span class="instruction-upload-message" id="owned-set-photo-message"></span>';
+    $html .= '</div>';
+
     foreach ($photos as $photo) {
-        $html .= '<div class="owned-set-photo" data-id="' . $photo['id'] . '">';
-        $html .= '<img src="' . htmlspecialchars($photo['stored_path']) . '" alt="' . htmlspecialchars((string) $photo['caption']) . '">';
-        if ($photo['caption'] !== null) {
-            $html .= '<span class="owned-set-photo-caption">' . htmlspecialchars($photo['caption']) . '</span>';
-        }
-        $html .= '<button type="button" class="owned-set-photo-delete" data-id="' . $photo['id'] . '">' . htmlspecialchars(t('set_detail_instructions_delete_button')) . '</button>';
-        $html .= '</div>';
+        $html .= renderOwnedSetPhoto($photo);
     }
     $html .= '</div>';
+
+    $html .= '<div class="modal-overlay owned-set-photo-lightbox" id="owned-set-photo-lightbox" style="display:none;">';
+    $html .= '<div class="owned-set-photo-lightbox-inner">';
+    $html .= '<button type="button" class="modal-close" id="owned-set-photo-lightbox-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<img id="owned-set-photo-lightbox-img" src="" alt="">';
+    $html .= '<span class="owned-set-photo-lightbox-caption" id="owned-set-photo-lightbox-caption"></span>';
+    $html .= '</div></div>';
 
     $photoLabelsJson = json_encode([
         'uploading' => t('set_detail_instructions_uploading'),
         'deleteConfirm' => t('owned_set_photo_delete_confirm'),
         'errorRetry' => t('import_error_retry'),
+        'deleteButtonLabel' => t('set_detail_instructions_delete_button'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $html .= <<<SCRIPT
 <script>
 (function(){
   var texts = $photoLabelsJson;
-  var form = document.getElementById("owned-set-photo-form");
+  var uploadTile = document.getElementById("owned-set-photo-upload-tile");
   var captionInput = document.getElementById("owned-set-photo-caption-input");
   var fileInput = document.getElementById("owned-set-photo-file-input");
   var msg = document.getElementById("owned-set-photo-message");
   var grid = document.getElementById("owned-set-photo-grid");
-  if (!form || !fileInput || !msg || !grid) {
+  var lightbox = document.getElementById("owned-set-photo-lightbox");
+  var lightboxClose = document.getElementById("owned-set-photo-lightbox-close");
+  var lightboxImg = document.getElementById("owned-set-photo-lightbox-img");
+  var lightboxCaption = document.getElementById("owned-set-photo-lightbox-caption");
+  if (!uploadTile || !fileInput || !msg || !grid) {
     return;
   }
 
   function bindDelete(btn) {
-    btn.addEventListener("click", function() {
+    btn.addEventListener("click", function(e) {
+      e.stopPropagation();
       if (!window.confirm(texts.deleteConfirm)) {
         return;
       }
@@ -3316,11 +3349,79 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
         });
     });
   }
-  grid.querySelectorAll(".owned-set-photo-delete").forEach(bindDelete);
+  function bindView(btn) {
+    btn.addEventListener("click", function() {
+      openLightbox(btn.dataset.src, btn.dataset.caption);
+    });
+  }
+  function bindTile(tile) {
+    var deleteBtn = tile.querySelector(".owned-set-photo-delete");
+    var viewBtn = tile.querySelector(".owned-set-photo-view");
+    if (deleteBtn) {
+      bindDelete(deleteBtn);
+    }
+    if (viewBtn) {
+      bindView(viewBtn);
+    }
+  }
+  grid.querySelectorAll(".owned-set-photo:not(.owned-set-photo-upload)").forEach(bindTile);
 
-  form.addEventListener("submit", function(e) {
-    e.preventDefault();
-    if (!fileInput.files || !fileInput.files[0]) {
+  function openLightbox(src, caption) {
+    if (!lightbox || !lightboxImg) {
+      return;
+    }
+    lightboxImg.src = src;
+    lightboxImg.alt = caption || "";
+    if (lightboxCaption) {
+      lightboxCaption.textContent = caption || "";
+      lightboxCaption.hidden = !caption;
+    }
+    lightbox.style.display = "flex";
+  }
+  if (lightboxClose) {
+    lightboxClose.addEventListener("click", function() {
+      lightbox.style.display = "none";
+      lightboxImg.src = "";
+    });
+  }
+
+  function addPhotoTile(photo) {
+    var tile = document.createElement("div");
+    tile.className = "owned-set-photo";
+    tile.dataset.id = photo.id;
+
+    var viewBtn = document.createElement("button");
+    viewBtn.type = "button";
+    viewBtn.className = "owned-set-photo-view";
+    viewBtn.dataset.src = photo.url;
+    viewBtn.dataset.caption = photo.caption || "";
+    var img = document.createElement("img");
+    img.src = photo.url;
+    img.alt = photo.caption || "";
+    img.loading = "lazy";
+    viewBtn.appendChild(img);
+    tile.appendChild(viewBtn);
+
+    if (photo.caption) {
+      var captionEl = document.createElement("span");
+      captionEl.className = "owned-set-photo-caption";
+      captionEl.textContent = photo.caption;
+      tile.appendChild(captionEl);
+    }
+
+    var deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "owned-set-photo-delete";
+    deleteBtn.dataset.id = photo.id;
+    deleteBtn.textContent = texts.deleteButtonLabel;
+    tile.appendChild(deleteBtn);
+
+    bindTile(tile);
+    grid.appendChild(tile);
+  }
+
+  function uploadFile(file) {
+    if (!file) {
       return;
     }
     msg.textContent = texts.uploading;
@@ -3328,13 +3429,15 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
     formData.set("action", "upload_owned_set_photo");
     formData.set("owned_set_id", "{$ownedSet['id']}");
     formData.set("caption", captionInput.value);
-    formData.set("photo_file", fileInput.files[0]);
+    formData.set("photo_file", file);
 
     fetch("?", { method: "POST", body: formData, credentials: "same-origin" })
       .then(function(r) { return r.json(); })
       .then(function(res) {
+        msg.textContent = "";
         if (res.success) {
-          window.location.reload();
+          captionInput.value = "";
+          addPhotoTile(res.photo);
         } else {
           msg.textContent = res.message;
         }
@@ -3342,6 +3445,47 @@ function renderOwnedSetPhotoGallery(PDO $pdo, array $ownedSet): string
       .catch(function() {
         msg.textContent = texts.errorRetry;
       });
+  }
+
+  uploadTile.addEventListener("click", function(e) {
+    if (e.target === captionInput) {
+      return;
+    }
+    fileInput.click();
+  });
+  fileInput.addEventListener("change", function() {
+    if (fileInput.files && fileInput.files[0]) {
+      uploadFile(fileInput.files[0]);
+    }
+    fileInput.value = "";
+  });
+  captionInput.addEventListener("click", function(e) {
+    e.stopPropagation();
+  });
+
+  var dragCounter = 0;
+  uploadTile.addEventListener("dragenter", function(e) {
+    e.preventDefault();
+    dragCounter++;
+    uploadTile.classList.add("owned-set-photo-upload-dragover");
+  });
+  uploadTile.addEventListener("dragover", function(e) {
+    e.preventDefault();
+  });
+  uploadTile.addEventListener("dragleave", function() {
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) {
+      uploadTile.classList.remove("owned-set-photo-upload-dragover");
+    }
+  });
+  uploadTile.addEventListener("drop", function(e) {
+    e.preventDefault();
+    dragCounter = 0;
+    uploadTile.classList.remove("owned-set-photo-upload-dragover");
+    var files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files[0]) {
+      uploadFile(files[0]);
+    }
   });
 })();
 </script>
