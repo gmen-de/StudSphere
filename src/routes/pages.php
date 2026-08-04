@@ -615,6 +615,46 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $content .= '<button type="submit">' . htmlspecialchars(t('location_add_button')) . '</button>';
     $content .= '</form></div></div>';
 
+    // Per-card "edit" modal (quantity + optional new location) — one shared
+    // instance, populated from whichever card was clicked via JS, same
+    // pattern as location-add-modal above. Submitted via fetch (not a plain
+    // POST) so the content pane can refresh in place instead of a full page
+    // reload losing the tree's expand state and scroll position.
+    $content .= '<div class="modal-overlay" id="location-item-edit-modal" style="display:none;">';
+    $content .= '<div class="modal-box"><button type="button" class="modal-close" id="location-item-edit-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $content .= '<h2 id="location-item-edit-heading">' . htmlspecialchars(t('location_item_edit_title')) . '</h2>';
+    $content .= '<p id="location-item-edit-subtitle" class="hint"></p>';
+    $content .= '<p class="location-item-edit-current"><strong>' . htmlspecialchars(t('location_item_current_location_label')) . ':</strong> <span id="location-item-edit-current-path"></span></p>';
+    $content .= '<form id="location-item-edit-form">';
+    $content .= '<div id="location-item-edit-message" class="add-stock-message"></div>';
+    $content .= '<label>' . htmlspecialchars(t('add_stock_quantity_label')) . '<input type="number" name="quantity" id="location-item-edit-quantity" min="0" required></label>';
+    $content .= '<label>' . htmlspecialchars(t('location_item_new_location_label')) . '</label>';
+    $content .= '<div id="location-item-edit-picker" class="location-picker"></div>';
+    $content .= '<button type="submit">' . htmlspecialchars(t('location_save_button')) . '</button>';
+    $content .= '</form></div></div>';
+
+    // Multi-select bulk relocate modal — the floating selection bar's
+    // "Umlagern" button opens this, target picked once for every currently
+    // selected card at once.
+    $content .= '<div class="modal-overlay" id="location-bulk-relocate-modal" style="display:none;">';
+    $content .= '<div class="modal-box"><button type="button" class="modal-close" id="location-bulk-relocate-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $content .= '<h2>' . htmlspecialchars(t('location_bulk_relocate_title')) . '</h2>';
+    $content .= '<form id="location-bulk-relocate-form">';
+    $content .= '<div id="location-bulk-relocate-message" class="add-stock-message"></div>';
+    $content .= '<label>' . htmlspecialchars(t('location_bulk_relocate_target_label')) . '</label>';
+    $content .= '<div id="location-bulk-relocate-picker" class="location-picker"></div>';
+    $content .= '<button type="submit">' . htmlspecialchars(t('location_bulk_relocate_confirm_button')) . '</button>';
+    $content .= '</form></div></div>';
+
+    // Floating bar shown once at least one card is selected — count plus
+    // "Umlagern"/"Auswahl aufheben". Fixed-position, built once here rather
+    // than per-selection to avoid rebuilding it on every checkbox click.
+    $content .= '<div class="location-bulk-bar" id="location-bulk-bar" hidden>';
+    $content .= '<span id="location-bulk-bar-count"></span>';
+    $content .= '<button type="button" id="location-bulk-bar-relocate">' . htmlspecialchars(t('location_bulk_relocate_button')) . '</button>';
+    $content .= '<button type="button" id="location-bulk-bar-clear">' . htmlspecialchars(t('location_bulk_clear_selection')) . '</button>';
+    $content .= '</div>';
+
     $explorerLabelsJson = json_encode([
         'chevronIcon' => getActionIcon('chevron_right'),
         'editIcon' => getActionIcon('edit'),
@@ -643,6 +683,14 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         'addModalHeading' => t('location_add_modal_heading'),
         'bulkNameHint' => t('location_bulk_name_hint'),
         'bulkNamingDefault' => t('location_bulk_naming_default'),
+        'selectLabel' => t('location_item_select_label'),
+        'updateFailed' => t('location_item_update_failed'),
+        'bulkBarCount' => t('location_bulk_bar_count'),
+        'bulkRelocateFailed' => t('location_bulk_relocate_failed'),
+        'levelLabel' => t('location_picker_level_label'),
+        'rootLabel' => t('location_picker_root_label'),
+        'selectPlaceholder' => t('add_stock_select_placeholder'),
+        'noChildren' => t('add_stock_no_children'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $content .= <<<SCRIPT
@@ -661,6 +709,23 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
   var addModalClose = document.getElementById('location-add-modal-close');
   var addModalHeading = document.getElementById('location-add-modal-heading');
   var addParentIdField = document.getElementById('location-add-parent-id');
+  var itemEditModal = document.getElementById('location-item-edit-modal');
+  var itemEditModalClose = document.getElementById('location-item-edit-modal-close');
+  var itemEditSubtitle = document.getElementById('location-item-edit-subtitle');
+  var itemEditCurrentPath = document.getElementById('location-item-edit-current-path');
+  var itemEditForm = document.getElementById('location-item-edit-form');
+  var itemEditMessage = document.getElementById('location-item-edit-message');
+  var itemEditQuantity = document.getElementById('location-item-edit-quantity');
+  var itemEditPicker = document.getElementById('location-item-edit-picker');
+  var bulkRelocateModal = document.getElementById('location-bulk-relocate-modal');
+  var bulkRelocateModalClose = document.getElementById('location-bulk-relocate-modal-close');
+  var bulkRelocateForm = document.getElementById('location-bulk-relocate-form');
+  var bulkRelocateMessage = document.getElementById('location-bulk-relocate-message');
+  var bulkRelocatePicker = document.getElementById('location-bulk-relocate-picker');
+  var bulkBar = document.getElementById('location-bulk-bar');
+  var bulkBarCount = document.getElementById('location-bulk-bar-count');
+  var bulkBarRelocateBtn = document.getElementById('location-bulk-bar-relocate');
+  var bulkBarClearBtn = document.getElementById('location-bulk-bar-clear');
   if (!contentEl) {
     return;
   }
@@ -739,6 +804,72 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     loadContent(id, name);
   }
 
+  // Walks the already-loaded tree (same data the left pane is built from)
+  // to find a card's full breadcrumb path — cheaper and simpler than a
+  // dedicated round trip, since the whole (non-owned-set) location tree is
+  // already sitting in memory as treeRoot.
+  function findLocationPath(id) {
+    var target = String(id);
+    function walk(node, trail) {
+      var nextTrail = node.id === null ? trail : trail.concat([node.name]);
+      if (node.id !== null && String(node.id) === target) {
+        return nextTrail;
+      }
+      for (var i = 0; i < (node.children || []).length; i++) {
+        var found = walk(node.children[i], nextTrail);
+        if (found) {
+          return found;
+        }
+      }
+      return null;
+    }
+    var trail = walk(treeRoot, []);
+    return trail ? trail.join(' \\u203a ') : '';
+  }
+
+  // Multi-select state for the "Umlagern" bulk bar — keyed so the same
+  // card toggles the same entry regardless of which grid rebuild it came
+  // from (categories reload wholesale on every loadContent()).
+  var selectedItems = {};
+
+  function itemKey(item) {
+    return item.kind === 'minifig'
+      ? 'minifig:' + item.locationId + ':' + item.minifigId + ':' + item.conditionType
+      : 'part:' + item.locationId + ':' + item.partId + ':' + item.colorId + ':' + item.conditionType;
+  }
+
+  function updateBulkBar() {
+    var count = Object.keys(selectedItems).length;
+    if (!bulkBar) {
+      return;
+    }
+    bulkBar.hidden = count === 0;
+    if (bulkBarCount) {
+      bulkBarCount.textContent = texts.bulkBarCount.replace('{count}', String(count));
+    }
+  }
+
+  function clearSelection() {
+    selectedItems = {};
+    Array.prototype.forEach.call(contentEl.querySelectorAll('.location-detail-card-select'), function(cb) {
+      cb.checked = false;
+    });
+    updateBulkBar();
+  }
+
+  if (bulkBarClearBtn) {
+    bulkBarClearBtn.addEventListener('click', clearSelection);
+  }
+
+  var currentLocationId = null;
+  var currentLocationName = null;
+
+  function refreshContent() {
+    if (currentLocationId !== null) {
+      loadContent(currentLocationId, currentLocationName);
+    }
+  }
+
   function buildGroup(title, bodyEl) {
     var section = document.createElement('section');
     section.className = 'location-content-group';
@@ -750,6 +881,40 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     section.appendChild(header);
     section.appendChild(bodyEl);
     return section;
+  }
+
+  function addCardSelectAndActivate(card, descriptor, activate) {
+    var checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'location-detail-card-select';
+    checkbox.setAttribute('aria-label', texts.selectLabel);
+    var key = itemKey(descriptor);
+    checkbox.checked = !!selectedItems[key];
+    checkbox.addEventListener('click', function(e) {
+      e.stopPropagation();
+    });
+    checkbox.addEventListener('keydown', function(e) {
+      e.stopPropagation();
+    });
+    checkbox.addEventListener('change', function() {
+      if (checkbox.checked) {
+        selectedItems[key] = descriptor;
+      } else {
+        delete selectedItems[key];
+      }
+      updateBulkBar();
+    });
+    card.appendChild(checkbox);
+
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.addEventListener('click', activate);
+    card.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activate();
+      }
+    });
   }
 
   function buildPartsGrid(parts) {
@@ -791,6 +956,21 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       meta.textContent = (item.color_name || '') + ' \\u00b7 ' + condText;
       card.appendChild(meta);
 
+      var descriptor = {
+        kind: 'part',
+        locationId: item.location_id,
+        partId: item.part_id,
+        colorId: item.color_id,
+        conditionType: item.condition_type
+      };
+      addCardSelectAndActivate(card, descriptor, function() {
+        openItemEditModal(descriptor, {
+          title: item.part_num + ' \\u00b7 ' + item.part_name,
+          meta: (item.color_name || '') + ' \\u00b7 ' + condText,
+          quantity: item.quantity
+        });
+      });
+
       grid.appendChild(card);
     });
     return grid;
@@ -831,9 +1011,131 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       meta.textContent = condText;
       card.appendChild(meta);
 
+      var descriptor = {
+        kind: 'minifig',
+        locationId: fig.location_id,
+        minifigId: fig.minifig_id,
+        conditionType: fig.condition_type
+      };
+      addCardSelectAndActivate(card, descriptor, function() {
+        openItemEditModal(descriptor, {
+          title: figName,
+          meta: condText,
+          quantity: fig.quantity
+        });
+      });
+
       grid.appendChild(card);
     });
     return grid;
+  }
+
+  function openItemEditModal(descriptor, display) {
+    if (!itemEditModal || !itemEditForm) {
+      return;
+    }
+    itemEditSubtitle.textContent = display.title + (display.meta ? ' \\u00b7 ' + display.meta : '');
+    itemEditCurrentPath.textContent = findLocationPath(descriptor.locationId);
+    itemEditQuantity.value = display.quantity;
+    itemEditMessage.textContent = '';
+    itemEditMessage.className = 'add-stock-message';
+
+    itemEditPicker.innerHTML = '';
+    var newLocationId = null;
+    window.createLocationPicker(itemEditPicker, texts, function(value) {
+      newLocationId = value;
+    });
+
+    itemEditForm.onsubmit = function(e) {
+      e.preventDefault();
+      var formData = new FormData();
+      formData.set('action', descriptor.kind === 'minifig' ? 'update_minifig_storage_item' : 'update_storage_item');
+      formData.set('location_id', descriptor.locationId);
+      formData.set('condition_type', descriptor.conditionType);
+      formData.set('quantity', itemEditQuantity.value);
+      if (newLocationId) {
+        formData.set('new_location_id', newLocationId);
+      }
+      if (descriptor.kind === 'minifig') {
+        formData.set('minifig_id', descriptor.minifigId);
+      } else {
+        formData.set('part_id', descriptor.partId);
+        formData.set('color_id', descriptor.colorId);
+      }
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            itemEditModal.style.display = 'none';
+            refreshContent();
+          } else {
+            itemEditMessage.textContent = texts.updateFailed.replace('{message}', res.message || '');
+            itemEditMessage.className = 'add-stock-message error';
+          }
+        })
+        .catch(function() {
+          itemEditMessage.textContent = texts.errorRetry;
+          itemEditMessage.className = 'add-stock-message error';
+        });
+    };
+
+    itemEditModal.style.display = 'flex';
+  }
+
+  if (itemEditModalClose) {
+    itemEditModalClose.addEventListener('click', function() {
+      itemEditModal.style.display = 'none';
+    });
+  }
+
+  if (bulkBarRelocateBtn && bulkRelocateModal) {
+    bulkBarRelocateBtn.addEventListener('click', function() {
+      if (Object.keys(selectedItems).length === 0) {
+        return;
+      }
+      bulkRelocateMessage.textContent = '';
+      bulkRelocateMessage.className = 'add-stock-message';
+      bulkRelocatePicker.innerHTML = '';
+      var targetLocationId = null;
+      window.createLocationPicker(bulkRelocatePicker, texts, function(value) {
+        targetLocationId = value;
+      });
+
+      bulkRelocateForm.onsubmit = function(e) {
+        e.preventDefault();
+        if (!targetLocationId) {
+          return;
+        }
+        var formData = new FormData();
+        formData.set('action', 'bulk_move_storage_items');
+        formData.set('target_location_id', targetLocationId);
+        formData.set('items', JSON.stringify(Object.keys(selectedItems).map(function(k) { return selectedItems[k]; })));
+        fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+          .then(function(r) { return r.json(); })
+          .then(function(res) {
+            if (res.success) {
+              bulkRelocateModal.style.display = 'none';
+              clearSelection();
+              refreshContent();
+            } else {
+              bulkRelocateMessage.textContent = texts.bulkRelocateFailed.replace('{message}', res.message || '');
+              bulkRelocateMessage.className = 'add-stock-message error';
+            }
+          })
+          .catch(function() {
+            bulkRelocateMessage.textContent = texts.errorRetry;
+            bulkRelocateMessage.className = 'add-stock-message error';
+          });
+      };
+
+      bulkRelocateModal.style.display = 'flex';
+    });
+  }
+
+  if (bulkRelocateModalClose) {
+    bulkRelocateModalClose.addEventListener('click', function() {
+      bulkRelocateModal.style.display = 'none';
+    });
   }
 
   function renderContent(id, name, data) {
@@ -887,6 +1189,8 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
   function loadContent(id, name) {
     loadToken++;
     var myToken = loadToken;
+    currentLocationId = id;
+    currentLocationName = name;
     contentEl.innerHTML = '<p class="hint">' + texts.loading + '</p>';
     fetch('?action=location_content&location_id=' + id, { credentials: 'same-origin' })
       .then(function(r) { return r.json(); })

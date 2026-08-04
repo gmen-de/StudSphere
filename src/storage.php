@@ -334,6 +334,94 @@ function setStorageItemQuantity(int $locationId, int $partId, int $colorId, stri
 }
 
 /**
+ * Moves an entire storage_items row (quantity, damaged_quantity,
+ * spare_quantity, spare_damaged_quantity — everything on it, not just the
+ * regular quantity) from one location to another, merging into whatever's
+ * already at the destination for the same part+color+condition. A no-op if
+ * the row doesn't exist at $fromLocationId, or if source and destination are
+ * the same location. Writes a linked move_out/move_in pair to
+ * storage_movements (related_movement_id ties them together), unlike
+ * setStorageItemQuantity()'s single 'correction' row.
+ */
+function moveStorageItem(int $fromLocationId, int $toLocationId, int $partId, int $colorId, string $conditionType, ?int $userId): void
+{
+    if ($fromLocationId === $toLocationId) {
+        return;
+    }
+    $pdo = getPDO();
+    $pdo->beginTransaction();
+    try {
+        $sourceStmt = $pdo->prepare(
+            'SELECT quantity, damaged_quantity, spare_quantity, spare_damaged_quantity
+             FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        );
+        $sourceStmt->execute([$fromLocationId, $partId, $colorId, $conditionType]);
+        $source = $sourceStmt->fetch();
+        if ($source === false) {
+            $pdo->rollBack();
+            return;
+        }
+
+        $pdo->prepare(
+            'DELETE FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        )->execute([$fromLocationId, $partId, $colorId, $conditionType]);
+
+        $upsertStmt = $pdo->prepare(
+            'INSERT INTO storage_items (location_id, part_id, color_id, condition_type, quantity, damaged_quantity, spare_quantity, spare_damaged_quantity)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                quantity = quantity + VALUES(quantity),
+                damaged_quantity = damaged_quantity + VALUES(damaged_quantity),
+                spare_quantity = spare_quantity + VALUES(spare_quantity),
+                spare_damaged_quantity = spare_damaged_quantity + VALUES(spare_damaged_quantity)'
+        );
+        $upsertStmt->execute([
+            $toLocationId, $partId, $colorId, $conditionType,
+            $source['quantity'], $source['damaged_quantity'], $source['spare_quantity'], $source['spare_damaged_quantity'],
+        ]);
+
+        $resultStmt = $pdo->prepare(
+            'SELECT quantity FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        );
+        $resultStmt->execute([$toLocationId, $partId, $colorId, $conditionType]);
+        $resultingQuantity = (int) $resultStmt->fetchColumn();
+
+        $outStmt = $pdo->prepare(
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity)
+             VALUES (?, ?, ?, ?, ?, \'move_out\', ?, 0)'
+        );
+        $outStmt->execute([$userId, $fromLocationId, $partId, $colorId, $conditionType, -(int) $source['quantity']]);
+        $outId = (int) $pdo->lastInsertId();
+
+        $inStmt = $pdo->prepare(
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity, related_movement_id)
+             VALUES (?, ?, ?, ?, ?, \'move_in\', ?, ?, ?)'
+        );
+        $inStmt->execute([$userId, $toLocationId, $partId, $colorId, $conditionType, (int) $source['quantity'], $resultingQuantity, $outId]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/**
+ * Single entry point for the location Explorer's "edit" card: applies a
+ * quantity correction (if changed) at the item's current location, then —
+ * only if a different location was actually chosen — moves the (now
+ * corrected) row there in one coherent step, rather than treating quantity
+ * and location as two separately-reasoned edits.
+ */
+function updateStorageItem(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $newLocationId, ?int $userId): void
+{
+    setStorageItemQuantity($locationId, $partId, $colorId, $conditionType, $newQuantity, $userId);
+    if ($newLocationId !== null && $newLocationId !== $locationId) {
+        moveStorageItem($locationId, $newLocationId, $partId, $colorId, $conditionType, $userId);
+    }
+}
+
+/**
  * Same shape as setStorageItemQuantity(), but for the spare_quantity/
  * spare_damaged_quantity columns — a set's spare and regular pool can be
  * the exact same part+color, so spares get their own pair of columns on
@@ -565,7 +653,7 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
     // callers fall back to a generic (not color-specific) thumbnail when
     // it's null, same priority order getSetPartsList() uses.
     $partsStmt = $pdo->prepare(
-        "SELECT si.part_id, p.part_num, p.name AS part_name, pc.name AS category_name,
+        "SELECT si.location_id, si.part_id, p.part_num, p.name AS part_name, pc.name AS category_name,
                 c.id AS color_id, c.color_id AS rebrickable_color_id, c.name AS color_name, c.rgb AS color_rgb,
                 si.condition_type, si.quantity, pci.local_image_path AS ldraw_thumbnail
          FROM storage_items si
@@ -579,6 +667,7 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
     $partsStmt->execute($looseIds);
     $partsByCategory = [];
     foreach ($partsStmt->fetchAll() as $row) {
+        $row['location_id'] = (int) $row['location_id'];
         $row['part_id'] = (int) $row['part_id'];
         $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
         $row['rebrickable_color_id'] = $row['rebrickable_color_id'] !== null ? (int) $row['rebrickable_color_id'] : null;
@@ -588,7 +677,7 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
     }
 
     $minifigsStmt = $pdo->prepare(
-        "SELECT msi.minifig_id, m.fig_num, m.name AS minifig_name, m.local_image_path AS thumbnail,
+        "SELECT msi.location_id, msi.minifig_id, m.fig_num, m.name AS minifig_name, m.local_image_path AS thumbnail,
                 msi.condition_type, msi.quantity
          FROM minifig_storage_items msi
          INNER JOIN minifigs m ON m.id = msi.minifig_id
@@ -598,6 +687,7 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
     $minifigsStmt->execute($looseIds);
     $minifigs = $minifigsStmt->fetchAll();
     foreach ($minifigs as &$fig) {
+        $fig['location_id'] = (int) $fig['location_id'];
         $fig['minifig_id'] = (int) $fig['minifig_id'];
         $fig['quantity'] = (int) $fig['quantity'];
     }
@@ -628,4 +718,76 @@ function addMinifigStock(int $locationId, int $minifigId, string $conditionType,
     );
     $resultStmt->execute([$locationId, $minifigId, $conditionType]);
     return (int) $resultStmt->fetchColumn();
+}
+
+/**
+ * Sets the exact quantity for a loose minifig at a location (unlike
+ * addMinifigStock(), which is additive) — the minifig counterpart to
+ * setStorageItemQuantity(). No storage_movements row, same reasoning as
+ * addMinifigStock().
+ */
+function setMinifigStorageItemQuantity(int $locationId, int $minifigId, string $conditionType, int $newQuantity): void
+{
+    $pdo = getPDO();
+    $stmt = $pdo->prepare(
+        'INSERT INTO minifig_storage_items (location_id, minifig_id, condition_type, quantity)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)'
+    );
+    $stmt->execute([$locationId, $minifigId, $conditionType, $newQuantity]);
+}
+
+/**
+ * Minifig counterpart to moveStorageItem() — moves an entire
+ * minifig_storage_items row (quantity and damaged_quantity) to a different
+ * location, merging into whatever's already there. No storage_movements
+ * row, same reasoning as addMinifigStock().
+ */
+function moveMinifigStorageItem(int $fromLocationId, int $toLocationId, int $minifigId, string $conditionType): void
+{
+    if ($fromLocationId === $toLocationId) {
+        return;
+    }
+    $pdo = getPDO();
+    $pdo->beginTransaction();
+    try {
+        $sourceStmt = $pdo->prepare(
+            'SELECT quantity, damaged_quantity FROM minifig_storage_items WHERE location_id = ? AND minifig_id = ? AND condition_type = ?'
+        );
+        $sourceStmt->execute([$fromLocationId, $minifigId, $conditionType]);
+        $source = $sourceStmt->fetch();
+        if ($source === false) {
+            $pdo->rollBack();
+            return;
+        }
+
+        $pdo->prepare(
+            'DELETE FROM minifig_storage_items WHERE location_id = ? AND minifig_id = ? AND condition_type = ?'
+        )->execute([$fromLocationId, $minifigId, $conditionType]);
+
+        $upsertStmt = $pdo->prepare(
+            'INSERT INTO minifig_storage_items (location_id, minifig_id, condition_type, quantity, damaged_quantity)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                quantity = quantity + VALUES(quantity),
+                damaged_quantity = damaged_quantity + VALUES(damaged_quantity)'
+        );
+        $upsertStmt->execute([$toLocationId, $minifigId, $conditionType, $source['quantity'], $source['damaged_quantity']]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/**
+ * Minifig counterpart to updateStorageItem() — see its doc comment.
+ */
+function updateMinifigStorageItem(int $locationId, int $minifigId, string $conditionType, int $newQuantity, ?int $newLocationId): void
+{
+    setMinifigStorageItemQuantity($locationId, $minifigId, $conditionType, $newQuantity);
+    if ($newLocationId !== null && $newLocationId !== $locationId) {
+        moveMinifigStorageItem($locationId, $newLocationId, $minifigId, $conditionType);
+    }
 }

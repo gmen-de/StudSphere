@@ -834,6 +834,64 @@ button[type='submit'] {
   background: #ffffff;
 }
 
+/* Only the location Explorer's cards (#location-explorer-content) are
+   click-to-edit / multi-selectable — the static location_detail page reuses
+   the same .location-detail-card markup purely for display, so the
+   interactive affordances stay scoped to the Explorer's container. */
+#location-explorer-content .location-detail-card {
+  cursor: pointer;
+}
+
+#location-explorer-content .location-detail-card:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.location-detail-card-select {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.4rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  cursor: pointer;
+}
+
+.location-bulk-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.7rem 1.1rem;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #f8fafc;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.35);
+  font-size: 0.85rem;
+}
+
+.location-bulk-bar button {
+  padding: 0.4rem 0.9rem;
+  border: none;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.location-bulk-bar #location-bulk-bar-relocate {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.location-bulk-bar #location-bulk-bar-clear {
+  background: rgba(248, 250, 252, 0.15);
+  color: #f8fafc;
+}
+
 .location-detail-card-thumb {
   display: flex;
   align-items: center;

@@ -459,6 +459,122 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     exit;
 }
 
+// The location Explorer's per-card "edit" modal (quantity + optional new
+// location, see updateStorageItem() in src/storage.php) — reachable by
+// clicking any part card in ?page=locations.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_storage_item') {
+    header('Content-Type: application/json');
+    try {
+        $locationId = (int) ($_POST['location_id'] ?? 0);
+        $partId = (int) ($_POST['part_id'] ?? 0);
+        $colorId = (int) ($_POST['color_id'] ?? 0);
+        $conditionType = ($_POST['condition_type'] ?? '') === 'new' ? 'new' : 'used';
+        $quantity = (int) ($_POST['quantity'] ?? -1);
+        $newLocationId = isset($_POST['new_location_id']) && $_POST['new_location_id'] !== ''
+            ? (int) $_POST['new_location_id'] : null;
+
+        if ($locationId <= 0 || $partId <= 0 || $colorId <= 0 || $quantity < 0) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+        if ($newLocationId !== null && $newLocationId !== $locationId && locationHasNonOwnedSetChildren($newLocationId)) {
+            throw new RuntimeException(t('add_stock_location_not_leaf'));
+        }
+
+        updateStorageItem($locationId, $partId, $colorId, $conditionType, $quantity, $newLocationId, (int) $_SESSION['user_id']);
+        refreshAppStatsCache($pdo);
+
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_minifig_storage_item') {
+    header('Content-Type: application/json');
+    try {
+        $locationId = (int) ($_POST['location_id'] ?? 0);
+        $minifigId = (int) ($_POST['minifig_id'] ?? 0);
+        $conditionType = ($_POST['condition_type'] ?? '') === 'new' ? 'new' : 'used';
+        $quantity = (int) ($_POST['quantity'] ?? -1);
+        $newLocationId = isset($_POST['new_location_id']) && $_POST['new_location_id'] !== ''
+            ? (int) $_POST['new_location_id'] : null;
+
+        if ($locationId <= 0 || $minifigId <= 0 || $quantity < 0) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+        if ($newLocationId !== null && $newLocationId !== $locationId && locationHasNonOwnedSetChildren($newLocationId)) {
+            throw new RuntimeException(t('add_stock_location_not_leaf'));
+        }
+
+        updateMinifigStorageItem($locationId, $minifigId, $conditionType, $quantity, $newLocationId);
+        refreshAppStatsCache($pdo);
+
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// The location Explorer's multi-select "Umlagern" bar — moves several
+// already-selected cards (parts and/or minifigs) to one target location in
+// one request. $items is a JSON-encoded array of
+// {kind:'part', locationId, partId, colorId, conditionType} or
+// {kind:'minifig', locationId, minifigId, conditionType}, built client-side
+// from the same data attributes the single-card edit modal uses.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_move_storage_items') {
+    header('Content-Type: application/json');
+    try {
+        $targetLocationId = (int) ($_POST['target_location_id'] ?? 0);
+        $items = json_decode((string) ($_POST['items'] ?? '[]'), true);
+
+        if ($targetLocationId <= 0 || !is_array($items) || empty($items)) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+        if (locationHasNonOwnedSetChildren($targetLocationId)) {
+            throw new RuntimeException(t('add_stock_location_not_leaf'));
+        }
+
+        $userId = (int) $_SESSION['user_id'];
+        $moved = 0;
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $fromLocationId = (int) ($item['locationId'] ?? 0);
+            if ($fromLocationId <= 0) {
+                continue;
+            }
+            $conditionType = ($item['conditionType'] ?? '') === 'new' ? 'new' : 'used';
+            if (($item['kind'] ?? '') === 'minifig') {
+                $minifigId = (int) ($item['minifigId'] ?? 0);
+                if ($minifigId <= 0) {
+                    continue;
+                }
+                moveMinifigStorageItem($fromLocationId, $targetLocationId, $minifigId, $conditionType);
+            } else {
+                $partId = (int) ($item['partId'] ?? 0);
+                $colorId = (int) ($item['colorId'] ?? 0);
+                if ($partId <= 0 || $colorId <= 0) {
+                    continue;
+                }
+                moveStorageItem($fromLocationId, $targetLocationId, $partId, $colorId, $conditionType, $userId);
+            }
+            $moved++;
+        }
+        refreshAppStatsCache($pdo);
+
+        echo json_encode(['success' => true, 'moved' => $moved], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
     header('Content-Type: application/json');
     $partId = (int) ($_GET['part_id'] ?? 0);
