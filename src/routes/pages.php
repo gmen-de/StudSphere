@@ -1067,6 +1067,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         .then(function(res) {
           if (res.success) {
             itemEditModal.style.display = 'none';
+            window.applyStatusStats(res.stats);
             refreshContent();
           } else {
             itemEditMessage.textContent = texts.updateFailed.replace('{message}', res.message || '');
@@ -1115,6 +1116,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
           .then(function(res) {
             if (res.success) {
               bulkRelocateModal.style.display = 'none';
+              window.applyStatusStats(res.stats);
               clearSelection();
               refreshContent();
             } else {
@@ -2236,9 +2238,30 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $ownedSetBreadcrumbs = [
         homeBreadcrumb(),
         ['label' => t('nav_my_sets_all'), 'url' => '?page=my_sets_all'],
-        ['label' => $ownedSet['name'], 'url' => '?page=set_detail&id=' . $ownedSet['set_id']],
-        ['label' => t('owned_set_instance_label'), 'url' => null],
     ];
+    if ($ownedSet['theme_id'] !== null) {
+        $ownedSetThemeTree = getOwnedSetThemeTree($pdo);
+        foreach (getThemeAncestors($ownedSetThemeTree, $ownedSet['theme_id']) as $ownedSetThemeAncestor) {
+            $ownedSetBreadcrumbs[] = [
+                'label' => $ownedSetThemeAncestor['name'],
+                'url' => '?page=my_sets_themes&theme=' . $ownedSetThemeAncestor['theme_id'],
+            ];
+        }
+    }
+    $ownedSetBreadcrumbs[] = ['label' => $ownedSet['name'], 'url' => '?page=set_detail&id=' . $ownedSet['set_id']];
+    // The instance number isn't stored on owned_sets itself (only baked into
+    // its auto-generated storage location's name, see addOwnedSet()) — same
+    // 1-based "position among this set's owned instances, oldest first"
+    // getOwnedSetsForSet() already establishes for the catalog set_detail
+    // page's "#1, #2, ..." links.
+    $ownedSetInstanceNumber = 1;
+    foreach (getOwnedSetsForSet($pdo, $ownedSet['set_id']) as $ownedSetInstanceIndex => $ownedSetInstance) {
+        if ($ownedSetInstance['id'] === $ownedSet['id']) {
+            $ownedSetInstanceNumber = $ownedSetInstanceIndex + 1;
+            break;
+        }
+    }
+    $ownedSetBreadcrumbs[] = ['label' => t('owned_set_instance_label', ['n' => (string) $ownedSetInstanceNumber]), 'url' => null];
 
     $completeness = getOwnedSetCompleteness($pdo, $ownedSet);
     // Ancestors only, not the set's own auto-generated leaf location itself

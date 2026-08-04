@@ -481,9 +481,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         }
 
         updateStorageItem($locationId, $partId, $colorId, $conditionType, $quantity, $newLocationId, (int) $_SESSION['user_id']);
-        refreshAppStatsCache($pdo);
+        $stats = refreshAppStatsCache($pdo);
 
-        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => true, 'stats' => $stats], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
@@ -509,9 +509,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         }
 
         updateMinifigStorageItem($locationId, $minifigId, $conditionType, $quantity, $newLocationId);
-        refreshAppStatsCache($pdo);
+        $stats = refreshAppStatsCache($pdo);
 
-        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => true, 'stats' => $stats], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
@@ -565,9 +565,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_
             }
             $moved++;
         }
-        refreshAppStatsCache($pdo);
+        $stats = refreshAppStatsCache($pdo);
 
-        echo json_encode(['success' => true, 'moved' => $moved], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => true, 'moved' => $moved, 'stats' => $stats], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
@@ -1253,13 +1253,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_s
         }
 
         $resultingQuantity = addStorageStock($locationId, $partId, $colorId, $conditionType, $quantity, (int) $_SESSION['user_id']);
-        refreshAppStatsCache($pdo);
+        $stats = refreshAppStatsCache($pdo);
 
         echo json_encode([
             'success' => true,
             'resultingQuantity' => $resultingQuantity,
             'locationPath' => getStorageLocationPath($locationId),
             'message' => t('add_stock_success', ['quantity' => (string) $quantity, 'total' => (string) $resultingQuantity]),
+            'stats' => $stats,
         ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);

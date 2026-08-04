@@ -173,4 +173,32 @@
   }
 
   window.createLocationPicker = createLocationPicker;
+
+  /**
+   * Patches the status-bar stats (top of every app page — see renderApp()
+   * in index.php, spans id="status-stat-<key>") after an AJAX action that
+   * changed storage_items/owned_sets. Those actions already call
+   * refreshAppStatsCache() server-side; this just needs the resulting
+   * numbers included in their JSON response and passed here, so the bar
+   * doesn't sit stale until the next full page load. A no-op for any key
+   * whose span isn't on the current page. Mirrors the local applyStats()
+   * already used by the owned_set_detail tabs (src/owned_sets.php) — kept
+   * as a separate shared copy here rather than refactoring that one, since
+   * it already works and isn't broken.
+   */
+  function applyStatusStats(stats) {
+    if (!stats) {
+      return;
+    }
+    var sep = document.documentElement.lang === 'de' ? '.' : ',';
+    Object.keys(stats).forEach(function (key) {
+      var el = document.getElementById('status-stat-' + key);
+      var strong = el ? el.querySelector('strong') : null;
+      if (strong) {
+        strong.textContent = String(stats[key]).replace(/\B(?=(\d{3})+(?!\d))/g, sep);
+      }
+    });
+  }
+
+  window.applyStatusStats = applyStatusStats;
 })(window);

@@ -74,9 +74,10 @@ function getOwnedSetById(PDO $pdo, int $id): ?array
         'SELECT os.id, os.set_id, os.inventory_id, os.location_id, os.condition_type, os.has_instructions, os.has_box, os.box_complete,
                 os.notes, os.instructions_notes, os.box_notes, os.box_complete_notes, os.stickers_applied, os.stickers_notes,
                 os.damaged_missing_show_spares, os.damaged_missing_show_stickers, os.created_at,
-                s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
+                s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail, th.theme_id
          FROM owned_sets os
          INNER JOIN sets s ON s.id = os.set_id
+         LEFT JOIN themes th ON th.theme_id = s.theme
          WHERE os.id = ?'
     );
     $stmt->execute([$id]);
@@ -94,6 +95,7 @@ function getOwnedSetById(PDO $pdo, int $id): ?array
     $row['stickers_applied'] = (bool) $row['stickers_applied'];
     $row['damaged_missing_show_spares'] = (bool) $row['damaged_missing_show_spares'];
     $row['damaged_missing_show_stickers'] = (bool) $row['damaged_missing_show_stickers'];
+    $row['theme_id'] = $row['theme_id'] !== null ? (int) $row['theme_id'] : null;
     return $row;
 }
 
@@ -1830,6 +1832,18 @@ function renderOwnedSetCard(array $ownedSet, ?float $completenessPercent = null)
     $html .= '<span class="set-card-image">' . ($ownedSet['thumbnail'] !== null ? '<img src="' . htmlspecialchars($ownedSet['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
     $html .= '<span class="set-card-num">' . htmlspecialchars($ownedSet['rebrickable_set_num']) . '</span>';
     $html .= '<span class="set-card-name" title="' . htmlspecialchars($ownedSet['name']) . '">' . htmlspecialchars($ownedSet['name']) . '</span>';
+    if (isset($ownedSet['location_id'])) {
+        // Ancestors only, not the set's own auto-generated leaf location
+        // itself (location_type 'owned_set') — same exclusion the
+        // owned_set_detail page's own "Lagerort" row already uses, since
+        // showing the set's own name again here would be redundant.
+        $locationAncestors = getStorageLocationAncestors((int) $ownedSet['location_id']);
+        array_pop($locationAncestors);
+        if (!empty($locationAncestors)) {
+            $locationLabel = implode(' -> ', array_column($locationAncestors, 'name'));
+            $html .= '<span class="set-card-meta set-card-location">' . htmlspecialchars($locationLabel) . '</span>';
+        }
+    }
     if ($completenessPercent !== null) {
         $html .= '<span class="set-card-meta">' . htmlspecialchars(formatNumber($completenessPercent, 1)) . '%</span>';
     }

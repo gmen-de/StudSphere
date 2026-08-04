@@ -767,6 +767,7 @@ function renderPartDetailModal(): string
           msgBox.className = 'add-stock-message ' + (res.success ? 'success' : 'error');
           if (res.success) {
             stockLoadedForPart = null;
+            window.applyStatusStats(res.stats);
           }
         })
         .catch(function() {

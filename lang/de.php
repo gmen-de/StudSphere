@@ -386,7 +386,7 @@ return [
     'my_sets_empty' => 'Du hast noch keine Sets zu deiner Sammlung hinzugefügt.',
     'owned_set_not_found_title' => 'Exemplar nicht gefunden',
     'owned_set_not_found' => 'Dieses Set-Exemplar existiert nicht (mehr).',
-    'owned_set_instance_label' => 'Exemplar',
+    'owned_set_instance_label' => 'Exemplar #{n}',
     'owned_set_detail_page_title' => 'Inv: {set_num} - {name}',
     'owned_set_invalid_set' => 'Ungültiges Set.',
     'owned_set_location_label' => 'Lagerort',
