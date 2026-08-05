@@ -1,0 +1,29 @@
+# Template unit — each instance renders independently (leocad only uses one
+# CPU core per render, so multiple instances are how a multi-core host
+# actually gets used; see bin/ldraw_render_worker.php's doc comment for why
+# that's safe). Enable as many instances as you want cores dedicated to
+# rendering, e.g. 4 of them:
+#
+#   systemctl enable --now ldraw-render-worker@1 ldraw-render-worker@2 \
+#     ldraw-render-worker@3 ldraw-render-worker@4
+#
+# Leave at least 1-2 cores free for Apache/PHP/MariaDB — don't set the
+# instance count to nproc. To scale down, disable the higher-numbered
+# instances (systemctl disable --now ldraw-render-worker@4); a still-running
+# render finishes normally, only the queue-polling loop stops afterward.
+
+[Unit]
+Description=StudSphere LDraw render worker (instance %i)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/html
+ExecStart=/usr/bin/php /var/www/html/bin/ldraw_render_worker.php %i
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
