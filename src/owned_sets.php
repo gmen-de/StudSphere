@@ -612,11 +612,35 @@ function getSetItemsPreview(PDO $pdo, int $inventoryId, string $locale, bool $sp
     return $result;
 }
 
-/** @see getSetItemsPreview() — regular-parts slice, mirrors getOwnedSetPartsWithStatus(). */
+/**
+ * @see getSetItemsPreview() — regular-parts slice, mirrors
+ * getOwnedSetPartsWithStatus(). Sorted by highest total nominal quantity
+ * first (unlike spares/stickers, which stay in catalog order) — per user
+ * feedback, checking off the wizard's one-part-per-page inventory review
+ * goes faster when the parts you have the most of (and are therefore most
+ * likely to be missing/short a few of) come up first. The sort key is the
+ * PART TYPE's total across all its color variants combined (color ignored),
+ * not any single row's own quantity — e.g. part 3001 in 5x red + 10x black
+ * + 3x white sorts by 18, not by 10. Matches how the wizard already groups
+ * a part_num's colors onto one shared page (initInventoryPages() in
+ * owned_set_wizard.php): each color still keeps its own row/tile and own
+ * quantity, only the ordering of which part_num's page comes first changes.
+ */
 function getSetPartsPreview(PDO $pdo, int $inventoryId, string $locale = 'en'): array
 {
     $stickerPartIds = array_keys(getStickerPartIds($pdo, $inventoryId));
-    return getSetItemsPreview($pdo, $inventoryId, $locale, false, $stickerPartIds, true);
+    $items = getSetItemsPreview($pdo, $inventoryId, $locale, false, $stickerPartIds, true);
+
+    $totalsByPartNum = [];
+    foreach ($items as $item) {
+        $totalsByPartNum[$item['part_num']] = ($totalsByPartNum[$item['part_num']] ?? 0) + $item['nominal_quantity'];
+    }
+    usort($items, function (array $a, array $b) use ($totalsByPartNum): int {
+        $cmp = $totalsByPartNum[$b['part_num']] <=> $totalsByPartNum[$a['part_num']];
+        return $cmp !== 0 ? $cmp : ($b['nominal_quantity'] <=> $a['nominal_quantity']);
+    });
+
+    return $items;
 }
 
 /** @see getSetItemsPreview() — sticker-sheets slice, mirrors getOwnedSetStickerPartsWithStatus(). */
