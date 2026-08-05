@@ -644,7 +644,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'minifig_detail') {
     }
     $minifigInventoryId = getMinifigInventoryId($pdo, $minifig['fig_num']);
     $parts = $minifigInventoryId !== null ? getSetPartsList($pdo, $minifigInventoryId, false, getLocale()) : [];
+    $minifig = array_merge($minifig, getMinifigSetStats($pdo, $minifigId));
     echo json_encode(['minifig' => $minifig, 'parts' => $parts], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// The minifig modal's "appears in N sets" link (src/minifig_modal.php) —
+// mirrors action=part_sets.
+if (isset($_GET['action']) && $_GET['action'] === 'minifig_sets') {
+    header('Content-Type: application/json');
+    $minifigId = (int) ($_GET['minifig_id'] ?? 0);
+    echo json_encode(['sets' => getMinifigSets($pdo, $minifigId)], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

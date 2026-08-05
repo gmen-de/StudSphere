@@ -27,8 +27,13 @@ function renderMinifigDetailModal(): string
         'errorRetry' => t('import_error_retry'),
         'minifigIcon' => getNavIcon('minifigs'),
         'brickIcon' => getNavIcon('bricks'),
+        'setsIcon' => getNavIcon('sets'),
         'componentsTitle' => t('minifig_modal_components_title'),
         'componentsEmpty' => t('minifig_modal_components_empty'),
+        'appearsInSets' => t('minifig_appears_in_sets'),
+        'appearsInNoSets' => t('minifig_appears_in_no_sets'),
+        'minifigSetsTitle' => t('minifig_sets_title'),
+        'backToMinifig' => t('back_to_minifig'),
         'addToInventoryTitle' => t('add_to_inventory_title'),
         'quantityLabel' => t('add_stock_quantity_label'),
         'conditionLabel' => t('add_stock_condition_label'),
@@ -101,6 +106,28 @@ function renderMinifigDetailModal(): string
     meta.textContent = fig.fig_num;
     info.appendChild(title);
     info.appendChild(meta);
+
+    var sets = document.createElement('p');
+    sets.className = 'part-modal-sets';
+    var setsText = texts.appearsInSets
+      .replace('{total}', fig.total_appearances)
+      .replace('{count}', fig.sets_count)
+      .replace('{minYear}', fig.min_year)
+      .replace('{maxYear}', fig.max_year);
+    if (fig.sets_count > 0) {
+      var setsLink = document.createElement('a');
+      setsLink.href = '#';
+      setsLink.textContent = setsText;
+      setsLink.addEventListener('click', function(e) {
+        e.preventDefault();
+        openMinifigSetsList(fig);
+      });
+      sets.appendChild(setsLink);
+    } else {
+      sets.textContent = texts.appearsInNoSets;
+    }
+    info.appendChild(sets);
+
     header.appendChild(info);
     content.appendChild(header);
 
@@ -244,6 +271,61 @@ function renderMinifigDetailModal(): string
     });
 
     content.appendChild(form);
+  }
+
+  function openMinifigSetsList(fig) {
+    content.innerHTML = '';
+
+    var backLink = document.createElement('a');
+    backLink.href = '#';
+    backLink.className = 'part-sets-back';
+    backLink.textContent = texts.backToMinifig;
+    backLink.addEventListener('click', function(e) {
+      e.preventDefault();
+      openMinifigModal(fig.id);
+    });
+    content.appendChild(backLink);
+
+    var title = document.createElement('h3');
+    title.textContent = texts.minifigSetsTitle;
+    content.appendChild(title);
+
+    var list = document.createElement('div');
+    list.className = 'part-sets-list';
+    content.appendChild(list);
+
+    fetch('?action=minifig_sets&minifig_id=' + encodeURIComponent(fig.id), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        (data.sets || []).forEach(function(set) {
+          var row = document.createElement('div');
+          row.className = 'part-sets-row';
+
+          var thumb = document.createElement('span');
+          thumb.className = 'part-sets-thumb';
+          thumb.innerHTML = set.thumbnail
+            ? '<img src="' + set.thumbnail + '" alt="">'
+            : texts.setsIcon;
+          row.appendChild(thumb);
+
+          var setInfo = document.createElement('span');
+          setInfo.className = 'part-sets-info';
+          var setName = document.createElement('span');
+          setName.className = 'part-sets-name';
+          setName.textContent = (set.name || set.set_num) + (set.year ? ' (' + set.year + ')' : '');
+          var setMeta = document.createElement('span');
+          setMeta.className = 'part-sets-meta';
+          setMeta.textContent = set.set_num + ' · ' + set.quantity + 'x';
+          setInfo.appendChild(setName);
+          setInfo.appendChild(setMeta);
+          row.appendChild(setInfo);
+
+          list.appendChild(row);
+        });
+      })
+      .catch(function() {
+        list.textContent = texts.errorRetry;
+      });
   }
 
   document.addEventListener('click', function(e) {

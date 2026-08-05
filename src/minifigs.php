@@ -44,6 +44,63 @@ function getMinifigById(PDO $pdo, int $id): ?array
 }
 
 /**
+ * "Appears in N sets, Xx total, from year to year" summary for the minifig
+ * detail modal's header — mirrors getPartDetail()'s equivalent block in
+ * src/parts.php exactly, just off inventory_minifigs instead of
+ * inventory_parts (a minifig has no is_spare distinction, so no such filter
+ * here).
+ *
+ * @return array{sets_count:int, total_appearances:int, min_year:?int, max_year:?int}
+ */
+function getMinifigSetStats(PDO $pdo, int $minifigId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(DISTINCT ri.set_num) AS set_count,
+                COALESCE(SUM(im.quantity), 0) AS total_appearances,
+                MIN(s.year) AS min_year,
+                MAX(s.year) AS max_year
+         FROM inventory_minifigs im
+         INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
+         LEFT JOIN sets s ON s.rebrickable_set_num = ri.set_num
+         WHERE im.minifig_id = ?'
+    );
+    $stmt->execute([$minifigId]);
+    $row = $stmt->fetch();
+    return [
+        'sets_count' => (int) ($row['set_count'] ?? 0),
+        'total_appearances' => (int) ($row['total_appearances'] ?? 0),
+        'min_year' => $row['min_year'] !== null ? (int) $row['min_year'] : null,
+        'max_year' => $row['max_year'] !== null ? (int) $row['max_year'] : null,
+    ];
+}
+
+/**
+ * Every set a minifig appears in — mirrors getPartSets() in src/parts.php.
+ *
+ * @return array<int, array{set_num:string, name:?string, year:?int, thumbnail:?string, quantity:int}>
+ */
+function getMinifigSets(PDO $pdo, int $minifigId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT ri.set_num, s.name, s.year, s.local_image_path AS thumbnail, SUM(im.quantity) AS quantity
+         FROM inventory_minifigs im
+         INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
+         LEFT JOIN sets s ON s.rebrickable_set_num = ri.set_num
+         WHERE im.minifig_id = ?
+         GROUP BY ri.set_num, s.name, s.year, s.local_image_path
+         ORDER BY s.year DESC, s.name ASC'
+    );
+    $stmt->execute([$minifigId]);
+    $sets = $stmt->fetchAll();
+    foreach ($sets as &$set) {
+        $set['quantity'] = (int) $set['quantity'];
+        $set['year'] = $set['year'] !== null ? (int) $set['year'] : null;
+    }
+    unset($set);
+    return $sets;
+}
+
+/**
  * Minifigs have no category field of their own — the only place Rebrickable
  * groups them is via the sets they appear in, so "theme" here is derived by
  * walking minifigs -> inventory_minifigs -> rebrickable_inventories -> sets
