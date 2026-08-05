@@ -299,22 +299,27 @@ function computeOwnedSetsBricklinkValueTotal(PDO $pdo): array
 }
 
 /**
- * The owned_set_detail sidebar's "BrickLink-Preis" row text — shared by the
+ * The owned_set_detail sidebar's "Ø BrickLink-Preis" row — shared by the
  * initial page render and the manual-refresh button's live JS update (see
  * the inline script next to that row in src/routes/pages.php), so the two
- * can never drift apart in formatting.
+ * can never drift apart in formatting. Shows only the price matching this
+ * particular instance's own condition_type (a "used" set has no business
+ * being compared against BrickLink's "new" average and vice versa) rather
+ * than both New and Used side by side. The "last updated" date isn't shown
+ * inline — it's the row's title attribute (a hover tooltip), so the row
+ * itself stays just the price.
+ *
+ * @return array{text: string, title: ?string}
  */
-function formatBricklinkPriceSummary(?float $priceNew, ?float $priceUsed, ?string $currency, ?string $checkedAt): string
+function formatBricklinkPriceSummary(?float $priceNew, ?float $priceUsed, ?string $currency, ?string $checkedAt, string $conditionType): array
 {
     if ($checkedAt === null) {
-        return t('owned_set_bricklink_price_never');
+        return ['text' => t('owned_set_bricklink_price_never'), 'title' => null];
     }
-    $symbol = bricklinkCurrencySymbol($currency);
-    $newText = $priceNew !== null ? formatNumber($priceNew, 2) . ' ' . $symbol : '–';
-    $usedText = $priceUsed !== null ? formatNumber($priceUsed, 2) . ' ' . $symbol : '–';
-    return t('owned_set_bricklink_price_summary', [
-        'new' => $newText,
-        'used' => $usedText,
-        'date' => formatDate($checkedAt, true),
-    ]);
+    $price = $conditionType === 'new' ? $priceNew : $priceUsed;
+    $priceText = $price !== null ? formatNumber($price, 2) . ' ' . bricklinkCurrencySymbol($currency) : '–';
+    return [
+        'text' => $priceText,
+        'title' => t('owned_set_bricklink_price_updated_title', ['date' => formatDate($checkedAt, true)]),
+    ];
 }

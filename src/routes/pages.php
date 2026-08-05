@@ -2345,13 +2345,15 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th><td>' . htmlspecialchars($ownedSet['condition_type'] === 'new' ? t('owned_set_condition_new') : t('owned_set_condition_used')) . '</td></tr>';
     if ($catalogSet !== null) {
-        $content .= '<tr><th>' . htmlspecialchars(t('owned_set_bricklink_price_label')) . '</th><td>';
-        $content .= '<span id="owned-set-bricklink-price-text">' . htmlspecialchars(formatBricklinkPriceSummary(
+        $bricklinkPriceDisplay = formatBricklinkPriceSummary(
             $catalogSet['bricklink_price_new'],
             $catalogSet['bricklink_price_used'],
             $catalogSet['bricklink_price_currency'],
-            $catalogSet['bricklink_price_checked_at']
-        )) . '</span> ';
+            $catalogSet['bricklink_price_checked_at'],
+            $ownedSet['condition_type']
+        );
+        $content .= '<tr><th>' . htmlspecialchars(t('owned_set_bricklink_price_label')) . '</th><td>';
+        $content .= '<span id="owned-set-bricklink-price-text"' . ($bricklinkPriceDisplay['title'] !== null ? ' title="' . htmlspecialchars($bricklinkPriceDisplay['title']) . '"' : '') . '>' . htmlspecialchars($bricklinkPriceDisplay['text']) . '</span> ';
         $content .= '<button type="button" class="owned-set-bricklink-refresh-btn" id="owned-set-bricklink-refresh" data-set-id="' . (int) $catalogSet['id'] . '" title="' . htmlspecialchars(t('owned_set_bricklink_price_refresh_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_bricklink_price_refresh_label')) . '">' . getActionIcon('refresh') . '</button>';
         $content .= '</td></tr>';
     }
