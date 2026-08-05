@@ -67,6 +67,12 @@ function renderPartDetailModal(): string
 <script>
 (function(){
   var texts = $modalLabelsJson;
+  // Remembers the last location a "Zum Lager hinzufügen" submit actually
+  // used, so the picker starts pre-filled there next time instead of empty
+  // at the root — most adds go to the same shelf/bin in a row. Per-browser
+  // (localStorage), not per-user server-side: simplest fit for "just save
+  // me the repeat clicks," no schema/account plumbing needed for it.
+  var LAST_ADD_LOCATION_STORAGE_KEY = 'studsphere_last_add_location';
   var modal = document.getElementById('part-detail-modal');
   var content = document.getElementById('part-modal-content');
   var closeBtn = document.getElementById('part-modal-close');
@@ -736,9 +742,15 @@ function renderPartDetailModal(): string
     locationContainer.className = 'location-picker';
     form.appendChild(locationContainer);
     var selectedLocationId = null;
+    var lastAddLocationId = null;
+    try {
+      lastAddLocationId = window.localStorage.getItem(LAST_ADD_LOCATION_STORAGE_KEY);
+    } catch (e) {
+      // Private browsing / storage disabled — picker just starts empty.
+    }
     window.createLocationPicker(locationContainer, texts, function(value) {
       selectedLocationId = value;
-    });
+    }, lastAddLocationId);
 
     var submitBtn = document.createElement('button');
     submitBtn.type = 'submit';
@@ -768,6 +780,11 @@ function renderPartDetailModal(): string
           if (res.success) {
             stockLoadedForPart = null;
             window.applyStatusStats(res.stats);
+            try {
+              window.localStorage.setItem(LAST_ADD_LOCATION_STORAGE_KEY, selectedLocationId);
+            } catch (ex) {
+              // ignore
+            }
           }
         })
         .catch(function() {

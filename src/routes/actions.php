@@ -389,6 +389,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_children') {
     exit;
 }
 
+// window.createLocationPicker()'s optional pre-selection (app.js) — given a
+// remembered location id, the picker needs its full root-to-target ancestor
+// chain up front to restore the breadcrumb/select state without a click.
+if (isset($_GET['action']) && $_GET['action'] === 'location_ancestors') {
+    header('Content-Type: application/json');
+    $ancestorsLocationId = (int) ($_GET['id'] ?? 0);
+    $ancestors = $ancestorsLocationId > 0 ? getStorageLocationAncestors($ancestorsLocationId) : [];
+    echo json_encode(['ancestors' => $ancestors], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // The location Explorer's right pane (src/routes/pages.php's ?page=locations,
 // see renderLocationExplorer() there) — everything stored anywhere under the
 // clicked location, recursively, grouped for display.

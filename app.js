@@ -19,9 +19,14 @@
    * @param {function(?string):void} onChange - called with the deepest
    *   currently selected location id (as a string), or null if nothing is
    *   selected at any level.
+   * @param {?string} [initialLocationId] - if given, the picker restores
+   *   this location's full breadcrumb/select path on load instead of
+   *   starting empty at the root (one extra request for its ancestor
+   *   chain — see action=location_ancestors). Silently falls back to an
+   *   empty root start if the id no longer exists.
    * @returns {{getValue: function():?string, getLabel: function():string, reset: function():void}}
    */
-  function createLocationPicker(container, texts, onChange) {
+  function createLocationPicker(container, texts, onChange, initialLocationId) {
     var path = []; // [{id, name}], deepest last; empty means nothing chosen yet
 
     function currentParentId() {
@@ -158,7 +163,39 @@
       onChange(deepestValue());
     });
 
-    loadLevel();
+    function restoreInitialPath(locationId) {
+      var params = new URLSearchParams();
+      params.set('action', 'location_ancestors');
+      params.set('id', locationId);
+      fetch('?' + params.toString(), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var ancestors = data.ancestors || [];
+          if (ancestors.length === 0) {
+            loadLevel();
+            return;
+          }
+          // The response is already root-first/target-last — exactly the
+          // shape `path` needs, so no per-level simulated clicking is
+          // needed; loadLevel() below then loads whatever's one level
+          // deeper than the restored target, same as after a real click.
+          path = ancestors.map(function (a) {
+            return { id: String(a.id), name: a.name };
+          });
+          renderBreadcrumb();
+          loadLevel();
+          onChange(deepestValue());
+        })
+        .catch(function () {
+          loadLevel();
+        });
+    }
+
+    if (initialLocationId) {
+      restoreInitialPath(initialLocationId);
+    } else {
+      loadLevel();
+    }
 
     return {
       getValue: deepestValue,
