@@ -284,12 +284,13 @@ function getThemeTileImages(PDO $pdo, array $themeIdGroups): array
 }
 
 /**
- * @return array{id:int, rebrickable_set_num:string, name:string, year:?int, year_retired:?int, num_parts:?int, thumbnail:?string, theme_id:?int, theme_name:?string}|null
+ * @return array{id:int, rebrickable_set_num:string, name:string, year:?int, year_retired:?int, num_parts:?int, thumbnail:?string, theme_id:?int, theme_name:?string, bricklink_item_id:?int, bricklink_price_new:?float, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}|null
  */
 function getSetById(PDO $pdo, int $id): ?array
 {
     $stmt = $pdo->prepare(
-        'SELECT s.id, s.rebrickable_set_num, s.name, s.year, s.year_retired, s.num_parts, s.local_image_path AS thumbnail, th.theme_id, th.name AS theme_name
+        'SELECT s.id, s.rebrickable_set_num, s.name, s.year, s.year_retired, s.num_parts, s.local_image_path AS thumbnail, th.theme_id, th.name AS theme_name,
+                s.bricklink_item_id, s.bricklink_price_new, s.bricklink_price_used, s.bricklink_price_currency, s.bricklink_price_checked_at
          FROM sets s
          LEFT JOIN themes th ON th.theme_id = s.theme
          WHERE s.id = ?'
@@ -302,6 +303,9 @@ function getSetById(PDO $pdo, int $id): ?array
     $set['year'] = $set['year'] !== null ? (int) $set['year'] : null;
     $set['year_retired'] = $set['year_retired'] !== null ? (int) $set['year_retired'] : null;
     $set['theme_id'] = $set['theme_id'] !== null ? (int) $set['theme_id'] : null;
+    $set['bricklink_item_id'] = $set['bricklink_item_id'] !== null ? (int) $set['bricklink_item_id'] : null;
+    $set['bricklink_price_new'] = $set['bricklink_price_new'] !== null ? (float) $set['bricklink_price_new'] : null;
+    $set['bricklink_price_used'] = $set['bricklink_price_used'] !== null ? (float) $set['bricklink_price_used'] : null;
     return $set;
 }
 

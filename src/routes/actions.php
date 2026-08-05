@@ -1062,6 +1062,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'open_
     exit;
 }
 
+// The owned_set_detail page's manual "refresh price" button — bypasses
+// stepBricklinkPriceSync()'s 30-day/throttle gate since this is one
+// deliberate user click, not the opportunistic background sync. Also bumps
+// the same last-run marker that gate reads, so the automatic sync doesn't
+// immediately re-fetch the same set right after.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'refresh_bricklink_price') {
+    header('Content-Type: application/json');
+    try {
+        $bricklinkRefreshSetId = (int) ($_POST['set_id'] ?? 0);
+        $bricklinkRefreshSet = getSetById($pdo, $bricklinkRefreshSetId);
+        if ($bricklinkRefreshSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        setAppSetting('bricklink_sync_last_run', date('Y-m-d H:i:s'));
+        refreshBricklinkPriceForSet($pdo, $bricklinkRefreshSet);
+        $refreshedSet = getSetById($pdo, $bricklinkRefreshSetId);
+        echo json_encode([
+            'success' => true,
+            'priceNew' => $refreshedSet['bricklink_price_new'],
+            'priceUsed' => $refreshedSet['bricklink_price_used'],
+            'currency' => $refreshedSet['bricklink_price_currency'],
+            'checkedAt' => formatDate($refreshedSet['bricklink_price_checked_at'], true),
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_owned_set_damaged_missing_settings') {
     header('Content-Type: application/json');
     try {

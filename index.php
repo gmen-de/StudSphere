@@ -16,6 +16,7 @@ require_once __DIR__ . '/src/parts.php';
 require_once __DIR__ . '/src/part_modal.php';
 require_once __DIR__ . '/src/part_images.php';
 require_once __DIR__ . '/src/sets.php';
+require_once __DIR__ . '/src/bricklink_prices.php';
 require_once __DIR__ . '/src/instructions.php';
 require_once __DIR__ . '/src/ldraw.php';
 require_once __DIR__ . '/src/owned_sets.php';
@@ -99,6 +100,11 @@ if (partTranslationsSyncPending()) {
         // down. It'll just retry on the next request.
     }
 }
+
+// Best-effort, throttled, at most one set per request — see
+// stepBricklinkPriceSync()'s doc comment (src/bricklink_prices.php) for why
+// this piggybacks on ordinary page loads instead of a cron/worker.
+stepBricklinkPriceSync($pdo);
 
 function render(string $title, string $content): void
 {

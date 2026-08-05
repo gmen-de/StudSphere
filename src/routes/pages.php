@@ -2344,6 +2344,17 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= implode(' » ', $locationLinks);
     $content .= '</td></tr>';
     $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th><td>' . htmlspecialchars($ownedSet['condition_type'] === 'new' ? t('owned_set_condition_new') : t('owned_set_condition_used')) . '</td></tr>';
+    if ($catalogSet !== null) {
+        $content .= '<tr><th>' . htmlspecialchars(t('owned_set_bricklink_price_label')) . '</th><td>';
+        $content .= '<span id="owned-set-bricklink-price-text">' . htmlspecialchars(formatBricklinkPriceSummary(
+            $catalogSet['bricklink_price_new'],
+            $catalogSet['bricklink_price_used'],
+            $catalogSet['bricklink_price_currency'],
+            $catalogSet['bricklink_price_checked_at']
+        )) . '</span> ';
+        $content .= '<button type="button" class="owned-set-bricklink-refresh-btn" id="owned-set-bricklink-refresh" data-set-id="' . (int) $catalogSet['id'] . '" title="' . htmlspecialchars(t('owned_set_bricklink_price_refresh_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_bricklink_price_refresh_label')) . '">' . getActionIcon('refresh') . '</button>';
+        $content .= '</td></tr>';
+    }
     $renderActualNominalRow('set_detail_field_exclusive', 'exclusive', $ownedInventorySummary['exclusive']);
     $renderActualNominalRow('set_detail_field_rare', 'rare', $ownedInventorySummary['rare']);
     $renderActualNominalRow('set_detail_field_stickers', 'stickers', $ownedInventorySummary['stickers']);
@@ -2391,6 +2402,44 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
 })();
 </script>
 SCRIPT;
+
+    $bricklinkRefreshFailedJson = json_encode(t('owned_set_bricklink_price_refresh_failed'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $content .= <<<SCRIPT
+<script>
+(function(){
+  var btn = document.getElementById("owned-set-bricklink-refresh");
+  if (!btn) { return; }
+  btn.addEventListener("click", function() {
+    btn.disabled = true;
+    btn.classList.add("owned-set-bricklink-refresh-spinning");
+    var formData = new FormData();
+    formData.set("action", "refresh_bricklink_price");
+    formData.set("set_id", btn.dataset.setId);
+    fetch("?", { method: "POST", body: formData, credentials: "same-origin" })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          // Simplest correct way to show the freshly formatted text
+          // (currency symbol, locale number/date formatting) without
+          // duplicating formatBricklinkPriceSummary()'s logic in JS — a
+          // manual click is rare enough that a reload is no real cost.
+          window.location.reload();
+          return;
+        }
+        btn.disabled = false;
+        btn.classList.remove("owned-set-bricklink-refresh-spinning");
+        window.alert($bricklinkRefreshFailedJson + " " + res.message);
+      })
+      .catch(function() {
+        btn.disabled = false;
+        btn.classList.remove("owned-set-bricklink-refresh-spinning");
+        window.alert($bricklinkRefreshFailedJson);
+      });
+  });
+})();
+</script>
+SCRIPT;
+
     $content .= '</div>';
 
     $content .= renderOwnedSetEditModal($ownedSet);

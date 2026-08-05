@@ -32,6 +32,11 @@ function installDatabase(): void
             image_url VARCHAR(512) DEFAULT NULL,
             local_image_path VARCHAR(512) DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            bricklink_item_id INT DEFAULT NULL,
+            bricklink_price_new DECIMAL(10,2) DEFAULT NULL,
+            bricklink_price_used DECIMAL(10,2) DEFAULT NULL,
+            bricklink_price_currency VARCHAR(10) DEFAULT NULL,
+            bricklink_price_checked_at TIMESTAMP NULL DEFAULT NULL,
             INDEX idx_sets_theme (theme)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
 

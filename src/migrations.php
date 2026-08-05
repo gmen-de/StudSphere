@@ -468,6 +468,20 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        30 => function (PDO $pdo): void {
+            // BrickLink price-guide enrichment (src/bricklink_prices.php) —
+            // bricklink_item_id is resolved once (BrickLink's own internal
+            // numeric catalog id, distinct from the set number) and cached
+            // forever; the price columns get refreshed opportunistically by
+            // stepBricklinkPriceSync(), never live on a page request.
+            // checked_at is set on every attempt (even a failed lookup), so
+            // a set BrickLink doesn't carry doesn't get retried every cycle.
+            addColumnIfMissing($pdo, 'sets', 'bricklink_item_id', 'INT DEFAULT NULL');
+            addColumnIfMissing($pdo, 'sets', 'bricklink_price_new', 'DECIMAL(10,2) DEFAULT NULL');
+            addColumnIfMissing($pdo, 'sets', 'bricklink_price_used', 'DECIMAL(10,2) DEFAULT NULL');
+            addColumnIfMissing($pdo, 'sets', 'bricklink_price_currency', 'VARCHAR(10) DEFAULT NULL');
+            addColumnIfMissing($pdo, 'sets', 'bricklink_price_checked_at', 'TIMESTAMP NULL DEFAULT NULL');
+        },
     ];
 }
 
@@ -530,7 +544,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 29;
+const CURRENT_SCHEMA_VERSION = 30;
 
 function getInstalledSchemaVersion(): int
 {

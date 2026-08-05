@@ -88,6 +88,10 @@ function getActionIcon(string $key): string
         // The location Explorer's column-resize handle: a circle with a
         // left arrow and a right arrow separated by a vertical divider.
         'resize_handle' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M10.5 8l-3 4 3 4"/><path d="M12 7v10"/><path d="M13.5 8l3 4-3 4"/></svg>',
+        // owned_set_detail's manual "refresh BrickLink price" button
+        // (src/routes/pages.php) — CSS spins it while a request is in
+        // flight.
+        'refresh' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11A8 8 0 1 0 18 16"/><path d="M20 5v6h-6"/></svg>',
     ];
 
     return $icons[$key] ?? '';
