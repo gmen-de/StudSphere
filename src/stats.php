@@ -21,12 +21,16 @@ require_once __DIR__ . '/owned_sets.php';
  * - "Sets": how many set instances are in owned_sets (physical copies, so
  *   owning the same set twice counts as 2 — matches "Bausteine gesamt"
  *   being a piece count, not a distinct-item count).
- * - "Minifiguren": SUM(quantity) across owned_set_minifigs — actually
- *   tracked per instance (see getOwnedSetMinifigsWithStatus() in
- *   src/owned_sets.php), not the catalog's nominal inventory_minifigs count,
+ * - "Minifiguren": SUM(quantity) across owned_set_minifigs (actually
+ *   tracked per instance, see getOwnedSetMinifigsWithStatus() in
+ *   src/owned_sets.php, not the catalog's nominal inventory_minifigs count,
  *   so a minifig marked missing during inventory-taking is reflected here
- *   too (consistent with "Bausteine gesamt"/"Beschädigte Teile" also
- *   reflecting actually-tracked state, not a catalog assumption).
+ *   too — consistent with "Bausteine gesamt"/"Beschädigte Teile" also
+ *   reflecting actually-tracked state, not a catalog assumption) PLUS
+ *   SUM(quantity) across minifig_storage_items (loose minifigs stored
+ *   independently of any set, see addMinifigStock() in src/storage.php) —
+ *   both are physically-owned minifigs, same "Bausteine gesamt" reasoning
+ *   for combining loose and set-bound into one total.
  * - "Beschädigte Teile": SUM(damaged_quantity) across all of storage_items.
  *   Damaged pieces are still physically present (a subset of "Bausteine
  *   gesamt"/quantity, not subtracted from it) — see
@@ -78,7 +82,8 @@ function refreshAppStatsCache(PDO $pdo): array
              WHERE si.quantity > 0 AND (sl.location_type IS NULL OR sl.location_type != 'owned_set')"
         )->fetchColumn(),
         'sets' => (int) $pdo->query('SELECT COUNT(*) FROM owned_sets')->fetchColumn(),
-        'minifigs' => (int) $pdo->query('SELECT COALESCE(SUM(quantity), 0) FROM owned_set_minifigs')->fetchColumn(),
+        'minifigs' => (int) $pdo->query('SELECT COALESCE(SUM(quantity), 0) FROM owned_set_minifigs')->fetchColumn()
+            + (int) $pdo->query('SELECT COALESCE(SUM(quantity), 0) FROM minifig_storage_items')->fetchColumn(),
         'bricks_damaged' => (int) $pdo->query('SELECT COALESCE(SUM(damaged_quantity), 0) FROM storage_items')->fetchColumn(),
         'bricks_missing' => computeCollectionMissingPartsTotal($pdo),
     ];

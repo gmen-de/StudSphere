@@ -142,39 +142,44 @@ function renderMinifigDetailModal(): string
       empty.textContent = texts.componentsEmpty;
       content.appendChild(empty);
     } else {
+      // Plain .part-card tiles (not a bespoke tile design) so they're picked
+      // up by renderPartDetailModal()'s own document-level click delegation
+      // — clicking one opens the part's own detail modal (image, sets,
+      // "Zum Lager hinzufügen" tab), same as everywhere else in the app a
+      // part card shows up. Requires renderPartDetailModal() to also be
+      // included on this page (see src/routes/pages.php).
       var grid = document.createElement('div');
-      grid.className = 'minifig-modal-parts-grid';
+      grid.className = 'parts-grid';
       parts.forEach(function(part) {
-        var tile = document.createElement('div');
-        tile.className = 'minifig-modal-part-tile';
+        var card = document.createElement('div');
+        card.className = 'part-card';
+        card.dataset.partId = part.part_id;
+        card.setAttribute('role', 'button');
+        card.tabIndex = 0;
 
         var thumb = document.createElement('span');
-        thumb.className = 'minifig-modal-part-tile-image';
+        thumb.className = 'part-card-image';
         var partThumb = part.ldraw_thumbnail || part.thumbnail || part.remote_thumbnail;
         thumb.innerHTML = partThumb ? '<img src="' + partThumb + '" alt="">' : texts.brickIcon;
-        tile.appendChild(thumb);
+        card.appendChild(thumb);
 
         var num = document.createElement('span');
-        num.className = 'minifig-modal-part-tile-num';
+        num.className = 'part-card-num';
         num.textContent = part.part_num;
-        tile.appendChild(num);
+        card.appendChild(num);
 
         var name = document.createElement('span');
-        name.className = 'minifig-modal-part-tile-name';
+        name.className = 'part-card-name';
         name.title = part.name;
         name.textContent = part.name;
-        tile.appendChild(name);
+        card.appendChild(name);
 
         var partMeta = document.createElement('span');
-        partMeta.className = 'minifig-modal-part-tile-meta';
-        var swatch = document.createElement('span');
-        swatch.className = 'minifig-modal-part-tile-swatch';
-        swatch.style.backgroundColor = part.color_rgb ? '#' + part.color_rgb.replace('#', '') : '#cccccc';
-        partMeta.appendChild(swatch);
-        partMeta.appendChild(document.createTextNode((part.color_name || '') + ' \\u00b7 ' + part.quantity + 'x'));
-        tile.appendChild(partMeta);
+        partMeta.className = 'part-card-meta';
+        partMeta.textContent = (part.color_name || '') + ' \\u00b7 ' + part.quantity + 'x';
+        card.appendChild(partMeta);
 
-        grid.appendChild(tile);
+        grid.appendChild(card);
       });
       content.appendChild(grid);
     }

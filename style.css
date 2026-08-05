@@ -1721,7 +1721,8 @@ footer {
 
 /* Content scrolls on its own; the close button (a sibling, not inside this
    scroll area) stays put in the corner instead of scrolling out of view. */
-#part-modal-content {
+#part-modal-content,
+#minifig-modal-content {
   overflow-y: auto;
   padding-right: 2.25rem;
 }
@@ -2391,82 +2392,9 @@ footer {
   line-height: 1.35;
 }
 
-/* Minifig-detail modal's constituent-parts grid — same tile family as
-   .part-stock-card, but purely informational (not clickable), so no cursor/
-   hover affordance is added here. */
-.minifig-modal-parts-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-  gap: 3px;
-  max-height: 40vh;
-  overflow-y: auto;
-  margin-bottom: 1rem;
-}
-
-.minifig-modal-part-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 0.5rem;
-  padding: 0.9rem 0.6rem;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 0.85rem;
-  background: #ffffff;
-}
-
-.minifig-modal-part-tile-image {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 4rem;
-  height: 4rem;
-  color: #94a3b8;
-}
-
-.minifig-modal-part-tile-image svg {
-  width: 2rem;
-  height: 2rem;
-}
-
-.minifig-modal-part-tile-image img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.minifig-modal-part-tile-num {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.minifig-modal-part-tile-name {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  font-size: 0.75rem;
-  color: #64748b;
-}
-
-.minifig-modal-part-tile-meta {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  font-size: 0.72rem;
-  color: #64748b;
-}
-
-.minifig-modal-part-tile-swatch {
-  display: inline-block;
-  flex-shrink: 0;
-  width: 0.85rem;
-  height: 0.85rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(15, 23, 42, 0.15);
-}
+/* Minifig-detail modal's constituent-parts grid reuses .parts-grid/.part-card
+   directly (src/minifig_modal.php) — clicking one opens the part's own
+   detail modal, so no bespoke non-interactive tile style is needed here. */
 
 .part-purchase-placeholder {
   color: #94a3b8;

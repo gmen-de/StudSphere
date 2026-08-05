@@ -1704,6 +1704,12 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
         if (empty($results['items'])) {
             $main .= '<section class="card"><p>' . htmlspecialchars(t('minifigs_categories_empty')) . '</p></section>';
         } else {
+            // Included so a component-part tile inside the minifig modal
+            // (built as a plain .part-card, see renderMinifigDetailModal()'s
+            // script) is picked up by this modal's own document-level click
+            // delegation — same "works unchanged wherever its cards show up"
+            // reasoning as everywhere else renderPartDetailModal() is used.
+            $main .= renderPartDetailModal();
             $main .= renderMinifigDetailModal();
             $hasMore = $perPage < $results['total'];
             $grouped = renderYearGroupedCards($results['items'], null, false, 'renderMinifigCard');
