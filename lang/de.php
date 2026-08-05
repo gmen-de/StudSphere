@@ -290,6 +290,7 @@ return [
     'stat_minifigs' => 'Minifiguren',
     'stat_bricks_damaged' => 'Beschädigte Teile',
     'stat_bricks_missing' => 'Fehlende Teile',
+    'stat_bricklink_value' => 'Sammlungswert',
     'nav_build' => 'Bauen',
     'nav_sets' => 'Sets',
     'nav_sets_search' => 'Set suchen',

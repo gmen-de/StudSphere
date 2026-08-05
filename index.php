@@ -294,6 +294,10 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '<span class="status-stat" id="status-stat-minifigs"><strong>' . formatNumber($stats['minifigs']) . '</strong> ' . htmlspecialchars(t('stat_minifigs')) . '</span>';
     echo '<span class="status-stat" id="status-stat-bricks_damaged"><strong>' . formatNumber($stats['bricks_damaged']) . '</strong> ' . htmlspecialchars(t('stat_bricks_damaged')) . '</span>';
     echo '<span class="status-stat" id="status-stat-bricks_missing"><strong>' . formatNumber($stats['bricks_missing']) . '</strong> ' . htmlspecialchars(t('stat_bricks_missing')) . '</span>';
+    $bricklinkValue = computeOwnedSetsBricklinkValueTotal(getPDO());
+    if ($bricklinkValue['total'] > 0) {
+        echo '<span class="status-stat" id="status-stat-bricklink_value"><strong>' . formatNumber($bricklinkValue['total'], 2) . ' ' . htmlspecialchars(bricklinkCurrencySymbol($bricklinkValue['currency'])) . '</strong> ' . htmlspecialchars(t('stat_bricklink_value')) . '</span>';
+    }
     echo '</div>';
     echo '<div class="status-user">';
     echo '<a class="status-username" href="?page=settings">' . htmlspecialchars($user['username']) . '</a>';

@@ -267,6 +267,38 @@ function bricklinkCurrencySymbol(?string $code): string
 }
 
 /**
+ * Sum of every owned set instance's own-condition BrickLink price (a "new"
+ * instance counts its bricklink_price_new, a "used" one its
+ * bricklink_price_used) — the status bar's "Sammlungswert" figure. Instances
+ * whose set has no price yet (never synced, or BrickLink has no current
+ * listings for that condition) simply contribute nothing, same as the other
+ * status-bar sums treat anything not yet known. Computed fresh on every
+ * render rather than cached alongside APP_STATS_CACHE_KEYS: unlike those,
+ * this only ever changes when a set is added/removed or a price gets
+ * (re)synced, and both of those already end in a full page render, so there
+ * was never a "went stale until reload" case to protect against for this
+ * one — see refreshAppStatsCache()'s doc comment in src/stats.php for the
+ * caching reasoning that doesn't apply here.
+ *
+ * @return array{total: float, currency: ?string}
+ */
+function computeOwnedSetsBricklinkValueTotal(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        "SELECT
+            SUM(CASE WHEN os.condition_type = 'new' THEN s.bricklink_price_new ELSE s.bricklink_price_used END) AS total,
+            MAX(s.bricklink_price_currency) AS currency
+         FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id"
+    );
+    $row = $stmt->fetch();
+    return [
+        'total' => $row !== false && $row['total'] !== null ? (float) $row['total'] : 0.0,
+        'currency' => $row !== false ? $row['currency'] : null,
+    ];
+}
+
+/**
  * The owned_set_detail sidebar's "BrickLink-Preis" row text — shared by the
  * initial page render and the manual-refresh button's live JS update (see
  * the inline script next to that row in src/routes/pages.php), so the two
