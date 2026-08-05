@@ -9,11 +9,14 @@ const MINIFIGS_SEARCH_PAGE_SIZE = 100;
 
 /**
  * One minifig card — mirrors parts.php's renderPartCard(), used by both the
- * minifigs search results and a set's minifig tab.
+ * minifigs search results and a set's minifig tab. data-minifig-id +
+ * role/tabindex mirror renderPartCard()'s data-part-id: renderMinifigDetailModal()
+ * (src/minifig_modal.php) listens for clicks on this globally, same pattern
+ * as the part-detail modal.
  */
 function renderMinifigCard(array $fig, ?string $meta = null): string
 {
-    $html = '<div class="minifig-card">';
+    $html = '<div class="minifig-card" data-minifig-id="' . (int) $fig['id'] . '" role="button" tabindex="0">';
     $html .= '<span class="minifig-card-image">' . ($fig['thumbnail'] !== null ? '<img src="' . htmlspecialchars($fig['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
     $html .= '<span class="minifig-card-num">' . htmlspecialchars($fig['fig_num']) . '</span>';
     $name = (string) ($fig['name'] ?? $fig['fig_num']);
@@ -23,6 +26,21 @@ function renderMinifigCard(array $fig, ?string $meta = null): string
     }
     $html .= '</div>';
     return $html;
+}
+
+/**
+ * @return array{id:int, fig_num:string, name:?string, thumbnail:?string}|null
+ */
+function getMinifigById(PDO $pdo, int $id): ?array
+{
+    $stmt = $pdo->prepare('SELECT id, fig_num, name, local_image_path AS thumbnail FROM minifigs WHERE id = ?');
+    $stmt->execute([$id]);
+    $row = $stmt->fetch();
+    if ($row === false) {
+        return null;
+    }
+    $row['id'] = (int) $row['id'];
+    return $row;
 }
 
 /**

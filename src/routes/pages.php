@@ -1704,6 +1704,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
         if (empty($results['items'])) {
             $main .= '<section class="card"><p>' . htmlspecialchars(t('minifigs_categories_empty')) . '</p></section>';
         } else {
+            $main .= renderMinifigDetailModal();
             $hasMore = $perPage < $results['total'];
             $grouped = renderYearGroupedCards($results['items'], null, false, 'renderMinifigCard');
             $lastYearAttr = $grouped['lastYearKnown'] ? ($grouped['lastYear'] ?? 'unknown') : 'unknown';

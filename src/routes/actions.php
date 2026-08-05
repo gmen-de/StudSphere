@@ -628,6 +628,26 @@ if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
     exit;
 }
 
+// renderMinifigDetailModal()'s data source (src/minifig_modal.php) — the
+// minifig itself plus its constituent parts, which Rebrickable ships as its
+// own "inventory" keyed by fig_num (see getMinifigInventoryId()'s doc
+// comment in src/minifigs.php), so getSetPartsList() — otherwise a
+// set-parts function — works unchanged here too.
+if (isset($_GET['action']) && $_GET['action'] === 'minifig_detail') {
+    header('Content-Type: application/json');
+    $minifigId = (int) ($_GET['minifig_id'] ?? 0);
+    $minifig = getMinifigById($pdo, $minifigId);
+    if ($minifig === null) {
+        http_response_code(404);
+        echo json_encode(['error' => t('minifig_not_found')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $minifigInventoryId = getMinifigInventoryId($pdo, $minifig['fig_num']);
+    $parts = $minifigInventoryId !== null ? getSetPartsList($pdo, $minifigInventoryId, false, getLocale()) : [];
+    echo json_encode(['minifig' => $minifig, 'parts' => $parts], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_part_translation') {
     header('Content-Type: application/json');
     try {
@@ -1314,6 +1334,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_s
             'success' => true,
             'resultingQuantity' => $resultingQuantity,
             'locationPath' => getStorageLocationPath($locationId),
+            'message' => t('add_stock_success', ['quantity' => (string) $quantity, 'total' => (string) $resultingQuantity]),
+            'stats' => $stats,
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => t('add_stock_failed', ['message' => $e->getMessage()])], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// Minifig counterpart to add_stock — the minifig detail modal's "add as
+// loose minifig" form (src/minifig_modal.php). No color dimension (minifigs
+// aren't tracked per-color), otherwise identical validation to add_stock.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_minifig_stock') {
+    header('Content-Type: application/json');
+    try {
+        $minifigId = (int) ($_POST['minifig_id'] ?? 0);
+        $locationId = (int) ($_POST['location_id'] ?? 0);
+        $conditionType = ($_POST['condition_type'] ?? '') === 'new' ? 'new' : 'used';
+        $quantity = (int) ($_POST['quantity'] ?? 0);
+
+        if ($minifigId <= 0 || $locationId <= 0 || $quantity <= 0) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+        if (locationHasNonOwnedSetChildren($locationId)) {
+            throw new RuntimeException(t('add_stock_location_not_leaf'));
+        }
+
+        $resultingQuantity = addMinifigStock($locationId, $minifigId, $conditionType, $quantity);
+        $stats = refreshAppStatsCache($pdo);
+
+        echo json_encode([
+            'success' => true,
+            'resultingQuantity' => $resultingQuantity,
             'message' => t('add_stock_success', ['quantity' => (string) $quantity, 'total' => (string) $resultingQuantity]),
             'stats' => $stats,
         ], JSON_UNESCAPED_UNICODE);
