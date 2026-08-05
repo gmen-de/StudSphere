@@ -317,7 +317,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
     $ownedSetInventoryId = $inventoryIdRaw !== '' ? (int) $inventoryIdRaw : null;
 
     try {
-        if ($ownedSetSetId <= 0 || getSetById($pdo, $ownedSetSetId) === null) {
+        $ownedSetCatalogSet = $ownedSetSetId > 0 ? getSetById($pdo, $ownedSetSetId) : null;
+        if ($ownedSetCatalogSet === null) {
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
         if ($parentLocationId === null) {
@@ -341,6 +342,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
             $stickersNotes
         );
         refreshAppStatsCache($pdo);
+        // Fetched synchronously here (not left to the opportunistic
+        // background sync) per user feedback: adding a set should behave
+        // like an immediate manual price refresh, not something that might
+        // sit queued for a while — see stepBricklinkPriceSync()'s doc
+        // comment for why *that* one stays throttled/background-only (it's
+        // triggered by every page load, this is one deliberate add).
+        try {
+            setAppSetting('bricklink_sync_last_run', date('Y-m-d H:i:s'));
+            refreshBricklinkPriceForSet($pdo, $ownedSetCatalogSet);
+        } catch (Throwable $e) {
+            // Best-effort — a slow/unreachable BrickLink must never block
+            // adding the set itself.
+        }
         echo json_encode(['success' => true, 'ownedSetId' => $newOwnedSetId], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);

@@ -1055,11 +1055,17 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   // replays on top of it. If that chain fails partway, the just-created row
   // is rolled back (action=remove_owned_set) so a failed save never leaves
   // an unconfirmed set sitting in the collection.
-  document.getElementById('owned-set-wizard-save').addEventListener('click', function() {
+  var saveBtn = document.getElementById('owned-set-wizard-save');
+  saveBtn.addEventListener('click', function() {
+    if (saveBtn.disabled) {
+      return;
+    }
+    saveBtn.disabled = true;
     var errorEl = document.getElementById('owned-set-wizard-overview-error');
     errorEl.textContent = '';
     submitAddOwnedSet().then(function(res) {
       if (!res.success) {
+        saveBtn.disabled = false;
         errorEl.textContent = res.message || texts.errorRetry;
         return;
       }
@@ -1127,9 +1133,11 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
           rollbackData.set('set_id', String(setId));
           fetch('?', { method: 'POST', body: rollbackData, credentials: 'same-origin', redirect: 'manual' }).catch(function() {});
           createdOwnedSetId = null;
+          saveBtn.disabled = false;
           errorEl.textContent = (err && err.message) || texts.errorRetry;
         });
     }).catch(function(err) {
+      saveBtn.disabled = false;
       errorEl.textContent = (err && err.message) || texts.errorRetry;
     });
   });

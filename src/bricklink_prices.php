@@ -198,18 +198,34 @@ const BRICKLINK_SYNC_MIN_INTERVAL_SECONDS = 600;
 
 /**
  * One set (the catalog set behind an owned instance) whose BrickLink price
- * hasn't been checked in BRICKLINK_SYNC_INTERVAL_DAYS days, oldest/never
- * checked first — or null if every owned set is currently up to date.
+ * hasn't been checked in BRICKLINK_SYNC_INTERVAL_DAYS days, or null if every
+ * owned set is currently up to date. Two-bucket priority:
+ * - Never checked at all: most-recently-added owned instance first — a set
+ *   someone just added to their collection jumps ahead of the rest of an
+ *   old, still-unprocessed backlog (e.g. right after this feature first
+ *   shipped, every existing owned set started out "never checked" at once;
+ *   without this, a freshly added set would otherwise wait behind however
+ *   much of that backlog hadn't been worked through yet — sets.id/creation
+ *   order is no use here, since it reflects the Rebrickable catalog import,
+ *   not when the user actually added the set to their own collection).
+ * - Already checked once but overdue for a recheck: oldest-checked first,
+ *   same as before.
  */
 function getNextOwnedSetDueForBricklinkSync(PDO $pdo): ?array
 {
     $stmt = $pdo->prepare(
-        'SELECT DISTINCT s.id, s.rebrickable_set_num, s.bricklink_item_id, s.bricklink_price_checked_at
+        'SELECT s.id, s.rebrickable_set_num, s.bricklink_item_id, s.bricklink_price_checked_at
          FROM sets s
          INNER JOIN owned_sets os ON os.set_id = s.id
          WHERE s.bricklink_price_checked_at IS NULL
             OR s.bricklink_price_checked_at < (NOW() - INTERVAL ' . BRICKLINK_SYNC_INTERVAL_DAYS . ' DAY)
-         ORDER BY s.bricklink_price_checked_at IS NOT NULL, s.bricklink_price_checked_at ASC
+         GROUP BY s.id, s.rebrickable_set_num, s.bricklink_item_id, s.bricklink_price_checked_at
+         ORDER BY
+            CASE WHEN s.bricklink_price_checked_at IS NULL THEN 0 ELSE 1 END,
+            CASE
+                WHEN s.bricklink_price_checked_at IS NULL THEN -UNIX_TIMESTAMP(MAX(os.created_at))
+                ELSE UNIX_TIMESTAMP(s.bricklink_price_checked_at)
+            END
          LIMIT 1'
     );
     $stmt->execute();
