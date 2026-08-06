@@ -27,10 +27,10 @@ require_once __DIR__ . '/owned_sets.php';
  *   so a minifig marked missing during inventory-taking is reflected here
  *   too — consistent with "Bausteine gesamt"/"Beschädigte Teile" also
  *   reflecting actually-tracked state, not a catalog assumption) PLUS
- *   SUM(quantity) across minifig_storage_items (loose minifigs stored
- *   independently of any set, see addMinifigStock() in src/storage.php) —
- *   both are physically-owned minifigs, same "Bausteine gesamt" reasoning
- *   for combining loose and set-bound into one total.
+ *   COUNT(*) of minifig_storage_items (loose minifigs stored independently
+ *   of any set, one row per physical instance — see addMinifigStock() in
+ *   src/storage.php) — both are physically-owned minifigs, same "Bausteine
+ *   gesamt" reasoning for combining loose and set-bound into one total.
  * - "Beschädigte Teile": SUM(damaged_quantity) across all of storage_items.
  *   Damaged pieces are still physically present (a subset of "Bausteine
  *   gesamt"/quantity, not subtracted from it) — see
@@ -83,7 +83,7 @@ function refreshAppStatsCache(PDO $pdo): array
         )->fetchColumn(),
         'sets' => (int) $pdo->query('SELECT COUNT(*) FROM owned_sets')->fetchColumn(),
         'minifigs' => (int) $pdo->query('SELECT COALESCE(SUM(quantity), 0) FROM owned_set_minifigs')->fetchColumn()
-            + (int) $pdo->query('SELECT COALESCE(SUM(quantity), 0) FROM minifig_storage_items')->fetchColumn(),
+            + (int) $pdo->query('SELECT COUNT(*) FROM minifig_storage_items')->fetchColumn(),
         'bricks_damaged' => (int) $pdo->query('SELECT COALESCE(SUM(damaged_quantity), 0) FROM storage_items')->fetchColumn(),
         'bricks_missing' => computeCollectionMissingPartsTotal($pdo),
     ];

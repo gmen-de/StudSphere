@@ -512,6 +512,56 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        33 => function (PDO $pdo): void {
+            // Reworks loose minifig storage from "one row = N identical,
+            // aggregated instances" to "one row = exactly one physical
+            // minifig" — mirrors how owned_sets already works for whole
+            // sets (no quantity column, one row per physical copy), per
+            // explicit user direction ("das muss für jede Figur individuell
+            // sein, wie für die normalen Sets auch"). Splits every existing
+            // quantity>1 row into `quantity` separate quantity=1 rows first
+            // so no stock is lost; damaged_quantity is NOT carried over
+            // (dropped below anyway — it was never actually surfaced in any
+            // UI for loose minifigs, only for parts).
+            $rows = $pdo->query('SELECT id, location_id, minifig_id, condition_type, quantity FROM minifig_storage_items WHERE quantity > 1')->fetchAll();
+            $insertStmt = $pdo->prepare('INSERT INTO minifig_storage_items (location_id, minifig_id, condition_type, quantity) VALUES (?, ?, ?, 1)');
+            $resetStmt = $pdo->prepare('UPDATE minifig_storage_items SET quantity = 1 WHERE id = ?');
+            foreach ($rows as $row) {
+                $extra = (int) $row['quantity'] - 1;
+                for ($i = 0; $i < $extra; $i++) {
+                    $insertStmt->execute([$row['location_id'], $row['minifig_id'], $row['condition_type']]);
+                }
+                $resetStmt->execute([$row['id']]);
+            }
+
+            // minifig_storage_item_parts (migration 32) is keyed by
+            // minifig_storage_item_id under the OLD aggregated-quantity
+            // meaning (nominal scaled by the row's old quantity) — wiped
+            // rather than redistributed, since that table was introduced
+            // this same release and holds no real data yet worth preserving.
+            $pdo->exec('TRUNCATE TABLE minifig_storage_item_parts');
+
+            dropIndexIfExists($pdo, 'minifig_storage_items', 'minifig_storage_item_unique');
+            addIndexIfMissing($pdo, 'minifig_storage_items', 'idx_minifigstorageitem_location', 'location_id');
+            addIndexIfMissing($pdo, 'minifig_storage_items', 'idx_minifigstorageitem_minifig', 'minifig_id');
+            dropColumnIfExists($pdo, 'minifig_storage_items', 'quantity');
+            dropColumnIfExists($pdo, 'minifig_storage_items', 'damaged_quantity');
+        },
+        34 => function (PDO $pdo): void {
+            // BrickLink price-guide fields for minifigs, same shape as
+            // migration 30's sets.bricklink_item_id/bricklink_price_* —
+            // see refreshBricklinkPriceForMinifig() (src/bricklink_prices.php).
+            // bricklink_price_item_id is BrickLink's numeric idItem, NOT the
+            // same value as the existing minifigs.bricklink_id column (that
+            // one is BrickLink's own alphanumeric catalog code, e.g.
+            // "sw0001a", resolved via moykubik.ru — idItem is a further,
+            // separate resolution step from that code).
+            addColumnIfMissing($pdo, 'minifigs', 'bricklink_price_item_id', 'INT DEFAULT NULL');
+            addColumnIfMissing($pdo, 'minifigs', 'bricklink_price_new', 'DECIMAL(10,2) DEFAULT NULL');
+            addColumnIfMissing($pdo, 'minifigs', 'bricklink_price_used', 'DECIMAL(10,2) DEFAULT NULL');
+            addColumnIfMissing($pdo, 'minifigs', 'bricklink_price_currency', 'VARCHAR(10) DEFAULT NULL');
+            addColumnIfMissing($pdo, 'minifigs', 'bricklink_price_checked_at', 'TIMESTAMP NULL DEFAULT NULL');
+        },
     ];
 }
 
@@ -574,7 +624,25 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 32;
+/**
+ * Inverse of addColumnIfMissing() — same information_schema existence check
+ * so a migration that drops a column stays safe to re-run after a partial
+ * failure.
+ */
+function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?'
+    );
+    $stmt->execute([$table, $columnName]);
+    if ((int) $stmt->fetchColumn() === 0) {
+        return;
+    }
+    $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
+}
+
+const CURRENT_SCHEMA_VERSION = 34;
 
 function getInstalledSchemaVersion(): int
 {

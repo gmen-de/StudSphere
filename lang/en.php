@@ -246,6 +246,8 @@ return [
     'location_explorer_loading' => 'Loading …',
     'location_content_group_minifigs' => 'Minifigures',
     'location_content_minifigs_empty' => 'No loose minifigures at this location.',
+    'location_detail_minifig_delete_button' => 'Remove figure',
+    'location_detail_minifig_delete_confirm' => 'Really remove this figure from storage?',
     'location_delete_confirm' => 'Really delete location "{name}"?',
     'locations_tree_expand_label' => 'Expand',
     'location_tree_root_label' => 'Storage',
@@ -575,5 +577,6 @@ return [
     'add_stock_invalid_input' => 'Please fill in all fields.',
     'add_stock_location_not_leaf' => 'Please select a specific storage location, not a parent area.',
     'add_stock_success' => '{quantity}x added. New total at this location: {total}',
+    'minifig_stock_added' => '{quantity}x added.',
     'add_stock_failed' => 'Error: {message}',
 ];

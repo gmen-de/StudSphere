@@ -31,17 +31,25 @@ function renderMinifigCard(array $fig, ?string $meta = null): string
 }
 
 /**
- * @return array{id:int, fig_num:string, name:?string, thumbnail:?string}|null
+ * @return array{id:int, fig_num:string, name:?string, thumbnail:?string, bricklink_id:?string, bricklink_price_item_id:?int, bricklink_price_new:?float, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}|null
  */
 function getMinifigById(PDO $pdo, int $id): ?array
 {
-    $stmt = $pdo->prepare('SELECT id, fig_num, name, local_image_path AS thumbnail FROM minifigs WHERE id = ?');
+    $stmt = $pdo->prepare(
+        'SELECT id, fig_num, name, local_image_path AS thumbnail, bricklink_id,
+                bricklink_price_item_id, bricklink_price_new, bricklink_price_used,
+                bricklink_price_currency, bricklink_price_checked_at
+         FROM minifigs WHERE id = ?'
+    );
     $stmt->execute([$id]);
     $row = $stmt->fetch();
     if ($row === false) {
         return null;
     }
     $row['id'] = (int) $row['id'];
+    $row['bricklink_price_item_id'] = $row['bricklink_price_item_id'] !== null ? (int) $row['bricklink_price_item_id'] : null;
+    $row['bricklink_price_new'] = $row['bricklink_price_new'] !== null ? (float) $row['bricklink_price_new'] : null;
+    $row['bricklink_price_used'] = $row['bricklink_price_used'] !== null ? (float) $row['bricklink_price_used'] : null;
     return $row;
 }
 
@@ -176,29 +184,26 @@ function getMinifigInventoryId(PDO $pdo, string $figNum): ?int
 }
 
 /**
- * Every minifig_storage_items row (i.e. every distinct location/condition
- * batch) for one minifig — the same minifig can be stored more than once
- * (split across locations, or some new/some used), and each such batch has
- * its own independent per-part completeness, same reasoning as an owned set
- * being ownable more than once. Powers the minifig-detail modal's storage-
- * instance picker (src/minifig_modal.php) for the defekt/fehlt status
- * feature — only rows with quantity > 0 are real, addressable batches.
+ * Every minifig_storage_items row (i.e. every distinct physical instance)
+ * for one minifig — the same minifig can be stored more than once (split
+ * across locations, some new/some used, or simply several identical
+ * copies), and each instance has its own independent per-part completeness,
+ * same reasoning as an owned set being ownable more than once. Powers the
+ * minifig-detail modal's storage-instance picker (src/minifig_modal.php)
+ * for the defekt/fehlt status feature.
  *
- * @return array<int, array{id:int, location_id:int, location_name:string, condition_type:string, quantity:int, damaged_quantity:int}>
+ * @return array<int, array{id:int, location_id:int, location_name:string, condition_type:string}>
  */
 function getMinifigStorageItemsForMinifig(PDO $pdo, int $minifigId): array
 {
     $stmt = $pdo->prepare(
-        'SELECT id, location_id, condition_type, quantity, damaged_quantity
-         FROM minifig_storage_items WHERE minifig_id = ? AND quantity > 0 ORDER BY id ASC'
+        'SELECT id, location_id, condition_type FROM minifig_storage_items WHERE minifig_id = ? ORDER BY id ASC'
     );
     $stmt->execute([$minifigId]);
     $rows = $stmt->fetchAll();
     foreach ($rows as &$row) {
         $row['id'] = (int) $row['id'];
         $row['location_id'] = (int) $row['location_id'];
-        $row['quantity'] = (int) $row['quantity'];
-        $row['damaged_quantity'] = (int) $row['damaged_quantity'];
         $row['location_name'] = implode(' -> ', array_column(getStorageLocationAncestors($row['location_id']), 'name'));
     }
     unset($row);
@@ -207,7 +212,7 @@ function getMinifigStorageItemsForMinifig(PDO $pdo, int $minifigId): array
 
 function getMinifigStorageItemById(PDO $pdo, int $id): ?array
 {
-    $stmt = $pdo->prepare('SELECT id, location_id, minifig_id, condition_type, quantity, damaged_quantity FROM minifig_storage_items WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, location_id, minifig_id, condition_type FROM minifig_storage_items WHERE id = ?');
     $stmt->execute([$id]);
     $row = $stmt->fetch();
     if ($row === false) {
@@ -216,23 +221,22 @@ function getMinifigStorageItemById(PDO $pdo, int $id): ?array
     $row['id'] = (int) $row['id'];
     $row['location_id'] = (int) $row['location_id'];
     $row['minifig_id'] = (int) $row['minifig_id'];
-    $row['quantity'] = (int) $row['quantity'];
-    $row['damaged_quantity'] = (int) $row['damaged_quantity'];
     return $row;
 }
 
 /**
- * One stored batch's own constituent parts (head/torso/legs/accessories) —
- * same nominal/actual/damaged shape and same "missing row = fully present,
- * until corrected" convention as getOwnedSetMinifigPartsWithStatus() (see
- * src/owned_sets.php), just scaled by this batch's own $quantity instead of
- * an owned set's per-minifig nominal count, and read from
- * minifig_storage_item_parts (migration 32) instead of
- * owned_set_minifig_parts.
+ * One stored minifig instance's own constituent parts (head/torso/legs/
+ * accessories) — same nominal/actual/damaged shape and same "missing row =
+ * fully present, until corrected" convention as
+ * getOwnedSetMinifigPartsWithStatus() (see src/owned_sets.php), read from
+ * minifig_storage_item_parts (migration 32). No quantity scaling: unlike an
+ * owned set's minifig (which can nominally need more than one identical
+ * copy), one minifig_storage_items row is always exactly one physical
+ * minifig, so nominal is simply the catalog's own per-part quantity.
  *
  * @return array<int, array{part_id:int, part_num:string, name:string, color_id:int, rebrickable_color_id:?int, color_name:?string, color_rgb:?string, thumbnail:?string, nominal_quantity:int, actual_quantity:int, damaged_quantity:int}>
  */
-function getMinifigStorageItemPartsWithStatus(PDO $pdo, int $minifigStorageItemId, string $figNum, int $quantity, string $locale = 'en'): array
+function getMinifigStorageItemPartsWithStatus(PDO $pdo, int $minifigStorageItemId, string $figNum, string $locale = 'en'): array
 {
     $inventoryId = getMinifigInventoryId($pdo, $figNum);
     if ($inventoryId === null) {
@@ -256,7 +260,6 @@ function getMinifigStorageItemPartsWithStatus(PDO $pdo, int $minifigStorageItemI
             continue;
         }
         $key = $item['part_id'] . ':' . $item['color_id'];
-        $totalNominal = $item['quantity'] * $quantity;
         $result[] = [
             'part_id' => $item['part_id'],
             'part_num' => $item['part_num'],
@@ -266,8 +269,8 @@ function getMinifigStorageItemPartsWithStatus(PDO $pdo, int $minifigStorageItemI
             'color_name' => $item['color_name'],
             'color_rgb' => $item['color_rgb'],
             'thumbnail' => $item['ldraw_thumbnail'] ?? $item['thumbnail'] ?? $item['remote_thumbnail'] ?? null,
-            'nominal_quantity' => $totalNominal,
-            'actual_quantity' => $actualByKey[$key] ?? $totalNominal,
+            'nominal_quantity' => $item['quantity'],
+            'actual_quantity' => $actualByKey[$key] ?? $item['quantity'],
             'damaged_quantity' => $damagedByKey[$key] ?? 0,
         ];
     }
@@ -275,7 +278,7 @@ function getMinifigStorageItemPartsWithStatus(PDO $pdo, int $minifigStorageItemI
 }
 
 /**
- * Records one part's owned/damaged counts for one stored minifig batch —
+ * Records one part's owned/damaged counts for one stored minifig instance —
  * mirrors applyOwnedSetMinifigPartInventory() (src/owned_sets.php), just
  * against minifig_storage_item_parts. $ownedInput/$damagedInput are
  * "part_id:color_id" => value maps, same shape as that function even though
@@ -283,10 +286,10 @@ function getMinifigStorageItemPartsWithStatus(PDO $pdo, int $minifigStorageItemI
  * part tile at a time, not a combined form) — accepting the same shape
  * keeps this a straight mirror and costs nothing extra.
  */
-function applyMinifigStorageItemPartInventory(PDO $pdo, int $minifigStorageItemId, string $figNum, int $quantity, array $ownedInput, array $damagedInput): void
+function applyMinifigStorageItemPartInventory(PDO $pdo, int $minifigStorageItemId, string $figNum, array $ownedInput, array $damagedInput): void
 {
     $nominalByKey = [];
-    foreach (getMinifigStorageItemPartsWithStatus($pdo, $minifigStorageItemId, $figNum, $quantity) as $part) {
+    foreach (getMinifigStorageItemPartsWithStatus($pdo, $minifigStorageItemId, $figNum) as $part) {
         $nominalByKey[$part['part_id'] . ':' . $part['color_id']] = $part['nominal_quantity'];
     }
     $stmt = $pdo->prepare(

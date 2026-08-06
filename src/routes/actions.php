@@ -516,24 +516,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_minifig_storage_item') {
+// Location Explorer: moves one specific minifig instance to another
+// location — no quantity concept anymore, each instance is exactly one
+// physical minifig (see minifig_storage_items' own doc comment,
+// src/setup.php).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'move_minifig_storage_item') {
     header('Content-Type: application/json');
     try {
-        $locationId = (int) ($_POST['location_id'] ?? 0);
-        $minifigId = (int) ($_POST['minifig_id'] ?? 0);
-        $conditionType = ($_POST['condition_type'] ?? '') === 'new' ? 'new' : 'used';
-        $quantity = (int) ($_POST['quantity'] ?? -1);
-        $newLocationId = isset($_POST['new_location_id']) && $_POST['new_location_id'] !== ''
-            ? (int) $_POST['new_location_id'] : null;
+        $instanceId = (int) ($_POST['instance_id'] ?? 0);
+        $newLocationId = (int) ($_POST['new_location_id'] ?? 0);
 
-        if ($locationId <= 0 || $minifigId <= 0 || $quantity < 0) {
+        if ($instanceId <= 0 || $newLocationId <= 0 || getMinifigStorageItemById($pdo, $instanceId) === null) {
             throw new RuntimeException(t('add_stock_invalid_input'));
         }
-        if ($newLocationId !== null && $newLocationId !== $locationId && locationHasNonOwnedSetChildren($newLocationId)) {
+        if (locationHasNonOwnedSetChildren($newLocationId)) {
             throw new RuntimeException(t('add_stock_location_not_leaf'));
         }
 
-        updateMinifigStorageItem($locationId, $minifigId, $conditionType, $quantity, $newLocationId);
+        moveMinifigStorageItemInstance($instanceId, $newLocationId);
+        $stats = refreshAppStatsCache($pdo);
+
+        echo json_encode(['success' => true, 'stats' => $stats], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// Location Explorer: removes one specific minifig instance entirely (the
+// loose-minifig counterpart of removing an owned set).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_minifig_storage_item') {
+    header('Content-Type: application/json');
+    try {
+        $instanceId = (int) ($_POST['instance_id'] ?? 0);
+        if ($instanceId <= 0 || getMinifigStorageItemById($pdo, $instanceId) === null) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        deleteMinifigStorageItemInstance($instanceId);
         $stats = refreshAppStatsCache($pdo);
 
         echo json_encode(['success' => true, 'stats' => $stats], JSON_UNESCAPED_UNICODE);
@@ -548,8 +569,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 // already-selected cards (parts and/or minifigs) to one target location in
 // one request. $items is a JSON-encoded array of
 // {kind:'part', locationId, partId, colorId, conditionType} or
-// {kind:'minifig', locationId, minifigId, conditionType}, built client-side
-// from the same data attributes the single-card edit modal uses.
+// {kind:'minifig', instanceId}, built client-side from the same data
+// attributes the single-card edit modal uses.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_move_storage_items') {
     header('Content-Type: application/json');
     try {
@@ -569,21 +590,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_
             if (!is_array($item)) {
                 continue;
             }
-            $fromLocationId = (int) ($item['locationId'] ?? 0);
-            if ($fromLocationId <= 0) {
-                continue;
-            }
-            $conditionType = ($item['conditionType'] ?? '') === 'new' ? 'new' : 'used';
             if (($item['kind'] ?? '') === 'minifig') {
-                $minifigId = (int) ($item['minifigId'] ?? 0);
-                if ($minifigId <= 0) {
+                $instanceId = (int) ($item['instanceId'] ?? 0);
+                if ($instanceId <= 0) {
                     continue;
                 }
-                moveMinifigStorageItem($fromLocationId, $targetLocationId, $minifigId, $conditionType);
+                moveMinifigStorageItemInstance($instanceId, $targetLocationId);
             } else {
+                $fromLocationId = (int) ($item['locationId'] ?? 0);
+                $conditionType = ($item['conditionType'] ?? '') === 'new' ? 'new' : 'used';
                 $partId = (int) ($item['partId'] ?? 0);
                 $colorId = (int) ($item['colorId'] ?? 0);
-                if ($partId <= 0 || $colorId <= 0) {
+                if ($fromLocationId <= 0 || $partId <= 0 || $colorId <= 0) {
                     continue;
                 }
                 moveStorageItem($fromLocationId, $targetLocationId, $partId, $colorId, $conditionType, $userId);
@@ -659,30 +677,41 @@ if (isset($_GET['action']) && $_GET['action'] === 'minifig_detail') {
         : 'https://www.bricklink.com/v2/search.page?q=' . urlencode($minifig['fig_num']);
     $minifig['rebrickable_url'] = 'https://rebrickable.com/minifigs/' . urlencode($minifig['fig_num']) . '/';
 
-    // One entry per minifig_storage_items batch of this minifig the user
-    // actually owns (getMinifigStorageItemsForMinifig(), src/minifigs.php) —
-    // each batch's own per-part defekt/fehlt status
+    // One entry per minifig_storage_items instance (a single physical
+    // minifig) the user actually owns (getMinifigStorageItemsForMinifig(),
+    // src/minifigs.php) — each instance's own per-part defekt/fehlt status
     // (getMinifigStorageItemPartsWithStatus()), keyed "part_id:color_id" so
     // the modal can overlay it onto the plain nominal $parts list above
-    // without a second round-trip when the user switches which batch is
-    // selected (only relevant if the minifig is stored in more than one
-    // place/condition at once).
+    // without a second round-trip when the user switches which instance is
+    // selected. Also carries a pre-formatted BrickLink price matching that
+    // instance's own condition_type (formatBricklinkPriceSummary(),
+    // src/bricklink_prices.php — same helper owned_set_detail uses), so the
+    // client never has to reimplement that formatting/currency logic.
     $storageInstances = [];
     foreach (getMinifigStorageItemsForMinifig($pdo, $minifigId) as $instance) {
         $partsStatus = [];
-        foreach (getMinifigStorageItemPartsWithStatus($pdo, $instance['id'], $minifig['fig_num'], $instance['quantity'], getLocale()) as $part) {
+        foreach (getMinifigStorageItemPartsWithStatus($pdo, $instance['id'], $minifig['fig_num'], getLocale()) as $part) {
             $partsStatus[$part['part_id'] . ':' . $part['color_id']] = [
                 'nominal' => $part['nominal_quantity'],
                 'actual' => $part['actual_quantity'],
                 'damaged' => $part['damaged_quantity'],
             ];
         }
+        $priceSummary = formatBricklinkPriceSummary(
+            $minifig['bricklink_price_new'],
+            $minifig['bricklink_price_used'],
+            $minifig['bricklink_price_currency'],
+            $minifig['bricklink_price_checked_at'],
+            $instance['condition_type']
+        );
         $storageInstances[] = [
             'id' => $instance['id'],
+            'locationId' => $instance['location_id'],
             'locationName' => $instance['location_name'],
             'conditionType' => $instance['condition_type'],
-            'quantity' => $instance['quantity'],
             'partsStatus' => $partsStatus,
+            'priceText' => $priceSummary['text'],
+            'priceTitle' => $priceSummary['title'],
         ];
     }
 
@@ -714,9 +743,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
         }
 
         $key = $partId . ':' . $colorId;
-        applyMinifigStorageItemPartInventory($pdo, $minifigStorageItemId, $minifigForSave['fig_num'], $storageItem['quantity'], [$key => $ownedQuantity], [$key => $damagedQuantity]);
+        applyMinifigStorageItemPartInventory($pdo, $minifigStorageItemId, $minifigForSave['fig_num'], [$key => $ownedQuantity], [$key => $damagedQuantity]);
         $stats = refreshAppStatsCache($pdo);
         echo json_encode(['success' => true, 'stats' => $stats], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// The minifig-detail modal's manual BrickLink price refresh button — mirrors
+// action=refresh_bricklink_price for sets, but returns a formatted
+// text/title pair instead of triggering a full page reload: the minifig
+// modal is an AJAX overlay, and a reload would just close it.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'refresh_minifig_bricklink_price') {
+    header('Content-Type: application/json');
+    try {
+        $refreshMinifigId = (int) ($_POST['minifig_id'] ?? 0);
+        $conditionTypeForPrice = ($_POST['condition_type'] ?? '') === 'new' ? 'new' : 'used';
+        $minifigForRefresh = $refreshMinifigId > 0 ? getMinifigById($pdo, $refreshMinifigId) : null;
+        if ($minifigForRefresh === null) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        refreshBricklinkPriceForMinifig($pdo, $minifigForRefresh);
+        $refreshedMinifig = getMinifigById($pdo, $refreshMinifigId);
+        $priceSummary = formatBricklinkPriceSummary(
+            $refreshedMinifig['bricklink_price_new'],
+            $refreshedMinifig['bricklink_price_used'],
+            $refreshedMinifig['bricklink_price_currency'],
+            $refreshedMinifig['bricklink_price_checked_at'],
+            $conditionTypeForPrice
+        );
+
+        echo json_encode(['success' => true, 'priceText' => $priceSummary['text'], 'priceTitle' => $priceSummary['title']], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
@@ -1445,8 +1506,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_s
 }
 
 // Minifig counterpart to add_stock — the minifig detail modal's "add as
-// loose minifig" form (src/minifig_modal.php). No color dimension (minifigs
-// aren't tracked per-color), otherwise identical validation to add_stock.
+// loose minifig" form (src/minifig_modal.php). $quantity means "how many
+// new, individually-tracked instances to create right now" (a convenience
+// for the common all-identical case — see addMinifigStock()'s doc comment,
+// src/storage.php); it is not a stored field. If a part_owned/part_damaged
+// breakdown was submitted, the same described status is applied to every
+// newly created instance (one form describes one state; differing states
+// across several copies mean separate add actions, corrected afterward via
+// the modal's per-tile editor if needed).
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_minifig_stock') {
     header('Content-Type: application/json');
     try {
@@ -1462,13 +1529,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_m
             throw new RuntimeException(t('add_stock_location_not_leaf'));
         }
 
-        $resultingQuantity = addMinifigStock($locationId, $minifigId, $conditionType, $quantity);
+        $newInstanceIds = addMinifigStock($locationId, $minifigId, $conditionType, $quantity);
+
+        $minifigForParts = getMinifigById($pdo, $minifigId);
+        if ($minifigForParts !== null && (!empty($_POST['part_owned']) || !empty($_POST['part_damaged']))) {
+            foreach ($newInstanceIds as $newInstanceId) {
+                applyMinifigStorageItemPartInventory(
+                    $pdo,
+                    $newInstanceId,
+                    $minifigForParts['fig_num'],
+                    (array) ($_POST['part_owned'] ?? []),
+                    (array) ($_POST['part_damaged'] ?? [])
+                );
+            }
+        }
+
+        // Best-effort, synchronous — mirrors how add_owned_set fetches a
+        // set's BrickLink price immediately rather than waiting for the
+        // opportunistic sync (per explicit prior user direction: adding
+        // something should behave like a manual refresh right away). Once
+        // per minifig catalog entry, not per instance — the price lives on
+        // minifigs, not on each individual storage row.
+        if ($minifigForParts !== null) {
+            try {
+                refreshBricklinkPriceForMinifig($pdo, $minifigForParts);
+            } catch (Throwable $e) {
+                // Never blocks the add.
+            }
+        }
+
         $stats = refreshAppStatsCache($pdo);
 
         echo json_encode([
             'success' => true,
-            'resultingQuantity' => $resultingQuantity,
-            'message' => t('add_stock_success', ['quantity' => (string) $quantity, 'total' => (string) $resultingQuantity]),
+            'createdCount' => count($newInstanceIds),
+            'message' => t('minifig_stock_added', ['quantity' => (string) $quantity]),
             'stats' => $stats,
         ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {

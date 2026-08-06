@@ -49,6 +49,10 @@ function renderMinifigDetailModal(): string
         'damagedLabel' => t('owned_set_inventory_damaged_label'),
         'inventorySummary' => t('owned_set_inventory_summary'),
         'saveButton' => t('owned_set_save_button'),
+        'partsHeading' => t('owned_set_minifig_parts_heading'),
+        'bricklinkRefreshLabel' => t('owned_set_bricklink_price_refresh_label'),
+        'bricklinkRefreshFailed' => t('owned_set_bricklink_price_refresh_failed'),
+        'refreshIcon' => getActionIcon('refresh'),
         'appearsInSets' => t('minifig_appears_in_sets'),
         'appearsInNoSets' => t('minifig_appears_in_no_sets'),
         'minifigSetsTitle' => t('minifig_sets_title'),
@@ -389,15 +393,32 @@ function renderMinifigDetailModal(): string
 
     var parts = data.parts || [];
     var storageInstances = data.storageInstances || [];
-    if (parts.length === 0) {
-      var empty = document.createElement('p');
-      empty.className = 'hint';
-      empty.textContent = texts.componentsEmpty;
-      content.appendChild(empty);
-    } else {
-      // Which batch (if more than one) the tiles' status reflects — picked
-      // via the instance selector below when there's a choice, otherwise
-      // the sole one, otherwise null (minifig not in storage at all yet).
+
+    // Short "vollständig"/"X fehlen"-style summary from one instance's own
+    // partsStatus map — disambiguates picker entries that would otherwise
+    // look identical (same location + condition, several physical copies).
+    function instanceStatusSummary(inst) {
+      var intact = 0, damaged = 0, missing = 0;
+      Object.keys(inst.partsStatus).forEach(function(key) {
+        var st = inst.partsStatus[key];
+        var partMissing = Math.max(0, st.nominal - st.actual);
+        var partDamaged = st.damaged;
+        intact += st.actual - st.damaged;
+        damaged += partDamaged;
+        missing += partMissing;
+      });
+      return texts.inventorySummary
+        .replace('{intact}', intact)
+        .replace('{damaged}', damaged)
+        .replace('{missing}', missing);
+    }
+
+    var updatePriceLine = function() {};
+    var instanceInfoSection = null;
+    if (storageInstances.length > 0) {
+      instanceInfoSection = document.createElement('div');
+      instanceInfoSection.className = 'minifig-modal-instance-info';
+
       if (storageInstances.length > 1) {
         var pickerLabel = document.createElement('label');
         pickerLabel.className = 'minifig-modal-instance-picker';
@@ -407,16 +428,82 @@ function renderMinifigDetailModal(): string
           var opt = document.createElement('option');
           opt.value = String(idx);
           var condLabel = inst.conditionType === 'new' ? texts.conditionNew : texts.conditionUsed;
-          opt.textContent = inst.locationName + ' · ' + condLabel + ' · ' + inst.quantity + 'x';
+          opt.textContent = inst.locationName + ' · ' + condLabel + ' · ' + instanceStatusSummary(inst);
           pickerSelect.appendChild(opt);
         });
         pickerSelect.addEventListener('change', function() {
-          applyInstanceToTiles(grid, storageInstances[parseInt(pickerSelect.value, 10)]);
+          var inst = storageInstances[parseInt(pickerSelect.value, 10)];
+          applyInstanceToTiles(grid, inst);
+          updatePriceLine();
         });
         pickerLabel.appendChild(pickerSelect);
-        content.appendChild(pickerLabel);
+        instanceInfoSection.appendChild(pickerLabel);
       }
 
+      var priceLine = document.createElement('p');
+      priceLine.className = 'minifig-modal-price-line';
+      var priceTextEl = document.createElement('span');
+      priceLine.appendChild(priceTextEl);
+      var priceRefreshBtn = document.createElement('button');
+      priceRefreshBtn.type = 'button';
+      priceRefreshBtn.className = 'owned-set-bricklink-refresh-btn';
+      priceRefreshBtn.setAttribute('aria-label', texts.bricklinkRefreshLabel);
+      priceRefreshBtn.title = texts.bricklinkRefreshLabel;
+      priceRefreshBtn.innerHTML = texts.refreshIcon;
+      priceRefreshBtn.addEventListener('click', function() {
+        if (!currentInstance) {
+          return;
+        }
+        priceRefreshBtn.disabled = true;
+        priceRefreshBtn.classList.add('owned-set-bricklink-refresh-spinning');
+        var priceFormData = new FormData();
+        priceFormData.set('action', 'refresh_minifig_bricklink_price');
+        priceFormData.set('minifig_id', fig.id);
+        priceFormData.set('condition_type', currentInstance.conditionType);
+        fetch('?', { method: 'POST', body: priceFormData, credentials: 'same-origin' })
+          .then(function(r) { return r.json(); })
+          .then(function(res) {
+            priceRefreshBtn.disabled = false;
+            priceRefreshBtn.classList.remove('owned-set-bricklink-refresh-spinning');
+            if (res.success) {
+              currentInstance.priceText = res.priceText;
+              currentInstance.priceTitle = res.priceTitle;
+              updatePriceLine();
+            } else {
+              window.alert(texts.bricklinkRefreshFailed + ' ' + (res.message || ''));
+            }
+          })
+          .catch(function() {
+            priceRefreshBtn.disabled = false;
+            priceRefreshBtn.classList.remove('owned-set-bricklink-refresh-spinning');
+            window.alert(texts.bricklinkRefreshFailed);
+          });
+      });
+      priceLine.appendChild(priceRefreshBtn);
+      instanceInfoSection.appendChild(priceLine);
+
+      updatePriceLine = function() {
+        priceTextEl.textContent = currentInstance ? currentInstance.priceText : '';
+        priceLine.title = currentInstance && currentInstance.priceTitle ? currentInstance.priceTitle : '';
+      };
+
+      content.appendChild(instanceInfoSection);
+
+      // Selects the first instance immediately — applyInstanceToTiles()
+      // (further below, once the parts grid exists) reassigns the same
+      // value again when there are known parts, harmlessly redundant; this
+      // covers the case where a minifig has storage instances but no known
+      // parts breakdown, which applyInstanceToTiles() never runs for at all.
+      currentInstance = storageInstances[0];
+      updatePriceLine();
+    }
+
+    if (parts.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = texts.componentsEmpty;
+      content.appendChild(empty);
+    } else {
       // .part-card stays the base class (shared box/border styling, plus
       // it's what renderPartDetailModal()'s document-level click delegation
       // matches on — required so the "+" button below can still open that
@@ -469,6 +556,7 @@ function renderMinifigDetailModal(): string
       content.appendChild(grid);
 
       applyInstanceToTiles(grid, storageInstances.length > 0 ? storageInstances[0] : null);
+      updatePriceLine();
       if (storageInstances.length === 0) {
         var hint = document.createElement('p');
         hint.className = 'hint';
@@ -557,6 +645,79 @@ function renderMinifigDetailModal(): string
     } catch (e) {
       // Private browsing / storage disabled — picker just starts empty.
     }
+    // Per-part defekt/fehlt breakdown for the new instance(s) about to be
+    // created — always offered (every add creates brand-new, individually
+    // tracked instances now, see addMinifigStock()'s doc comment,
+    // src/storage.php). Steppers are always bounded by the catalog's own
+    // per-part quantity (one instance = one physical minifig, no scaling by
+    // the "how many to create" field below); if that field is >1, the same
+    // described status is applied identically to every one of them.
+    var partSteppers = {};
+    var partsStatusSection = null;
+    if (parts.length > 0) {
+      partsStatusSection = document.createElement('div');
+      var partsStatusHeading = document.createElement('h4');
+      partsStatusHeading.className = 'owned-set-minifig-parts-heading';
+      partsStatusHeading.textContent = texts.partsHeading;
+      partsStatusSection.appendChild(partsStatusHeading);
+
+      var partsStatusColumnHeader = document.createElement('div');
+      partsStatusColumnHeader.className = 'owned-set-minifig-part-row owned-set-minifig-part-header';
+      var columnHeaderSpacer = document.createElement('span');
+      columnHeaderSpacer.className = 'part-card-image';
+      var columnHeaderName = document.createElement('span');
+      columnHeaderName.className = 'owned-set-minifig-part-name';
+      var columnHeaderOwned = document.createElement('span');
+      columnHeaderOwned.className = 'owned-set-minifig-part-col-label';
+      columnHeaderOwned.textContent = texts.ownedLabel;
+      var columnHeaderDamaged = document.createElement('span');
+      columnHeaderDamaged.className = 'owned-set-minifig-part-col-label';
+      columnHeaderDamaged.textContent = texts.damagedLabel;
+      partsStatusColumnHeader.appendChild(columnHeaderSpacer);
+      partsStatusColumnHeader.appendChild(columnHeaderName);
+      partsStatusColumnHeader.appendChild(columnHeaderOwned);
+      partsStatusColumnHeader.appendChild(columnHeaderDamaged);
+      partsStatusSection.appendChild(partsStatusColumnHeader);
+
+      var partsStatusList = document.createElement('div');
+      partsStatusList.className = 'owned-set-minifig-parts-list';
+      parts.forEach(function(part) {
+        var key = part.part_id + ':' + part.color_id;
+        var row = document.createElement('div');
+        row.className = 'owned-set-minifig-part-row';
+
+        var thumbSpan = document.createElement('span');
+        thumbSpan.className = 'part-card-image';
+        var pThumb = part.ldraw_thumbnail || part.thumbnail || part.remote_thumbnail;
+        thumbSpan.innerHTML = pThumb ? '<img src="' + pThumb + '" alt="">' : texts.brickIcon;
+        row.appendChild(thumbSpan);
+
+        var nameSpan = document.createElement('span');
+        nameSpan.className = 'owned-set-minifig-part-name';
+        nameSpan.title = part.name;
+        nameSpan.textContent = part.name + (part.color_name ? ' (' + part.color_name + ')' : '');
+        row.appendChild(nameSpan);
+
+        var ownedStepper = buildStepper(0, part.quantity, part.quantity);
+        row.appendChild(ownedStepper.wrap);
+        var damagedStepper = buildStepper(0, part.quantity, 0);
+        row.appendChild(damagedStepper.wrap);
+
+        ownedStepper.input.addEventListener('input', function() {
+          var v = parseInt(ownedStepper.input.value, 10) || 0;
+          damagedStepper.input.max = String(v);
+          if ((parseInt(damagedStepper.input.value, 10) || 0) > v) {
+            damagedStepper.input.value = String(v);
+          }
+        });
+
+        partSteppers[key] = { owned: ownedStepper, damaged: damagedStepper };
+        partsStatusList.appendChild(row);
+      });
+      partsStatusSection.appendChild(partsStatusList);
+      form.appendChild(partsStatusSection);
+    }
+
     window.createLocationPicker(locationContainer, texts, function(value) {
       selectedLocationId = value;
     }, lastAddLocationId);
@@ -578,6 +739,12 @@ function renderMinifigDetailModal(): string
       formData.set('quantity', qtyInput.value);
       formData.set('condition_type', condSelect.value);
       formData.set('location_id', selectedLocationId || '');
+
+      Object.keys(partSteppers).forEach(function(key) {
+        var st = partSteppers[key];
+        formData.set('part_owned[' + key + ']', st.owned.input.value);
+        formData.set('part_damaged[' + key + ']', st.damaged.input.value);
+      });
 
       fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
         .then(function(r) { return r.json(); })

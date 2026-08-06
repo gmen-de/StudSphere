@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/settings.php';
+require_once __DIR__ . '/owned_sets.php';
 
 /**
  * BrickLink's price guide (average price of currently-listed items, per
@@ -75,6 +76,28 @@ function fetchBricklinkPage(string $url): ?string
 function resolveBricklinkItemId(string $setNum): ?int
 {
     $url = 'https://www.bricklink.com/v2/catalog/catalogitem.page?S=' . urlencode($setNum);
+    $html = fetchBricklinkPage($url);
+    if ($html === null) {
+        return null;
+    }
+    if (preg_match('/idItem:\s*(\d+)/', $html, $m)) {
+        return (int) $m[1];
+    }
+    return null;
+}
+
+/**
+ * Same as resolveBricklinkItemId(), for a minifig's own BrickLink catalog
+ * page (?M=<code>) instead of a set's (?S=<setnum>). The input here is
+ * BrickLink's own alphanumeric minifig code (e.g. "sw0001a", minifigs.
+ * bricklink_id — resolved separately via getOrFetchBricklinkMinifigId(),
+ * src/owned_sets.php), not the Rebrickable fig_num; every catalog page,
+ * regardless of item type, embeds the same "idItem: <n>" numeric id this
+ * extracts.
+ */
+function resolveBricklinkMinifigCatalogItemId(string $bricklinkId): ?int
+{
+    $url = 'https://www.bricklink.com/v2/catalog/catalogitem.page?M=' . urlencode($bricklinkId);
     $html = fetchBricklinkPage($url);
     if ($html === null) {
         return null;
@@ -187,6 +210,51 @@ function refreshBricklinkPriceForSet(PDO $pdo, array $set): bool
     return true;
 }
 
+/**
+ * Minifig counterpart to refreshBricklinkPriceForSet() — one extra
+ * resolution step first, since a minifig needs BrickLink's own catalog code
+ * (minifigs.bricklink_id, e.g. "sw0001a") before its numeric idItem can even
+ * be looked up, whereas a set number doubles as its own catalog page query
+ * directly. getOrFetchBricklinkMinifigId() (src/owned_sets.php) already
+ * exists for the Wanted-List export and the modal's BrickLink link, and is
+ * reused here unchanged — it already caches its result on
+ * minifigs.bricklink_id, so this only ever pays that cost once per minifig
+ * regardless of how many times its price gets refreshed afterward.
+ */
+function refreshBricklinkPriceForMinifig(PDO $pdo, array $minifig): bool
+{
+    $bricklinkId = getOrFetchBricklinkMinifigId($pdo, $minifig['id'], $minifig['fig_num']);
+    if ($bricklinkId === null) {
+        $pdo->prepare('UPDATE minifigs SET bricklink_price_checked_at = NOW() WHERE id = ?')->execute([$minifig['id']]);
+        return false;
+    }
+
+    $itemId = $minifig['bricklink_price_item_id'] ?? null;
+    if ($itemId === null) {
+        $itemId = resolveBricklinkMinifigCatalogItemId($bricklinkId);
+        if ($itemId !== null) {
+            $pdo->prepare('UPDATE minifigs SET bricklink_price_item_id = ? WHERE id = ?')->execute([$itemId, $minifig['id']]);
+        }
+    }
+
+    if ($itemId === null) {
+        $pdo->prepare('UPDATE minifigs SET bricklink_price_checked_at = NOW() WHERE id = ?')->execute([$minifig['id']]);
+        return false;
+    }
+
+    $guide = fetchBricklinkPriceGuide((int) $itemId);
+    if ($guide === null) {
+        $pdo->prepare('UPDATE minifigs SET bricklink_price_checked_at = NOW() WHERE id = ?')->execute([$minifig['id']]);
+        return false;
+    }
+
+    $pdo->prepare(
+        'UPDATE minifigs SET bricklink_price_new = ?, bricklink_price_used = ?, bricklink_price_currency = ?, bricklink_price_checked_at = NOW() WHERE id = ?'
+    )->execute([$guide['new']['avgPrice'], $guide['used']['avgPrice'], $guide['currency'], $minifig['id']]);
+
+    return true;
+}
+
 const BRICKLINK_SYNC_INTERVAL_DAYS = 30;
 // Floor between two opportunistic syncs, regardless of how many page loads
 // happen in between — this (not literal random scheduling, which would need
@@ -269,6 +337,64 @@ function stepBricklinkPriceSync(PDO $pdo): void
 }
 
 /**
+ * Minifig counterpart to getNextOwnedSetDueForBricklinkSync() — same
+ * two-bucket priority (never checked, most-recently-stored instance first;
+ * otherwise oldest-checked first), joined over minifig_storage_items
+ * instead of owned_sets.
+ */
+function getNextMinifigDueForBricklinkSync(PDO $pdo): ?array
+{
+    $stmt = $pdo->prepare(
+        'SELECT m.id, m.fig_num, m.bricklink_price_item_id, m.bricklink_price_checked_at
+         FROM minifigs m
+         INNER JOIN minifig_storage_items msi ON msi.minifig_id = m.id
+         WHERE m.bricklink_price_checked_at IS NULL
+            OR m.bricklink_price_checked_at < (NOW() - INTERVAL ' . BRICKLINK_SYNC_INTERVAL_DAYS . ' DAY)
+         GROUP BY m.id, m.fig_num, m.bricklink_price_item_id, m.bricklink_price_checked_at
+         ORDER BY
+            CASE WHEN m.bricklink_price_checked_at IS NULL THEN 0 ELSE 1 END,
+            CASE
+                WHEN m.bricklink_price_checked_at IS NULL THEN -UNIX_TIMESTAMP(MAX(msi.updated_at))
+                ELSE UNIX_TIMESTAMP(m.bricklink_price_checked_at)
+            END
+         LIMIT 1'
+    );
+    $stmt->execute();
+    $minifig = $stmt->fetch();
+    if ($minifig === false) {
+        return null;
+    }
+    $minifig['id'] = (int) $minifig['id'];
+    $minifig['bricklink_price_item_id'] = $minifig['bricklink_price_item_id'] !== null ? (int) $minifig['bricklink_price_item_id'] : null;
+    return $minifig;
+}
+
+/**
+ * Minifig counterpart to stepBricklinkPriceSync() — its own last-run marker
+ * and the same throttle/never-throw reasoning, kept fully independent of
+ * the sets sync so neither one's backlog delays the other.
+ */
+function stepBricklinkMinifigPriceSync(PDO $pdo): void
+{
+    try {
+        $lastRun = getAppSetting('bricklink_minifig_sync_last_run');
+        if ($lastRun !== null && (time() - strtotime($lastRun)) < BRICKLINK_SYNC_MIN_INTERVAL_SECONDS) {
+            return;
+        }
+
+        $due = getNextMinifigDueForBricklinkSync($pdo);
+        if ($due === null) {
+            return;
+        }
+
+        setAppSetting('bricklink_minifig_sync_last_run', date('Y-m-d H:i:s'));
+        refreshBricklinkPriceForMinifig($pdo, $due);
+    } catch (Throwable $e) {
+        // Best-effort background enrichment — swallow everything.
+    }
+}
+
+/**
  * ISO 4217 code -> symbol for the handful of currencies BrickLink's price
  * guide realistically returns for this app's userbase; falls back to the
  * raw code for anything else rather than guessing a symbol.
@@ -306,6 +432,29 @@ function computeOwnedSetsBricklinkValueTotal(PDO $pdo): array
             MAX(s.bricklink_price_currency) AS currency
          FROM owned_sets os
          INNER JOIN sets s ON s.id = os.set_id"
+    );
+    $row = $stmt->fetch();
+    return [
+        'total' => $row !== false && $row['total'] !== null ? (float) $row['total'] : 0.0,
+        'currency' => $row !== false ? $row['currency'] : null,
+    ];
+}
+
+/**
+ * Minifig counterpart to computeOwnedSetsBricklinkValueTotal() — same
+ * per-condition sum, one row per stored minifig instance instead of one per
+ * owned set. The status bar adds this to the sets total (see index.php).
+ *
+ * @return array{total: float, currency: ?string}
+ */
+function computeMinifigStorageBricklinkValueTotal(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        "SELECT
+            SUM(CASE WHEN msi.condition_type = 'new' THEN m.bricklink_price_new ELSE m.bricklink_price_used END) AS total,
+            MAX(m.bricklink_price_currency) AS currency
+         FROM minifig_storage_items msi
+         INNER JOIN minifigs m ON m.id = msi.minifig_id"
     );
     $row = $stmt->fetch();
     return [

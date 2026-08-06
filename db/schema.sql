@@ -123,7 +123,12 @@ CREATE TABLE IF NOT EXISTS minifigs (
     num_parts INT DEFAULT NULL,
     image_url VARCHAR(512) DEFAULT NULL,
     local_image_path VARCHAR(512) DEFAULT NULL,
-    bricklink_id VARCHAR(20) DEFAULT NULL
+    bricklink_id VARCHAR(20) DEFAULT NULL,
+    bricklink_price_item_id INT DEFAULT NULL,
+    bricklink_price_new DECIMAL(10,2) DEFAULT NULL,
+    bricklink_price_used DECIMAL(10,2) DEFAULT NULL,
+    bricklink_price_currency VARCHAR(10) DEFAULT NULL,
+    bricklink_price_checked_at TIMESTAMP NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS rebrickable_inventories (
@@ -196,17 +201,20 @@ CREATE TABLE IF NOT EXISTS storage_items (
     UNIQUE KEY storage_item_unique (location_id, part_id, color_id, condition_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- One row per physical minifig — no quantity column, mirrors owned_sets
+-- (one row per physical set copy) rather than storage_items (one aggregated
+-- row per part/color/condition). Each row's own completeness lives in
+-- minifig_storage_item_parts.
 CREATE TABLE IF NOT EXISTS minifig_storage_items (
     id INT AUTO_INCREMENT PRIMARY KEY,
     location_id INT NOT NULL,
     minifig_id INT NOT NULL,
     condition_type ENUM('new','used') NOT NULL DEFAULT 'used',
-    quantity INT NOT NULL DEFAULT 0,
-    damaged_quantity INT NOT NULL DEFAULT 0,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_minifigstorageitem_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
     CONSTRAINT fk_minifigstorageitem_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
-    UNIQUE KEY minifig_storage_item_unique (location_id, minifig_id, condition_type)
+    INDEX idx_minifigstorageitem_location (location_id),
+    INDEX idx_minifigstorageitem_minifig (minifig_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS minifig_storage_item_parts (

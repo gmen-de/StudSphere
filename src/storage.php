@@ -677,19 +677,19 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
     }
 
     $minifigsStmt = $pdo->prepare(
-        "SELECT msi.location_id, msi.minifig_id, m.fig_num, m.name AS minifig_name, m.local_image_path AS thumbnail,
-                msi.condition_type, msi.quantity
+        "SELECT msi.id AS instance_id, msi.location_id, msi.minifig_id, m.fig_num, m.name AS minifig_name, m.local_image_path AS thumbnail,
+                msi.condition_type
          FROM minifig_storage_items msi
          INNER JOIN minifigs m ON m.id = msi.minifig_id
-         WHERE msi.location_id IN ($loosePlaceholders) AND msi.quantity > 0
+         WHERE msi.location_id IN ($loosePlaceholders)
          ORDER BY m.name"
     );
     $minifigsStmt->execute($looseIds);
     $minifigs = $minifigsStmt->fetchAll();
     foreach ($minifigs as &$fig) {
+        $fig['instance_id'] = (int) $fig['instance_id'];
         $fig['location_id'] = (int) $fig['location_id'];
         $fig['minifig_id'] = (int) $fig['minifig_id'];
-        $fig['quantity'] = (int) $fig['quantity'];
     }
     unset($fig);
 
@@ -697,97 +697,50 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
 }
 
 /**
- * Adds quantity to a specific location/minifig/condition combination
- * (upsert on the existing UNIQUE KEY) — the loose-minifig counterpart to
- * addStorageStock(). No storage_movements audit row: that log's schema is
- * part-specific (part_id/color_id, see its CONSTRAINT fk_movement_part), and
- * loose-minifig storage is new enough that extending it isn't warranted yet.
+ * Adds $count new, individual minifig instances (one row each — see
+ * minifig_storage_items' own doc comment in src/setup.php for why there's
+ * no quantity column to upsert onto) and returns their new ids, so a caller
+ * that also received a per-part defekt/fehlt breakdown
+ * (action=add_minifig_stock, src/routes/actions.php) can apply it to each
+ * one. No storage_movements audit row: that log's schema is part-specific
+ * (part_id/color_id, see its CONSTRAINT fk_movement_part), and loose-minifig
+ * storage is new enough that extending it isn't warranted yet.
+ *
+ * @return int[]
  */
-function addMinifigStock(int $locationId, int $minifigId, string $conditionType, int $quantity): int
+function addMinifigStock(int $locationId, int $minifigId, string $conditionType, int $count): array
 {
     $pdo = getPDO();
     $stmt = $pdo->prepare(
-        'INSERT INTO minifig_storage_items (location_id, minifig_id, condition_type, quantity)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)'
+        'INSERT INTO minifig_storage_items (location_id, minifig_id, condition_type) VALUES (?, ?, ?)'
     );
-    $stmt->execute([$locationId, $minifigId, $conditionType, $quantity]);
-
-    $resultStmt = $pdo->prepare(
-        'SELECT quantity FROM minifig_storage_items WHERE location_id = ? AND minifig_id = ? AND condition_type = ?'
-    );
-    $resultStmt->execute([$locationId, $minifigId, $conditionType]);
-    return (int) $resultStmt->fetchColumn();
+    $ids = [];
+    for ($i = 0; $i < $count; $i++) {
+        $stmt->execute([$locationId, $minifigId, $conditionType]);
+        $ids[] = (int) $pdo->lastInsertId();
+    }
+    return $ids;
 }
 
 /**
- * Sets the exact quantity for a loose minifig at a location (unlike
- * addMinifigStock(), which is additive) — the minifig counterpart to
- * setStorageItemQuantity(). No storage_movements row, same reasoning as
- * addMinifigStock().
+ * Moves one specific minifig instance to a different location — plain
+ * UPDATE by id, no merging needed (unlike moveStorageItem()/parts, there's
+ * no unique key on location+minifig+condition to collide with anymore).
  */
-function setMinifigStorageItemQuantity(int $locationId, int $minifigId, string $conditionType, int $newQuantity): void
+function moveMinifigStorageItemInstance(int $instanceId, int $toLocationId): void
 {
     $pdo = getPDO();
-    $stmt = $pdo->prepare(
-        'INSERT INTO minifig_storage_items (location_id, minifig_id, condition_type, quantity)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)'
-    );
-    $stmt->execute([$locationId, $minifigId, $conditionType, $newQuantity]);
+    $pdo->prepare('UPDATE minifig_storage_items SET location_id = ? WHERE id = ?')->execute([$toLocationId, $instanceId]);
 }
 
 /**
- * Minifig counterpart to moveStorageItem() — moves an entire
- * minifig_storage_items row (quantity and damaged_quantity) to a different
- * location, merging into whatever's already there. No storage_movements
- * row, same reasoning as addMinifigStock().
+ * Removes one specific minifig instance entirely — the loose-minifig
+ * counterpart to removeOwnedSet() (src/owned_sets.php) for the "I no longer
+ * have this one" case. Its minifig_storage_item_parts rows cascade via FK,
+ * same as owned_set_minifig_parts does when an owned_sets row is deleted.
  */
-function moveMinifigStorageItem(int $fromLocationId, int $toLocationId, int $minifigId, string $conditionType): void
+function deleteMinifigStorageItemInstance(int $instanceId): void
 {
-    if ($fromLocationId === $toLocationId) {
-        return;
-    }
     $pdo = getPDO();
-    $pdo->beginTransaction();
-    try {
-        $sourceStmt = $pdo->prepare(
-            'SELECT quantity, damaged_quantity FROM minifig_storage_items WHERE location_id = ? AND minifig_id = ? AND condition_type = ?'
-        );
-        $sourceStmt->execute([$fromLocationId, $minifigId, $conditionType]);
-        $source = $sourceStmt->fetch();
-        if ($source === false) {
-            $pdo->rollBack();
-            return;
-        }
-
-        $pdo->prepare(
-            'DELETE FROM minifig_storage_items WHERE location_id = ? AND minifig_id = ? AND condition_type = ?'
-        )->execute([$fromLocationId, $minifigId, $conditionType]);
-
-        $upsertStmt = $pdo->prepare(
-            'INSERT INTO minifig_storage_items (location_id, minifig_id, condition_type, quantity, damaged_quantity)
-             VALUES (?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                quantity = quantity + VALUES(quantity),
-                damaged_quantity = damaged_quantity + VALUES(damaged_quantity)'
-        );
-        $upsertStmt->execute([$toLocationId, $minifigId, $conditionType, $source['quantity'], $source['damaged_quantity']]);
-
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
-}
-
-/**
- * Minifig counterpart to updateStorageItem() — see its doc comment.
- */
-function updateMinifigStorageItem(int $locationId, int $minifigId, string $conditionType, int $newQuantity, ?int $newLocationId): void
-{
-    setMinifigStorageItemQuantity($locationId, $minifigId, $conditionType, $newQuantity);
-    if ($newLocationId !== null && $newLocationId !== $locationId) {
-        moveMinifigStorageItem($locationId, $newLocationId, $minifigId, $conditionType);
-    }
+    $pdo->prepare('DELETE FROM minifig_storage_items WHERE id = ?')->execute([$instanceId]);
 }

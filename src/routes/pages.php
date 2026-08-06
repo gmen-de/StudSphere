@@ -627,10 +627,14 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $content .= '<p class="location-item-edit-current"><strong>' . htmlspecialchars(t('location_item_current_location_label')) . ':</strong> <span id="location-item-edit-current-path"></span></p>';
     $content .= '<form id="location-item-edit-form">';
     $content .= '<div id="location-item-edit-message" class="add-stock-message"></div>';
-    $content .= '<label>' . htmlspecialchars(t('add_stock_quantity_label')) . '<input type="number" name="quantity" id="location-item-edit-quantity" min="0" required></label>';
+    $content .= '<label id="location-item-edit-quantity-row">' . htmlspecialchars(t('add_stock_quantity_label')) . '<input type="number" name="quantity" id="location-item-edit-quantity" min="0" required></label>';
     $content .= '<label>' . htmlspecialchars(t('location_item_new_location_label')) . '</label>';
     $content .= '<div id="location-item-edit-picker" class="location-picker"></div>';
     $content .= '<button type="submit">' . htmlspecialchars(t('location_save_button')) . '</button>';
+    // Minifig instances only (see openItemEditModal()) — no quantity concept
+    // to "set to 0" as an implicit delete, so removal needs its own explicit
+    // control.
+    $content .= '<button type="button" id="location-item-edit-delete" style="display:none;">' . htmlspecialchars(t('location_detail_minifig_delete_button')) . '</button>';
     $content .= '</form></div></div>';
 
     // Multi-select bulk relocate modal — the floating selection bar's
@@ -685,6 +689,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         'bulkNamingDefault' => t('location_bulk_naming_default'),
         'selectLabel' => t('location_item_select_label'),
         'updateFailed' => t('location_item_update_failed'),
+        'minifigDeleteConfirm' => t('location_detail_minifig_delete_confirm'),
         'bulkBarCount' => t('location_bulk_bar_count'),
         'bulkRelocateFailed' => t('location_bulk_relocate_failed'),
         'levelLabel' => t('location_picker_level_label'),
@@ -716,6 +721,8 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
   var itemEditForm = document.getElementById('location-item-edit-form');
   var itemEditMessage = document.getElementById('location-item-edit-message');
   var itemEditQuantity = document.getElementById('location-item-edit-quantity');
+  var itemEditQuantityRow = document.getElementById('location-item-edit-quantity-row');
+  var itemEditDeleteBtn = document.getElementById('location-item-edit-delete');
   var itemEditPicker = document.getElementById('location-item-edit-picker');
   var bulkRelocateModal = document.getElementById('location-bulk-relocate-modal');
   var bulkRelocateModalClose = document.getElementById('location-bulk-relocate-modal-close');
@@ -834,7 +841,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
 
   function itemKey(item) {
     return item.kind === 'minifig'
-      ? 'minifig:' + item.locationId + ':' + item.minifigId + ':' + item.conditionType
+      ? 'minifig:' + item.instanceId
       : 'part:' + item.locationId + ':' + item.partId + ':' + item.colorId + ':' + item.conditionType;
   }
 
@@ -983,11 +990,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       var card = document.createElement('div');
       card.className = 'location-detail-card';
 
-      var qtyBadge = document.createElement('span');
-      qtyBadge.className = 'location-detail-card-qty';
-      qtyBadge.textContent = fig.quantity + 'x';
-      card.appendChild(qtyBadge);
-
       var thumb = document.createElement('span');
       thumb.className = 'location-detail-card-thumb';
       thumb.innerHTML = fig.thumbnail ? ('<img src="' + fig.thumbnail + '" alt="">') : texts.minifigIcon;
@@ -1013,15 +1015,13 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
 
       var descriptor = {
         kind: 'minifig',
-        locationId: fig.location_id,
-        minifigId: fig.minifig_id,
-        conditionType: fig.condition_type
+        instanceId: fig.instance_id,
+        locationId: fig.location_id
       };
       addCardSelectAndActivate(card, descriptor, function() {
         openItemEditModal(descriptor, {
           title: figName,
-          meta: condText,
-          quantity: fig.quantity
+          meta: condText
         });
       });
 
@@ -1030,15 +1030,59 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     return grid;
   }
 
+  // Shared by every submit path openItemEditModal() can trigger (move a
+  // part, delete a minifig instance, move a minifig instance) — same
+  // success/failure handling each time, just a different FormData.
+  function submitItemEdit(formData) {
+    fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          itemEditModal.style.display = 'none';
+          window.applyStatusStats(res.stats);
+          refreshContent();
+        } else {
+          itemEditMessage.textContent = texts.updateFailed.replace('{message}', res.message || '');
+          itemEditMessage.className = 'add-stock-message error';
+        }
+      })
+      .catch(function() {
+        itemEditMessage.textContent = texts.errorRetry;
+        itemEditMessage.className = 'add-stock-message error';
+      });
+  }
+
   function openItemEditModal(descriptor, display) {
     if (!itemEditModal || !itemEditForm) {
       return;
     }
     itemEditSubtitle.textContent = display.title + (display.meta ? ' \\u00b7 ' + display.meta : '');
     itemEditCurrentPath.textContent = findLocationPath(descriptor.locationId);
-    itemEditQuantity.value = display.quantity;
     itemEditMessage.textContent = '';
     itemEditMessage.className = 'add-stock-message';
+
+    // A minifig instance is exactly one physical figure — no quantity field,
+    // and "remove" needs its own explicit control instead of "set to 0".
+    var isMinifig = descriptor.kind === 'minifig';
+    if (itemEditQuantityRow) {
+      itemEditQuantityRow.style.display = isMinifig ? 'none' : '';
+    }
+    itemEditQuantity.required = !isMinifig;
+    if (!isMinifig) {
+      itemEditQuantity.value = display.quantity;
+    }
+    if (itemEditDeleteBtn) {
+      itemEditDeleteBtn.style.display = isMinifig ? '' : 'none';
+      itemEditDeleteBtn.onclick = !isMinifig ? null : function() {
+        if (!window.confirm(texts.minifigDeleteConfirm)) {
+          return;
+        }
+        var deleteFormData = new FormData();
+        deleteFormData.set('action', 'delete_minifig_storage_item');
+        deleteFormData.set('instance_id', descriptor.instanceId);
+        submitItemEdit(deleteFormData);
+      };
+    }
 
     itemEditPicker.innerHTML = '';
     var newLocationId = null;
@@ -1048,36 +1092,31 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
 
     itemEditForm.onsubmit = function(e) {
       e.preventDefault();
+      if (isMinifig) {
+        if (!newLocationId) {
+          itemEditMessage.textContent = texts.updateFailed.replace('{message}', '');
+          itemEditMessage.className = 'add-stock-message error';
+          return;
+        }
+        var moveFormData = new FormData();
+        moveFormData.set('action', 'move_minifig_storage_item');
+        moveFormData.set('instance_id', descriptor.instanceId);
+        moveFormData.set('new_location_id', newLocationId);
+        submitItemEdit(moveFormData);
+        return;
+      }
+
       var formData = new FormData();
-      formData.set('action', descriptor.kind === 'minifig' ? 'update_minifig_storage_item' : 'update_storage_item');
+      formData.set('action', 'update_storage_item');
       formData.set('location_id', descriptor.locationId);
       formData.set('condition_type', descriptor.conditionType);
       formData.set('quantity', itemEditQuantity.value);
       if (newLocationId) {
         formData.set('new_location_id', newLocationId);
       }
-      if (descriptor.kind === 'minifig') {
-        formData.set('minifig_id', descriptor.minifigId);
-      } else {
-        formData.set('part_id', descriptor.partId);
-        formData.set('color_id', descriptor.colorId);
-      }
-      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-          if (res.success) {
-            itemEditModal.style.display = 'none';
-            window.applyStatusStats(res.stats);
-            refreshContent();
-          } else {
-            itemEditMessage.textContent = texts.updateFailed.replace('{message}', res.message || '');
-            itemEditMessage.className = 'add-stock-message error';
-          }
-        })
-        .catch(function() {
-          itemEditMessage.textContent = texts.errorRetry;
-          itemEditMessage.className = 'add-stock-message error';
-        });
+      formData.set('part_id', descriptor.partId);
+      formData.set('color_id', descriptor.colorId);
+      submitItemEdit(formData);
     };
 
     itemEditModal.style.display = 'flex';
