@@ -50,6 +50,82 @@ function renderOwnedStatusBadges(int $completeCount, int $damagedCount, int $mis
 }
 
 /**
+ * Shared "Exemplar wählen" modal for owned_set_detail/owned_minifig_detail
+ * (src/routes/pages.php) — a scrollable radio-row list plus a confirm
+ * button, replacing a plain <select> whose <option> text (location path +
+ * condition + status all crammed in) made the dropdown uncomfortably wide;
+ * a modal row can lay that out properly and show each copy's own ampel
+ * status dot (renderOwnedStatusBadges()'s single-dot building block)
+ * besides. Fixed element ids either way — only one of the two detail pages
+ * is ever rendered at a time, so there's no risk of two such modals
+ * colliding on the same page. Returns '' when there's nothing to pick
+ * between (single-instance case), same as the withheld trigger button at
+ * both call sites.
+ *
+ * @param array<int, array{id:int, label:string, meta:string, status:string}> $instances
+ */
+function renderOwnedInstancePickerModal(array $instances, int $currentId, string $targetPage): string
+{
+    if (count($instances) <= 1) {
+        return '';
+    }
+
+    $html = '<div class="modal-overlay" id="owned-instance-picker-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<button type="button" class="modal-close" id="owned-instance-picker-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '<h2>' . htmlspecialchars(t('owned_instance_picker_heading')) . '</h2>';
+    $html .= '<div class="owned-instance-picker-list">';
+    foreach ($instances as $instance) {
+        $checkedAttr = $instance['id'] === $currentId ? ' checked' : '';
+        $html .= '<label class="owned-instance-picker-row">';
+        $html .= '<input type="radio" name="owned-instance-picker-choice" value="?page=' . htmlspecialchars($targetPage) . '&id=' . (int) $instance['id'] . '"' . $checkedAttr . '>';
+        $html .= '<span class="owned-status-dot owned-status-dot-' . htmlspecialchars($instance['status']) . '" aria-hidden="true"></span>';
+        $html .= '<span class="owned-instance-picker-row-main">';
+        $html .= '<span class="owned-instance-picker-row-title">' . htmlspecialchars($instance['label']) . '</span>';
+        $html .= '<span class="owned-instance-picker-row-meta">' . htmlspecialchars($instance['meta']) . '</span>';
+        $html .= '</span>';
+        $html .= '</label>';
+    }
+    $html .= '</div>';
+    $html .= '<button type="submit" id="owned-instance-picker-confirm">' . htmlspecialchars(t('owned_instance_picker_confirm_button')) . '</button>';
+    $html .= '</div></div>';
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var openBtn = document.getElementById('owned-instance-picker-open');
+  var modal = document.getElementById('owned-instance-picker-modal');
+  var closeBtn = document.getElementById('owned-instance-picker-modal-close');
+  var confirmBtn = document.getElementById('owned-instance-picker-confirm');
+  if (!openBtn || !modal || !closeBtn || !confirmBtn) {
+    return;
+  }
+
+  function openModal() {
+    modal.style.display = 'flex';
+  }
+  function closeModal() {
+    modal.style.display = 'none';
+  }
+  openBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    openModal();
+  });
+  closeBtn.addEventListener('click', closeModal);
+  confirmBtn.addEventListener('click', function() {
+    var checked = modal.querySelector('input[name="owned-instance-picker-choice"]:checked');
+    if (checked) {
+      window.location.href = checked.value;
+    }
+  });
+})();
+</script>
+SCRIPT;
+
+    return $html;
+}
+
+/**
  * One card per distinct minifig model for "Meine Minifiguren" (my_minifigs*)
  * — mirrors renderOwnedSetGroupCard() (src/owned_sets.php): a real link
  * straight to a detail page (?page=owned_minifig_detail), not the generic

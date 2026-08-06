@@ -2275,27 +2275,31 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     // set (getOwnedSetsForSet(), already fetched above as $ownedSetSiblings
     // for the "#n" numbering), the set-detail-page counterpart to "Meine
     // Sets"' grouped card (renderOwnedSetGroupCard()): that card links to
-    // just one representative copy, this is how the rest are reached.
-    // Deliberately separate from the prev/next nav above, which walks the
-    // whole catalog (getAdjacentOwnedSets()) rather than staying within this
-    // one set's own copies.
+    // just one representative copy, this is how the rest are reached. A
+    // modal with a scrollable row list (renderOwnedInstancePickerModal(),
+    // src/minifigs.php, shared with owned_minifig_detail above) rather than
+    // a plain <select> — a location path in an <option> made the dropdown
+    // uncomfortably wide, and a modal row can show each copy's own ampel
+    // status dot besides. Deliberately separate from the prev/next nav
+    // above, which walks the whole catalog (getAdjacentOwnedSets()) rather
+    // than staying within this one set's own copies.
     if (count($ownedSetSiblings) > 1) {
-        $content .= '<label class="minifig-modal-instance-picker">';
-        $content .= '<span>' . htmlspecialchars(t('owned_set_instance_picker_label')) . '</span>';
-        $content .= '<select onchange="if (this.value) { window.location.href = this.value; }">';
+        $ownedSetPickerRows = [];
         foreach ($ownedSetSiblings as $i => $sibling) {
             $sibling['rebrickable_set_num'] = $ownedSet['rebrickable_set_num'];
             $siblingLocationPath = getStorageLocationAncestors($sibling['location_id']);
             array_pop($siblingLocationPath);
             $optLocation = implode(' -> ', array_column($siblingLocationPath, 'name'));
             $optCond = $sibling['condition_type'] === 'new' ? t('owned_set_condition_new') : t('owned_set_condition_used');
-            $optLabel = t('owned_set_instance_label', ['n' => (string) ($i + 1)])
-                . ' - ' . $optLocation . ' - ' . $optCond . ' - ' . t('owned_status_' . getOwnedSetInstanceStatus($pdo, $sibling));
-            $selectedAttr = $sibling['id'] === $ownedSet['id'] ? ' selected' : '';
-            $content .= '<option value="?page=owned_set_detail&id=' . $sibling['id'] . '"' . $selectedAttr . '>' . htmlspecialchars($optLabel) . '</option>';
+            $ownedSetPickerRows[] = [
+                'id' => $sibling['id'],
+                'label' => t('owned_set_instance_label', ['n' => (string) ($i + 1)]),
+                'meta' => implode(' · ', array_filter([$optLocation, $optCond], fn (string $v): bool => $v !== '')),
+                'status' => getOwnedSetInstanceStatus($pdo, $sibling),
+            ];
         }
-        $content .= '</select>';
-        $content .= '</label>';
+        $content .= '<button type="button" class="owned-instance-picker-trigger" id="owned-instance-picker-open">' . htmlspecialchars(t('owned_instance_picker_label')) . '</button>';
+        $content .= renderOwnedInstancePickerModal($ownedSetPickerRows, $ownedSet['id'], 'owned_set_detail');
     }
 
     // Same general info table as the catalog set-detail page (Name/
@@ -3113,24 +3117,28 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_minifig_detail') {
     // model (getOwnedMinifigInstancesForModel()), the detail-page counterpart
     // to "Meine Minifiguren"'s grouped card (renderOwnedMinifigGroupCard()):
     // that card links to just one representative copy, this is how the rest
-    // are reached. Plain navigation (not a live DOM swap, unlike the compact
-    // modal's own instance picker) since the whole page - tabs, sidebar
-    // table, action bar - differs per instance.
+    // are reached. A modal with a scrollable row list (renderOwnedInstancePickerModal(),
+    // src/minifigs.php, shared with owned_set_detail below) rather than a
+    // plain <select> — a location path in an <option> made the dropdown
+    // uncomfortably wide, and a modal row can show each copy's own ampel
+    // status dot besides. Plain navigation on confirm (not a live DOM swap,
+    // unlike the compact modal's own instance picker) since the whole page -
+    // tabs, sidebar table, action bar - differs per instance.
     $ownedMinifigAllInstances = getOwnedMinifigInstancesForModel($pdo, $ownedMinifigInstance['minifig_id'], $ownedMinifigInstance['fig_num'], getLocale());
     if (count($ownedMinifigAllInstances) > 1) {
-        $content .= '<label class="minifig-modal-instance-picker">';
-        $content .= '<span>' . htmlspecialchars(t('owned_minifig_instance_picker_label')) . '</span>';
-        $content .= '<select onchange="if (this.value) { window.location.href = this.value; }">';
+        $ownedMinifigPickerRows = [];
         foreach ($ownedMinifigAllInstances as $i => $inst) {
             $optLocation = implode(' -> ', array_column(getStorageLocationAncestors($inst['location_id']), 'name'));
             $optCond = $inst['condition_type'] === 'new' ? t('condition_new') : t('condition_used');
-            $optLabel = t('owned_set_instance_label', ['n' => (string) ($i + 1)])
-                . ' - ' . $optLocation . ' - ' . $optCond . ' - ' . t('owned_status_' . $inst['status']);
-            $selectedAttr = $inst['id'] === $ownedMinifigInstance['id'] ? ' selected' : '';
-            $content .= '<option value="?page=owned_minifig_detail&id=' . $inst['id'] . '"' . $selectedAttr . '>' . htmlspecialchars($optLabel) . '</option>';
+            $ownedMinifigPickerRows[] = [
+                'id' => $inst['id'],
+                'label' => t('owned_set_instance_label', ['n' => (string) ($i + 1)]),
+                'meta' => implode(' · ', array_filter([$optLocation, $optCond], fn (string $v): bool => $v !== '')),
+                'status' => $inst['status'],
+            ];
         }
-        $content .= '</select>';
-        $content .= '</label>';
+        $content .= '<button type="button" class="owned-instance-picker-trigger" id="owned-instance-picker-open">' . htmlspecialchars(t('owned_instance_picker_label')) . '</button>';
+        $content .= renderOwnedInstancePickerModal($ownedMinifigPickerRows, $ownedMinifigInstance['id'], 'owned_minifig_detail');
     }
 
     // Links row — same BrickLink/Rebrickable pair the compact minifig modal

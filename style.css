@@ -1739,6 +1739,80 @@ footer {
   background: #dc2626;
 }
 
+/* "Exemplar wählen" instance-picker modal (renderOwnedInstancePickerModal(),
+   src/minifigs.php) — opened from a small trigger button in place of the
+   plain <select> a long location path used to stretch uncomfortably wide;
+   each row here wraps instead of forcing the modal wider. */
+.owned-instance-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #1e293b;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.owned-instance-picker-trigger:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.owned-instance-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  margin: 1rem 0;
+}
+
+.owned-instance-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.75rem;
+  cursor: pointer;
+}
+
+.owned-instance-picker-row:has(input:checked) {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.owned-instance-picker-row input[type='radio'] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.owned-instance-picker-row .owned-status-dot {
+  flex-shrink: 0;
+}
+
+.owned-instance-picker-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.owned-instance-picker-row-title {
+  font-weight: 600;
+}
+
+.owned-instance-picker-row-meta {
+  font-size: 0.8rem;
+  color: #64748b;
+  overflow-wrap: break-word;
+}
+
 /* Part-detail overlay */
 .modal-overlay {
   position: fixed;
