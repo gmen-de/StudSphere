@@ -1274,7 +1274,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'owned_set_pdf_report') {
         exit;
     }
     header('Content-Type: application/pdf');
-    header('Content-Disposition: attachment; filename="' . $pdfReportOwnedSet['rebrickable_set_num'] . '_Bericht.pdf"');
+    // 'inline', not 'attachment' — paired with the trigger link's
+    // target="_blank" (src/routes/pages.php) so the browser's own PDF
+    // viewer opens the report in a new tab instead of forcing a download.
+    header('Content-Disposition: inline; filename="' . $pdfReportOwnedSet['rebrickable_set_num'] . '_Bericht.pdf"');
     header('Content-Length: ' . strlen($pdfReportBytes));
     echo $pdfReportBytes;
     exit;
