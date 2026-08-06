@@ -143,6 +143,7 @@ function getNavMenu(PDO $pdo): array
             ['labelKey' => 'nav_colors_search', 'href' => '?page=colors_search'],
         ]],
         ['icon' => 'my_sets', 'labelKey' => 'nav_my_sets', 'href' => '?page=my_sets', 'children' => $mySetsChildren],
+        ['icon' => 'my_minifigs', 'labelKey' => 'nav_my_minifigs', 'href' => '?page=my_minifigs', 'children' => $myMinifigsChildren],
         ['icon' => 'my_bricks', 'labelKey' => 'nav_my_bricks', 'href' => '?page=my_bricks', 'children' => [
             ['labelKey' => 'nav_my_bricks_all', 'href' => '?page=my_bricks_all'],
             ['labelKey' => 'nav_my_bricks_by_location', 'href' => '?page=my_bricks_by_location'],
@@ -151,7 +152,6 @@ function getNavMenu(PDO $pdo): array
         ['icon' => 'locations', 'labelKey' => 'locations_title', 'href' => '?page=locations', 'children' => [
             ['labelKey' => 'nav_locations_tree', 'href' => '?page=locations'],
         ]],
-        ['icon' => 'my_minifigs', 'labelKey' => 'nav_my_minifigs', 'href' => '?page=my_minifigs', 'children' => $myMinifigsChildren],
     ];
 }
 
