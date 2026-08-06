@@ -44,6 +44,24 @@ function pdfReportImageTag(?string $relativePath, string $maxSize = '26px'): str
 }
 
 /**
+ * The StudSphere mark for the report's own header/footer (not
+ * pdfReportImageTag() — that one caps size with max-width/max-height,
+ * which wouldn't scale a naturally-smaller render up to a fixed size).
+ * Always src/pdf_report_logo.svg, a flat-fill copy of /logo.svg: mPDF's
+ * SVG renderer silently drops radialGradient fills, which made the site
+ * logo's own gradient-filled sphere vanish entirely (only the thin orbit/
+ * satellite outlines survived) when tested against the original file.
+ */
+function pdfReportLogoTag(string $size): string
+{
+    $absolute = resolvePdfReportImagePath('src/pdf_report_logo.svg');
+    if ($absolute === null) {
+        return '';
+    }
+    return '<img src="' . htmlspecialchars($absolute) . '" style="width:' . $size . ';height:' . $size . ';">';
+}
+
+/**
  * Table rows shared by the Bauteile/Ersatzteile/Stickerbögen sections —
  * same nominal/actual/damaged/thumbnail shape returned by
  * getOwnedSetPartsWithStatus()/getOwnedSetSparePartsWithStatus()/
@@ -294,19 +312,25 @@ function buildOwnedSetPdfReport(PDO $pdo, array $ownedSet): string
         'margin_right' => 15,
     ]);
     $mpdf->SetTitle($ownedSet['rebrickable_set_num'] . ' - ' . $ownedSet['name']);
+
+    // Letterhead-style header, top-right on every page — same logo as the
+    // footer, just larger (24px reads clearly at this size, unlike the
+    // footer's deliberately subtle 18px) and paired with the wordmark.
+    // "StudSphere" itself is hardcoded rather than t()'d, same as the
+    // login page's own <h1>StudSphere</h1> — it's the product's proper
+    // name, not user-facing copy that varies by locale.
+    $headerHtml = '<table width="100%" style="font-size:11pt;color:#334155;"><tr>';
+    $headerHtml .= '<td style="text-align:right;vertical-align:middle;">';
+    $headerHtml .= pdfReportLogoTag('24px') . ' <span style="vertical-align:middle;font-weight:700;">StudSphere</span>';
+    $headerHtml .= '</td></tr></table>';
+    $mpdf->SetHTMLHeader($headerHtml);
+
     // SetHTMLFooter(), not the simpler SetFooter() — that one only supports
-    // plain text-ish content, no <img>. The logo is a separate flat-fill SVG
-    // (src/pdf_report_logo.svg), not /logo.svg itself — see that file's own
-    // comment for why: mPDF's SVG renderer silently drops radialGradient
-    // fills, which made the site logo's main sphere vanish entirely. Fixed
-    // width/height (not pdfReportImageTag()'s max-width/max-height, which
-    // wouldn't scale a naturally-smaller render up to size) — 18px is the
-    // smallest size the sphere+orbit+satellites still read as the logo
-    // rather than a plain dot, verified by rendering this exact footer.
-    $footerLogoPath = resolvePdfReportImagePath('src/pdf_report_logo.svg');
-    $footerLogo = $footerLogoPath !== null ? '<img src="' . htmlspecialchars($footerLogoPath) . '" style="width:18px;height:18px;">' : '';
+    // plain text-ish content, no <img>. 18px is the smallest size the
+    // sphere+orbit+satellites still read as the logo rather than a plain
+    // dot, verified by rendering this exact footer.
     $footerHtml = '<table width="100%" style="font-size:8pt;color:#64748b;"><tr>';
-    $footerHtml .= '<td width="20" style="vertical-align:middle;">' . $footerLogo . '</td>';
+    $footerHtml .= '<td width="20" style="vertical-align:middle;">' . pdfReportLogoTag('18px') . '</td>';
     $footerHtml .= '<td style="vertical-align:middle;">' . htmlspecialchars(t('owned_set_pdf_footer')) . ' {DATE j.m.Y} · {PAGENO}/{nbpg}</td>';
     $footerHtml .= '</tr></table>';
     $mpdf->SetHTMLFooter($footerHtml);
