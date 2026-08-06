@@ -760,6 +760,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
                 'originalFilename' => $instruction['original_filename'],
                 'url' => $instruction['stored_path'],
                 'fileSize' => formatFileSize($instruction['file_size']),
+                'uploadedAt' => formatDate($instruction['uploaded_at']),
             ],
         ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {

@@ -92,6 +92,9 @@ function getActionIcon(string $key): string
         // (src/routes/pages.php) — CSS spins it while a request is in
         // flight.
         'refresh' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11A8 8 0 1 0 18 16"/><path d="M20 5v6h-6"/></svg>',
+        // The instructions tab's tile fallback (renderSetInstructionsTab(),
+        // src/instructions.php) — a plain document glyph, no PDF branding.
+        'pdf' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M13 3v5h5"/><path d="M8.5 13h7"/><path d="M8.5 16.5h7"/></svg>',
     ];
 
     return $icons[$key] ?? '';

@@ -2088,94 +2088,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
             $content .= '</div>';
         }
     } elseif ($activeTab === 'instructions') {
-        $instructions = getSetInstructions($pdo, $setId);
-
-        $content .= '<form id="instruction-upload-form" class="instruction-upload-form">';
-        $content .= '<input type="text" id="instruction-label-input" placeholder="' . htmlspecialchars(t('set_detail_instructions_label_placeholder')) . '" maxlength="255">';
-        $content .= '<input type="file" id="instruction-file-input" accept="application/pdf">';
-        $content .= '<button type="submit">' . htmlspecialchars(t('set_detail_instructions_upload_button')) . '</button>';
-        $content .= '<span class="instruction-upload-message" id="instruction-upload-message"></span>';
-        $content .= '</form>';
-
-        if (empty($instructions)) {
-            $content .= '<p class="instructions-empty">' . htmlspecialchars(t('set_detail_instructions_empty')) . '</p>';
-        } else {
-            $content .= '<ul class="instructions-list">';
-            foreach ($instructions as $instruction) {
-                $uploadedAt = formatDate($instruction['uploaded_at']);
-                $label = $instruction['label'] !== null ? $instruction['label'] : $instruction['original_filename'];
-                $content .= '<li class="instruction-item" data-id="' . $instruction['id'] . '">';
-                $content .= '<a href="' . htmlspecialchars($instruction['stored_path']) . '" target="_blank" rel="noopener">' . htmlspecialchars($label) . '</a>';
-                $content .= '<span class="instruction-meta">' . htmlspecialchars(formatFileSize($instruction['file_size'])) . ' · ' . htmlspecialchars($uploadedAt) . '</span>';
-                $content .= '<button type="button" class="instruction-delete-btn" data-id="' . $instruction['id'] . '">' . htmlspecialchars(t('set_detail_instructions_delete_button')) . '</button>';
-                $content .= '</li>';
-            }
-            $content .= '</ul>';
-        }
-
-        $instructionLabelsJson = json_encode([
-            'uploading' => t('set_detail_instructions_uploading'),
-            'deleteConfirm' => t('set_detail_instructions_delete_confirm'),
-            'errorRetry' => t('import_error_retry'),
-        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-
-        $content .= <<<SCRIPT
-<script>
-(function(){
-  var texts = $instructionLabelsJson;
-  var form = document.getElementById('instruction-upload-form');
-  var labelInput = document.getElementById('instruction-label-input');
-  var fileInput = document.getElementById('instruction-file-input');
-  var msg = document.getElementById('instruction-upload-message');
-  if (form) {
-    form.addEventListener('submit', function(e) {
-      e.preventDefault();
-      if (!fileInput.files || !fileInput.files[0]) {
-        return;
-      }
-      msg.textContent = texts.uploading;
-      var formData = new FormData();
-      formData.set('action', 'upload_set_instruction');
-      formData.set('set_id', '$setId');
-      formData.set('label', labelInput.value);
-      formData.set('instruction_file', fileInput.files[0]);
-
-      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-          if (res.success) {
-            window.location.reload();
-          } else {
-            msg.textContent = res.message;
-          }
-        })
-        .catch(function() {
-          msg.textContent = texts.errorRetry;
-        });
-    });
-  }
-
-  document.querySelectorAll('.instruction-delete-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      if (!window.confirm(texts.deleteConfirm)) {
-        return;
-      }
-      var formData = new FormData();
-      formData.set('action', 'delete_set_instruction');
-      formData.set('instruction_id', btn.dataset.id);
-
-      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-          if (res.success) {
-            window.location.reload();
-          }
-        });
-    });
-  });
-})();
-</script>
-SCRIPT;
+        $content .= renderSetInstructionsTab($setId);
     } else {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('part_purchase_placeholder')) . '</p></section>';
     }
@@ -2219,9 +2132,15 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
         if ($tabKey === 'damaged_missing') {
             return renderOwnedSetDamagedMissingSection($pdo, $ownedSet);
         }
+        if ($tabKey === 'instructions') {
+            // Keyed by the catalog set, not this owned instance — every
+            // physical copy of the same set shares the same uploaded PDFs
+            // (see renderSetInstructionsTab()'s doc comment).
+            return renderSetInstructionsTab($ownedSet['set_id']);
+        }
         return renderOwnedSetPhotoGallery($pdo, $ownedSet);
     };
-    $ownedSetTabKeys = ['inventory', 'spares', 'stickers', 'minifigs', 'damaged_missing', 'gallery'];
+    $ownedSetTabKeys = ['inventory', 'spares', 'stickers', 'minifigs', 'damaged_missing', 'instructions', 'gallery'];
 
     // AJAX tab-content request (see the tab-loading script further down) —
     // only meaningful once the instance is opened (sealed sets have no
@@ -2519,6 +2438,7 @@ SCRIPT;
             'stickers' => t('owned_set_tab_stickers'),
             'minifigs' => t('owned_set_tab_minifigs'),
             'damaged_missing' => t('owned_set_tab_damaged_missing'),
+            'instructions' => t('owned_set_tab_instructions'),
             'gallery' => t('owned_set_tab_gallery'),
         ];
         $activeOwnedTab = (string) ($_GET['tab'] ?? '');

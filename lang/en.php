@@ -370,6 +370,8 @@ return [
     'set_detail_retired_year_invalid' => 'Please enter a valid year (or leave empty to remove it).',
     'set_detail_retired_year_save_failed' => 'Error: {message}',
     'set_detail_instructions_label_placeholder' => 'Label, e.g. Booklet 1 of 2',
+    'instruction_upload_hint' => 'Drop instructions (PDF) here or click to browse',
+    'owned_set_tab_instructions' => 'Instructions',
     'set_detail_instructions_upload_button' => 'Upload',
     'set_detail_instructions_uploading' => 'Uploading …',
     'set_detail_instructions_empty' => 'No building instructions are recorded for this set yet.',

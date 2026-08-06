@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/i18n.php';
+require_once __DIR__ . '/icons.php';
 
 const INSTRUCTION_MAX_LABEL_LENGTH = 255;
 
@@ -115,6 +116,211 @@ function deleteSetInstruction(PDO $pdo, int $id): ?array
     $stmt = $pdo->prepare('DELETE FROM set_instructions WHERE id = ?');
     $stmt->execute([$id]);
     return $instruction;
+}
+
+function renderInstructionTile(array $instruction): string
+{
+    $label = $instruction['label'] !== null ? $instruction['label'] : $instruction['original_filename'];
+    $meta = formatFileSize($instruction['file_size']) . ' · ' . formatDate($instruction['uploaded_at']);
+
+    $html = '<div class="owned-set-photo instruction-tile" data-id="' . (int) $instruction['id'] . '">';
+    $html .= '<a class="owned-set-photo-view instruction-tile-open" href="' . htmlspecialchars($instruction['stored_path']) . '" target="_blank" rel="noopener">';
+    $html .= '<span class="instruction-tile-icon">' . getActionIcon('pdf') . '</span>';
+    $html .= '</a>';
+    $html .= '<span class="owned-set-photo-caption">' . htmlspecialchars($label) . '</span>';
+    $html .= '<span class="owned-set-photo-caption instruction-tile-meta">' . htmlspecialchars($meta) . '</span>';
+    $html .= '<button type="button" class="owned-set-photo-delete" data-id="' . (int) $instruction['id'] . '">' . htmlspecialchars(t('set_detail_instructions_delete_button')) . '</button>';
+    $html .= '</div>';
+    return $html;
+}
+
+/**
+ * The "Bauanleitung" tab's full markup + upload/delete script — shared by
+ * the catalog set_detail page and owned_set_detail's own tab bar. Keyed by
+ * the catalog set_id in both cases (an owned instance has no instructions
+ * of its own; every physical copy of the same set shares the same PDFs),
+ * so this needs nothing owned-instance-specific. Deliberately the same
+ * tile-grid/drag-and-drop UX as renderOwnedSetPhotoGallery() (src/owned_sets.php)
+ * — per explicit user request to match that tab exactly — reusing its
+ * .owned-set-photo* classes directly rather than a parallel set, since a
+ * PDF tile is structurally identical to a photo tile (just an icon instead
+ * of an <img>, and an "open in new tab" link instead of a lightbox).
+ */
+function renderSetInstructionsTab(int $setId): string
+{
+    $pdo = getPDO();
+    $instructions = getSetInstructions($pdo, $setId);
+
+    $content = '<div class="owned-set-photo-grid" id="instructions-grid">';
+
+    $content .= '<div class="owned-set-photo owned-set-photo-upload" id="instructions-upload-tile">';
+    $content .= '<span class="owned-set-photo-upload-icon">' . getActionIcon('upload') . '</span>';
+    $content .= '<span class="owned-set-photo-upload-text">' . htmlspecialchars(t('instruction_upload_hint')) . '</span>';
+    $content .= '<input type="text" id="instruction-label-input" class="owned-set-photo-upload-caption" placeholder="' . htmlspecialchars(t('set_detail_instructions_label_placeholder')) . '" maxlength="255">';
+    $content .= '<input type="file" id="instruction-file-input" accept="application/pdf" multiple hidden>';
+    $content .= '<span class="instruction-upload-message" id="instruction-upload-message"></span>';
+    $content .= '</div>';
+
+    foreach ($instructions as $instruction) {
+        $content .= renderInstructionTile($instruction);
+    }
+    $content .= '</div>';
+
+    $instructionLabelsJson = json_encode([
+        'uploading' => t('set_detail_instructions_uploading'),
+        'deleteConfirm' => t('set_detail_instructions_delete_confirm'),
+        'errorRetry' => t('import_error_retry'),
+        'deleteButtonLabel' => t('set_detail_instructions_delete_button'),
+        'pdfIcon' => getActionIcon('pdf'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $content .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $instructionLabelsJson;
+  var uploadTile = document.getElementById('instructions-upload-tile');
+  var labelInput = document.getElementById('instruction-label-input');
+  var fileInput = document.getElementById('instruction-file-input');
+  var msg = document.getElementById('instruction-upload-message');
+  var grid = document.getElementById('instructions-grid');
+  if (!uploadTile || !fileInput || !msg || !grid) {
+    return;
+  }
+
+  function bindDelete(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (!window.confirm(texts.deleteConfirm)) {
+        return;
+      }
+      var formData = new FormData();
+      formData.set('action', 'delete_set_instruction');
+      formData.set('instruction_id', btn.dataset.id);
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            btn.closest('.instruction-tile').remove();
+          }
+        });
+    });
+  }
+  grid.querySelectorAll('.instruction-tile .owned-set-photo-delete').forEach(bindDelete);
+
+  function addInstructionTile(instruction) {
+    var tile = document.createElement('div');
+    tile.className = 'owned-set-photo instruction-tile';
+    tile.dataset.id = instruction.id;
+
+    var open = document.createElement('a');
+    open.className = 'owned-set-photo-view instruction-tile-open';
+    open.href = instruction.url;
+    open.target = '_blank';
+    open.rel = 'noopener';
+    var icon = document.createElement('span');
+    icon.className = 'instruction-tile-icon';
+    icon.innerHTML = texts.pdfIcon;
+    open.appendChild(icon);
+    tile.appendChild(open);
+
+    var caption = document.createElement('span');
+    caption.className = 'owned-set-photo-caption';
+    caption.textContent = instruction.label || instruction.originalFilename;
+    tile.appendChild(caption);
+
+    var meta = document.createElement('span');
+    meta.className = 'owned-set-photo-caption instruction-tile-meta';
+    meta.textContent = instruction.fileSize + ' \\u00b7 ' + instruction.uploadedAt;
+    tile.appendChild(meta);
+
+    var deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'owned-set-photo-delete';
+    deleteBtn.dataset.id = instruction.id;
+    deleteBtn.textContent = texts.deleteButtonLabel;
+    tile.appendChild(deleteBtn);
+
+    bindDelete(deleteBtn);
+    grid.appendChild(tile);
+  }
+
+  function uploadOne(file) {
+    var formData = new FormData();
+    formData.set('action', 'upload_set_instruction');
+    formData.set('set_id', '$setId');
+    formData.set('label', labelInput.value);
+    formData.set('instruction_file', file);
+
+    return fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          addInstructionTile(res.instruction);
+        } else {
+          msg.textContent = res.message;
+        }
+      })
+      .catch(function() {
+        msg.textContent = texts.errorRetry;
+      });
+  }
+
+  function uploadFiles(files) {
+    var list = Array.prototype.slice.call(files || []);
+    if (list.length === 0) {
+      return;
+    }
+    msg.textContent = texts.uploading;
+    var chain = Promise.resolve();
+    list.forEach(function(file) {
+      chain = chain.then(function() { return uploadOne(file); });
+    });
+    chain.then(function() {
+      msg.textContent = '';
+      labelInput.value = '';
+    });
+  }
+
+  uploadTile.addEventListener('click', function(e) {
+    if (e.target === labelInput) {
+      return;
+    }
+    fileInput.click();
+  });
+  fileInput.addEventListener('change', function() {
+    uploadFiles(fileInput.files);
+    fileInput.value = '';
+  });
+  labelInput.addEventListener('click', function(e) {
+    e.stopPropagation();
+  });
+
+  var dragCounter = 0;
+  uploadTile.addEventListener('dragenter', function(e) {
+    e.preventDefault();
+    dragCounter++;
+    uploadTile.classList.add('owned-set-photo-upload-dragover');
+  });
+  uploadTile.addEventListener('dragover', function(e) {
+    e.preventDefault();
+  });
+  uploadTile.addEventListener('dragleave', function() {
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) {
+      uploadTile.classList.remove('owned-set-photo-upload-dragover');
+    }
+  });
+  uploadTile.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dragCounter = 0;
+    uploadTile.classList.remove('owned-set-photo-upload-dragover');
+    uploadFiles(e.dataTransfer && e.dataTransfer.files);
+  });
+})();
+</script>
+SCRIPT;
+
+    return $content;
 }
 
 function formatFileSize(int $bytes): string

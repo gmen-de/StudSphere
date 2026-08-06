@@ -370,6 +370,8 @@ return [
     'set_detail_retired_year_invalid' => 'Bitte ein gültiges Jahr eingeben (oder leer lassen, um es zu entfernen).',
     'set_detail_retired_year_save_failed' => 'Fehler: {message}',
     'set_detail_instructions_label_placeholder' => 'Bezeichnung, z. B. Heft 1 von 2',
+    'instruction_upload_hint' => 'Bauanleitung (PDF) hierher ziehen oder klicken',
+    'owned_set_tab_instructions' => 'Bauanleitung',
     'set_detail_instructions_upload_button' => 'Hochladen',
     'set_detail_instructions_uploading' => 'Wird hochgeladen …',
     'set_detail_instructions_empty' => 'Für dieses Set sind noch keine Bauanleitungen hinterlegt.',

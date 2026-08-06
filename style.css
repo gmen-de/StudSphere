@@ -3689,6 +3689,30 @@ footer {
   object-fit: cover;
 }
 
+/* Instructions tab (src/instructions.php) reuses the photo grid/tile classes
+   wholesale — this is the one bit unique to a PDF tile: an icon in place of
+   an <img>, same footprint. */
+.instruction-tile-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 15rem;
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.instruction-tile-icon svg {
+  width: 4rem;
+  height: 4rem;
+}
+
+.instruction-tile-meta {
+  padding-top: 0;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
 .owned-set-photo-caption {
   padding: 0.5rem 0.75rem;
   font-size: 0.8rem;
