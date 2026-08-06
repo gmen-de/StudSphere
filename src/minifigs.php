@@ -6,6 +6,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/icons.php';
 require_once __DIR__ . '/sets.php';
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/i18n.php';
 
 const MINIFIGS_SEARCH_PAGE_SIZE = 100;
 
@@ -16,9 +17,19 @@ const MINIFIGS_SEARCH_PAGE_SIZE = 100;
  * (src/minifig_modal.php) listens for clicks on this globally, same pattern
  * as the part-detail modal.
  */
-function renderMinifigCard(array $fig, ?string $meta = null): string
+function renderMinifigCard(array $fig, ?string $meta = null, ?int $instanceId = null): string
 {
-    $html = '<div class="minifig-card" data-minifig-id="' . (int) $fig['id'] . '" role="button" tabindex="0">';
+    $html = '<div class="minifig-card" data-minifig-id="' . (int) $fig['id'] . '"';
+    if ($instanceId !== null) {
+        // Lets the click-delegated modal (renderMinifigDetailModal(),
+        // src/minifig_modal.php) preselect this exact physical instance
+        // instead of defaulting to the first one — used by "Meine
+        // Minifiguren" (my_minifigs*), where every tile IS one specific
+        // instance, same as clicking a set card jumps straight to that
+        // set's own owned_set_detail.
+        $html .= ' data-instance-id="' . $instanceId . '"';
+    }
+    $html .= ' role="button" tabindex="0">';
     $html .= '<span class="minifig-card-image">' . ($fig['thumbnail'] !== null ? '<img src="' . htmlspecialchars($fig['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
     $html .= '<span class="minifig-card-num">' . htmlspecialchars($fig['fig_num']) . '</span>';
     $name = (string) ($fig['name'] ?? $fig['fig_num']);
@@ -28,6 +39,31 @@ function renderMinifigCard(array $fig, ?string $meta = null): string
     }
     $html .= '</div>';
     return $html;
+}
+
+/**
+ * One loose minifig instance tile for "Meine Minifiguren" (my_minifigs*) —
+ * conceptually mirrors renderOwnedSetCard() (src/owned_sets.php): location +
+ * condition instead of a completeness percentage. Built on top of
+ * renderMinifigCard() rather than a parallel markup/CSS class, since
+ * minifigs have no dedicated detail page to link to the way owned sets do
+ * (?page=owned_set_detail) — only the shared detail modal, reached the same
+ * document-level-click way every other minifig card on the site already
+ * uses. The instance id (renderMinifigCard()'s optional third param)
+ * preselects exactly this physical instance once the modal opens.
+ */
+function renderOwnedMinifigCard(array $instance): string
+{
+    $fig = [
+        'id' => $instance['minifig_id'],
+        'thumbnail' => $instance['thumbnail'],
+        'fig_num' => $instance['fig_num'],
+        'name' => $instance['name'],
+    ];
+    $locationLabel = implode(' -> ', array_column(getStorageLocationAncestors((int) $instance['location_id']), 'name'));
+    $condLabel = $instance['condition_type'] === 'new' ? t('condition_new') : t('condition_used');
+    $meta = $locationLabel !== '' ? $locationLabel . ' · ' . $condLabel : $condLabel;
+    return renderMinifigCard($fig, $meta, (int) $instance['id']);
 }
 
 /**
@@ -164,6 +200,132 @@ function getMinifigThemeTileImages(PDO $pdo, array $themeIds): array
         }
     }
     return $result;
+}
+
+/**
+ * Same tree shape as getOwnedSetThemeTree() (src/sets.php) — full parent/
+ * child hierarchy via buildThemeTree(), just counting loose minifig
+ * instances (minifig_storage_items) instead of owned_sets rows. A minifig's
+ * theme is always derived through the sets it appears in (see
+ * getMinifigThemes()'s doc comment above), hence the extra two joins
+ * compared to getOwnedSetThemeTree(). Powers "Meine Minifiguren"'s theme
+ * menu (nav flyout + my_minifigs_themes).
+ */
+function getOwnedMinifigThemeTree(PDO $pdo): array
+{
+    $rows = $pdo->query(
+        'SELECT th.theme_id, th.name, th.parent_theme_id, COUNT(DISTINCT msi.id) AS direct_count
+         FROM themes th
+         LEFT JOIN sets s ON s.theme = CAST(th.theme_id AS CHAR)
+         LEFT JOIN rebrickable_inventories ri ON ri.set_num = s.rebrickable_set_num
+         LEFT JOIN inventory_minifigs im ON im.inventory_id = ri.inventory_id
+         LEFT JOIN minifig_storage_items msi ON msi.minifig_id = im.minifig_id
+         GROUP BY th.theme_id, th.name, th.parent_theme_id'
+    )->fetchAll();
+    return buildThemeTree($rows);
+}
+
+/**
+ * Mirrors sets.php's getThemeTileImages() — one representative minifig
+ * image per theme tile, searched across the tile's own theme plus every
+ * descendant (a parent tile can have zero loose minifigs tagged with it
+ * directly while its subthemes have plenty). Deliberately not
+ * getMinifigThemeTileImages() above: that one only searches a theme's own
+ * literal id (fine for the flat catalog-wide minifig browse it serves), not
+ * a group of descendant ids.
+ *
+ * @param array<int, int[]> $themeIdGroups keyed by the tile's own theme_id
+ * @return array<string, string>
+ */
+function getOwnedMinifigThemeTileImages(PDO $pdo, array $themeIdGroups): array
+{
+    $result = [];
+    foreach ($themeIdGroups as $tileThemeId => $searchIds) {
+        if (empty($searchIds)) {
+            continue;
+        }
+        $placeholders = implode(',', array_fill(0, count($searchIds), '?'));
+        $stmt = $pdo->prepare(
+            "SELECT m.local_image_path
+             FROM minifigs m
+             INNER JOIN inventory_minifigs im ON im.minifig_id = m.id
+             INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
+             INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num
+             WHERE s.theme IN ($placeholders) AND m.local_image_path IS NOT NULL AND m.local_image_path != ''
+             LIMIT 1"
+        );
+        $stmt->execute($searchIds);
+        $path = $stmt->fetchColumn();
+        if ($path !== false) {
+            $result[(string) $tileThemeId] = (string) $path;
+        }
+    }
+    return $result;
+}
+
+/**
+ * Every loose minifig instance (one row per physical figure, see
+ * minifig_storage_items' own doc comment in src/setup.php), no theme filter
+ * — mirrors getAllOwnedSets() (src/owned_sets.php).
+ *
+ * @return array<int, array{id:int, minifig_id:int, fig_num:string, name:?string, thumbnail:?string, location_id:int, condition_type:string}>
+ */
+function getAllLooseMinifigs(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        'SELECT msi.id, msi.minifig_id, m.fig_num, m.name, m.local_image_path AS thumbnail,
+                msi.location_id, msi.condition_type
+         FROM minifig_storage_items msi
+         INNER JOIN minifigs m ON m.id = msi.minifig_id
+         ORDER BY m.name ASC, msi.id ASC'
+    );
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['id'] = (int) $row['id'];
+        $row['minifig_id'] = (int) $row['minifig_id'];
+        $row['location_id'] = (int) $row['location_id'];
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
+ * Loose minifig instances whose minifig type appears in a set from one of
+ * the given themes — the loose-minifig equivalent of getOwnedSetsForThemes()
+ * (src/owned_sets.php).
+ *
+ * @param int[] $themeIds
+ * @return array<int, array{id:int, minifig_id:int, fig_num:string, name:?string, thumbnail:?string, location_id:int, condition_type:string}>
+ */
+function getLooseMinifigsForThemes(PDO $pdo, array $themeIds): array
+{
+    if (empty($themeIds)) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($themeIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT msi.id, msi.minifig_id, m.fig_num, m.name, m.local_image_path AS thumbnail,
+                msi.location_id, msi.condition_type
+         FROM minifig_storage_items msi
+         INNER JOIN minifigs m ON m.id = msi.minifig_id
+         WHERE msi.minifig_id IN (
+             SELECT DISTINCT im.minifig_id
+             FROM inventory_minifigs im
+             INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
+             INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num
+             WHERE s.theme IN ($placeholders)
+         )
+         ORDER BY m.name ASC, msi.id ASC"
+    );
+    $stmt->execute($themeIds);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['id'] = (int) $row['id'];
+        $row['minifig_id'] = (int) $row['minifig_id'];
+        $row['location_id'] = (int) $row['location_id'];
+    }
+    unset($row);
+    return $rows;
 }
 
 /**

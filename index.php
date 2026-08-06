@@ -126,7 +126,10 @@ function render(string $title, string $content): void
 function getNavMenu(PDO $pdo): array
 {
     $ownedThemeTree = getOwnedSetThemeTree($pdo);
-    $mySetsChildren = buildOwnedThemeNavItems($ownedThemeTree, getSetThemeChildren($ownedThemeTree, null));
+    $mySetsChildren = buildOwnedThemeNavItems($ownedThemeTree, getSetThemeChildren($ownedThemeTree, null), '?page=my_sets_themes&theme=');
+
+    $ownedMinifigThemeTree = getOwnedMinifigThemeTree($pdo);
+    $myMinifigsChildren = buildOwnedThemeNavItems($ownedMinifigThemeTree, getSetThemeChildren($ownedMinifigThemeTree, null), '?page=my_minifigs_themes&theme=');
 
     return [
         ['icon' => 'dashboard', 'labelKey' => 'dashboard_title', 'href' => $_SERVER['PHP_SELF'], 'children' => []],
@@ -148,29 +151,33 @@ function getNavMenu(PDO $pdo): array
         ['icon' => 'locations', 'labelKey' => 'locations_title', 'href' => '?page=locations', 'children' => [
             ['labelKey' => 'nav_locations_tree', 'href' => '?page=locations'],
         ]],
-        ['icon' => 'collection', 'labelKey' => 'nav_my_collection', 'href' => '?page=my_collection', 'children' => []],
+        ['icon' => 'my_minifigs', 'labelKey' => 'nav_my_minifigs', 'href' => '?page=my_minifigs', 'children' => $myMinifigsChildren],
     ];
 }
 
 /**
  * Turns a level of getSetThemeChildren() output into nav-dropdown item
- * shape, recursing into owned subthemes so the "Meine Sets" menu can flyout
- * into them (e.g. Train -> 9V) instead of only showing the top level.
+ * shape, recursing into owned subthemes so a "Meine Sets"/"Meine
+ * Minifiguren"-style menu can flyout into them (e.g. Train -> 9V) instead of
+ * only showing the top level. $baseHref is the page's own theme-drilldown
+ * link prefix (e.g. "?page=my_sets_themes&theme="), just missing the
+ * trailing theme_id — shared by both menus since they're structurally
+ * identical, just built from a different tree.
  *
  * @param array<int, array{theme_id:int, name:string, recursive_count:int}> $themeNodes
  * @return array<int, array{label:string, href:string, children?:array}>
  */
-function buildOwnedThemeNavItems(array $tree, array $themeNodes): array
+function buildOwnedThemeNavItems(array $tree, array $themeNodes, string $baseHref): array
 {
     $items = [];
     foreach ($themeNodes as $theme) {
         $item = [
             'label' => $theme['name'],
-            'href' => '?page=my_sets_themes&theme=' . $theme['theme_id'],
+            'href' => $baseHref . $theme['theme_id'],
         ];
         $subThemes = getSetThemeChildren($tree, $theme['theme_id']);
         if (!empty($subThemes)) {
-            $item['children'] = buildOwnedThemeNavItems($tree, $subThemes);
+            $item['children'] = buildOwnedThemeNavItems($tree, $subThemes, $baseHref);
         }
         $items[] = $item;
     }
@@ -451,7 +458,6 @@ $stubPages = [
     'my_bricks_all' => 'nav_my_bricks_all',
     'my_bricks_by_location' => 'nav_my_bricks_by_location',
     'my_bricks_by_type' => 'nav_my_bricks_by_type',
-    'my_collection' => 'nav_my_collection',
 ];
 $requestedPage = (string) ($_GET['page'] ?? '');
 if ($requestedPage !== '' && isset($stubPages[$requestedPage])) {

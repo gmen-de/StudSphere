@@ -2915,3 +2915,95 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_sets_themes') {
     renderApp(t('nav_my_sets_themes'), $content, $user, computeAppStats($pdo), $myThemesBreadcrumbs);
     exit;
 }
+
+if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs') {
+    header('Location: ?page=my_minifigs_all');
+    exit;
+}
+
+if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_all') {
+    $looseMinifigs = getAllLooseMinifigs($pdo);
+
+    $content = '<h1>' . htmlspecialchars(t('nav_my_minifigs_all')) . '</h1>';
+    if (empty($looseMinifigs)) {
+        $content .= '<section class="card"><p>' . htmlspecialchars(t('my_minifigs_empty')) . '</p></section>';
+    } else {
+        // Same reasoning as minifigs_search/the minifig modal itself — the
+        // click-to-open detail modal is delegated globally via a
+        // document-level listener, so it just needs its markup present
+        // somewhere on the page.
+        $content .= renderPartDetailModal();
+        $content .= renderMinifigDetailModal();
+        $content .= '<div class="minifigs-grid">';
+        foreach ($looseMinifigs as $instance) {
+            $content .= renderOwnedMinifigCard($instance);
+        }
+        $content .= '</div>';
+    }
+
+    renderApp(t('nav_my_minifigs_all'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('nav_my_minifigs_all'), 'url' => null]]);
+    exit;
+}
+
+if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_themes') {
+    $themeParam = isset($_GET['theme']) && $_GET['theme'] !== '' ? (int) $_GET['theme'] : null;
+
+    $content = '<h1>' . htmlspecialchars(t('nav_my_minifigs_themes')) . '</h1>';
+    $myMinifigThemesBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_my_minifigs_themes'), 'url' => $themeParam !== null ? '?page=my_minifigs_themes' : null]];
+
+    $tree = getOwnedMinifigThemeTree($pdo);
+
+    if ($themeParam !== null) {
+        $ancestors = getThemeAncestors($tree, $themeParam);
+        foreach ($ancestors as $i => $ancestor) {
+            $isLast = $i === count($ancestors) - 1;
+            $myMinifigThemesBreadcrumbs[] = [
+                'label' => $ancestor['name'],
+                'url' => $isLast ? null : '?page=my_minifigs_themes&theme=' . $ancestor['theme_id'],
+            ];
+        }
+    }
+
+    $children = getSetThemeChildren($tree, $themeParam);
+    if (!empty($children)) {
+        $tileImageGroups = [];
+        foreach ($children as $child) {
+            $tileImageGroups[$child['theme_id']] = getThemeAndDescendantIds($tree, $child['theme_id']);
+        }
+        $tileImages = getOwnedMinifigThemeTileImages($pdo, $tileImageGroups);
+        $content .= '<div class="category-tile-grid sets-theme-grid">';
+        foreach ($children as $child) {
+            $img = $tileImages[(string) $child['theme_id']] ?? null;
+            $content .= '<a class="category-tile sets-theme-tile" href="?page=my_minifigs_themes&theme=' . $child['theme_id'] . '">';
+            $content .= '<span class="category-tile-image sets-theme-tile-image">' . ($img !== null ? '<img src="' . htmlspecialchars($img) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
+            $content .= '<span class="category-tile-label sets-theme-tile-label">' . htmlspecialchars($child['name']) . ' (' . $child['recursive_count'] . ')</span>';
+            $content .= '</a>';
+        }
+        $content .= '</div>';
+    } elseif ($themeParam === null) {
+        $content .= '<section class="card"><p>' . htmlspecialchars(t('my_minifigs_empty')) . '</p></section>';
+    }
+
+    if ($themeParam !== null) {
+        // Exact theme_id match only, same as getOwnedSetsForThemes()'s own
+        // call in my_sets_themes above — a set (and by extension the
+        // minifigs derived through it) is tagged with one specific theme_id,
+        // not every ancestor simultaneously, so drilling into an empty
+        // parent still correctly shows nothing here while its subtheme
+        // tiles (which DO use the recursive id group, for the tile grid
+        // above) lead somewhere that does.
+        $looseMinifigs = getLooseMinifigsForThemes($pdo, [$themeParam]);
+        if (!empty($looseMinifigs)) {
+            $content .= renderPartDetailModal();
+            $content .= renderMinifigDetailModal();
+            $content .= '<div class="minifigs-grid">';
+            foreach ($looseMinifigs as $instance) {
+                $content .= renderOwnedMinifigCard($instance);
+            }
+            $content .= '</div>';
+        }
+    }
+
+    renderApp(t('nav_my_minifigs_themes'), $content, $user, computeAppStats($pdo), $myMinifigThemesBreadcrumbs);
+    exit;
+}
