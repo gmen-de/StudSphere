@@ -294,7 +294,22 @@ function buildOwnedSetPdfReport(PDO $pdo, array $ownedSet): string
         'margin_right' => 15,
     ]);
     $mpdf->SetTitle($ownedSet['rebrickable_set_num'] . ' - ' . $ownedSet['name']);
-    $mpdf->SetFooter(htmlspecialchars(t('owned_set_pdf_footer')) . ' {DATE j.m.Y} · {PAGENO}/{nbpg}');
+    // SetHTMLFooter(), not the simpler SetFooter() — that one only supports
+    // plain text-ish content, no <img>. The logo is a separate flat-fill SVG
+    // (src/pdf_report_logo.svg), not /logo.svg itself — see that file's own
+    // comment for why: mPDF's SVG renderer silently drops radialGradient
+    // fills, which made the site logo's main sphere vanish entirely. Fixed
+    // width/height (not pdfReportImageTag()'s max-width/max-height, which
+    // wouldn't scale a naturally-smaller render up to size) — 18px is the
+    // smallest size the sphere+orbit+satellites still read as the logo
+    // rather than a plain dot, verified by rendering this exact footer.
+    $footerLogoPath = resolvePdfReportImagePath('src/pdf_report_logo.svg');
+    $footerLogo = $footerLogoPath !== null ? '<img src="' . htmlspecialchars($footerLogoPath) . '" style="width:18px;height:18px;">' : '';
+    $footerHtml = '<table width="100%" style="font-size:8pt;color:#64748b;"><tr>';
+    $footerHtml .= '<td width="20" style="vertical-align:middle;">' . $footerLogo . '</td>';
+    $footerHtml .= '<td style="vertical-align:middle;">' . htmlspecialchars(t('owned_set_pdf_footer')) . ' {DATE j.m.Y} · {PAGENO}/{nbpg}</td>';
+    $footerHtml .= '</tr></table>';
+    $mpdf->SetHTMLFooter($footerHtml);
     $mpdf->WriteHTML($html);
 
     return $mpdf->Output('', \Mpdf\Output\Destination::STRING_RETURN);
