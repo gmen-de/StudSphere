@@ -89,6 +89,13 @@ function renderPartDetailModal(): string
 
   function openPartModal(partId) {
     content.innerHTML = '';
+    // Moved to the end of <body> on every open: .modal-overlay elements all
+    // share the same z-index, so among overlapping fixed-position siblings
+    // stacking falls back to DOM order — reparenting here guarantees
+    // whichever modal was opened most recently (e.g. this one, opened from
+    // inside an already-open minifig modal) renders on top, regardless of
+    // where its markup originally sat on the page.
+    document.body.appendChild(modal);
     modal.style.display = 'flex';
 
     fetch('?action=part_detail&part_id=' + encodeURIComponent(partId), { credentials: 'same-origin' })

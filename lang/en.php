@@ -533,6 +533,7 @@ return [
     'part_appears_in_no_sets' => 'Doesn\'t appear in any known set',
     'bricklink_link' => 'BrickLink',
     'brickowl_link' => 'BrickOwl',
+    'rebrickable_link' => 'Rebrickable',
     'add_to_inventory_title' => 'Add to Inventory',
     'add_stock_known_colors_title' => 'Known Colors',
     'add_stock_no_children' => 'No sub-locations yet.',

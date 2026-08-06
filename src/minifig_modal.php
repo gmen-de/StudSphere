@@ -25,6 +25,8 @@ function renderMinifigDetailModal(): string
     $modalLabelsJson = json_encode([
         'notFound' => t('minifig_not_found'),
         'errorRetry' => t('import_error_retry'),
+        'bricklinkLink' => t('bricklink_link'),
+        'rebrickableLink' => t('rebrickable_link'),
         'minifigIcon' => getNavIcon('minifigs'),
         'brickIcon' => getNavIcon('bricks'),
         'setsIcon' => getNavIcon('sets'),
@@ -67,6 +69,10 @@ function renderMinifigDetailModal(): string
 
   function openMinifigModal(minifigId) {
     content.innerHTML = '';
+    // See the matching comment in part_modal.php's openPartModal(): keeps
+    // this modal on top of any other already-open .modal-overlay whenever
+    // it's (re)opened, regardless of markup order on the page.
+    document.body.appendChild(modal);
     modal.style.display = 'flex';
 
     fetch('?action=minifig_detail&minifig_id=' + encodeURIComponent(minifigId), { credentials: 'same-origin' })
@@ -106,6 +112,23 @@ function renderMinifigDetailModal(): string
     meta.textContent = fig.fig_num;
     info.appendChild(title);
     info.appendChild(meta);
+
+    var links = document.createElement('p');
+    links.className = 'part-modal-links';
+    var blLink = document.createElement('a');
+    blLink.href = fig.bricklink_url;
+    blLink.target = '_blank';
+    blLink.rel = 'noopener';
+    blLink.textContent = texts.bricklinkLink;
+    var rbLink = document.createElement('a');
+    rbLink.href = fig.rebrickable_url;
+    rbLink.target = '_blank';
+    rbLink.rel = 'noopener';
+    rbLink.textContent = texts.rebrickableLink;
+    links.appendChild(blLink);
+    links.appendChild(document.createTextNode(' · '));
+    links.appendChild(rbLink);
+    info.appendChild(links);
 
     var sets = document.createElement('p');
     sets.className = 'part-modal-sets';
