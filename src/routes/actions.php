@@ -645,14 +645,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'minifig_detail') {
     $minifigInventoryId = getMinifigInventoryId($pdo, $minifig['fig_num']);
     $parts = $minifigInventoryId !== null ? getSetPartsList($pdo, $minifigInventoryId, false, getLocale()) : [];
     $minifig = array_merge($minifig, getMinifigSetStats($pdo, $minifigId));
-    // Same best-effort search-link approach as action=part_detail — a
-    // direct BrickLink catalog link needs a resolved bricklink_id
-    // (getOrFetchBricklinkMinifigId(), src/owned_sets.php), which requires
-    // an external lookup and can fail, so it's reserved for the Wanted-List
-    // export flow that already has a manual-entry fallback UI for that.
+    // Reuses the same bricklink_id resolution as the Wanted-List XML export
+    // (getOrFetchBricklinkMinifigId(), src/owned_sets.php) — a plain
+    // BrickLink search by Rebrickable fig_num (like action=part_detail does
+    // for parts) doesn't reliably find minifigs, since BrickLink's own
+    // minifig numbering scheme doesn't match Rebrickable's. Falls back to
+    // the search page only if the id genuinely couldn't be resolved.
     // Rebrickable's own fig_num doubles as its catalog URL directly, no
     // lookup needed.
-    $minifig['bricklink_url'] = 'https://www.bricklink.com/v2/search.page?q=' . urlencode($minifig['fig_num']);
+    $bricklinkMinifigId = getOrFetchBricklinkMinifigId($pdo, $minifigId, $minifig['fig_num']);
+    $minifig['bricklink_url'] = $bricklinkMinifigId !== null
+        ? 'https://www.bricklink.com/v2/catalog/catalogitem.page?M=' . urlencode($bricklinkMinifigId)
+        : 'https://www.bricklink.com/v2/search.page?q=' . urlencode($minifig['fig_num']);
     $minifig['rebrickable_url'] = 'https://rebrickable.com/minifigs/' . urlencode($minifig['fig_num']) . '/';
     echo json_encode(['minifig' => $minifig, 'parts' => $parts], JSON_UNESCAPED_UNICODE);
     exit;
