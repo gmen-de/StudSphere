@@ -490,6 +490,28 @@ function getSchemaMigrations(): array
             // additive enrichment, never required.
             addColumnIfMissing($pdo, 'set_instructions', 'thumbnail_path', 'VARCHAR(512) DEFAULT NULL');
         },
+        32 => function (PDO $pdo): void {
+            // A loose (not-in-a-set) minifig's own constituent parts — same
+            // reasoning as migration 18's owned_set_minifig_parts, just keyed
+            // by a specific minifig_storage_items row instead of an owned_set
+            // instance, since the same minifig can be stored more than once
+            // (different locations/conditions) and each copy's completeness
+            // is independent.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS minifig_storage_item_parts (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    minifig_storage_item_id INT NOT NULL,
+                    part_id INT NOT NULL,
+                    color_id INT DEFAULT NULL,
+                    quantity INT NOT NULL DEFAULT 0,
+                    damaged_quantity INT NOT NULL DEFAULT 0,
+                    UNIQUE KEY minifig_storage_item_part_unique (minifig_storage_item_id, part_id, color_id),
+                    CONSTRAINT fk_minifigstorageitempart_item FOREIGN KEY (minifig_storage_item_id) REFERENCES minifig_storage_items(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_minifigstorageitempart_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_minifigstorageitempart_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -552,7 +574,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 31;
+const CURRENT_SCHEMA_VERSION = 32;
 
 function getInstalledSchemaVersion(): int
 {

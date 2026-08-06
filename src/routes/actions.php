@@ -658,7 +658,69 @@ if (isset($_GET['action']) && $_GET['action'] === 'minifig_detail') {
         ? 'https://www.bricklink.com/v2/catalog/catalogitem.page?M=' . urlencode($bricklinkMinifigId)
         : 'https://www.bricklink.com/v2/search.page?q=' . urlencode($minifig['fig_num']);
     $minifig['rebrickable_url'] = 'https://rebrickable.com/minifigs/' . urlencode($minifig['fig_num']) . '/';
-    echo json_encode(['minifig' => $minifig, 'parts' => $parts], JSON_UNESCAPED_UNICODE);
+
+    // One entry per minifig_storage_items batch of this minifig the user
+    // actually owns (getMinifigStorageItemsForMinifig(), src/minifigs.php) —
+    // each batch's own per-part defekt/fehlt status
+    // (getMinifigStorageItemPartsWithStatus()), keyed "part_id:color_id" so
+    // the modal can overlay it onto the plain nominal $parts list above
+    // without a second round-trip when the user switches which batch is
+    // selected (only relevant if the minifig is stored in more than one
+    // place/condition at once).
+    $storageInstances = [];
+    foreach (getMinifigStorageItemsForMinifig($pdo, $minifigId) as $instance) {
+        $partsStatus = [];
+        foreach (getMinifigStorageItemPartsWithStatus($pdo, $instance['id'], $minifig['fig_num'], $instance['quantity'], getLocale()) as $part) {
+            $partsStatus[$part['part_id'] . ':' . $part['color_id']] = [
+                'nominal' => $part['nominal_quantity'],
+                'actual' => $part['actual_quantity'],
+                'damaged' => $part['damaged_quantity'],
+            ];
+        }
+        $storageInstances[] = [
+            'id' => $instance['id'],
+            'locationName' => $instance['location_name'],
+            'conditionType' => $instance['condition_type'],
+            'quantity' => $instance['quantity'],
+            'partsStatus' => $partsStatus,
+        ];
+    }
+
+    echo json_encode(['minifig' => $minifig, 'parts' => $parts, 'storageInstances' => $storageInstances], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// The minifig-detail modal's per-part defekt/fehlt editor (src/minifig_modal.php)
+// — single-key save, mirrors save_owned_set_inventory's "just iterate
+// whatever keys are posted" shape via applyMinifigStorageItemPartInventory(),
+// just always exactly one key here since the modal edits one part tile at a
+// time, not a combined form.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_minifig_storage_item_part') {
+    header('Content-Type: application/json');
+    try {
+        $minifigStorageItemId = (int) ($_POST['minifig_storage_item_id'] ?? 0);
+        $partId = (int) ($_POST['part_id'] ?? 0);
+        $colorId = (int) ($_POST['color_id'] ?? 0);
+        $ownedQuantity = (int) ($_POST['quantity'] ?? 0);
+        $damagedQuantity = (int) ($_POST['damaged_quantity'] ?? 0);
+
+        $storageItem = getMinifigStorageItemById($pdo, $minifigStorageItemId);
+        if ($storageItem === null || $partId <= 0 || $colorId <= 0) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+        $minifigForSave = getMinifigById($pdo, $storageItem['minifig_id']);
+        if ($minifigForSave === null) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        $key = $partId . ':' . $colorId;
+        applyMinifigStorageItemPartInventory($pdo, $minifigStorageItemId, $minifigForSave['fig_num'], $storageItem['quantity'], [$key => $ownedQuantity], [$key => $damagedQuantity]);
+        $stats = refreshAppStatsCache($pdo);
+        echo json_encode(['success' => true, 'stats' => $stats], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
     exit;
 }
 

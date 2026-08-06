@@ -3419,6 +3419,53 @@ footer {
   border-color: #dc2626;
 }
 
+/* Minifig-modal component tiles (src/minifig_modal.php) — a loose minifig's
+   own per-part defekt/fehlt status, same tile family as
+   .owned-set-inventory-tile-* above but layered onto .part-card (needed so
+   the "+" button below still triggers renderPartDetailModal()'s document-
+   level .part-card click delegation). position: relative here is only for
+   that "+" button's absolute corner placement. */
+.minifig-component-tile {
+  position: relative;
+}
+
+.minifig-component-tile-add {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 999px;
+  border: none;
+  background: #f1f5f9;
+  color: #475569;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.minifig-component-tile-add svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  display: block;
+}
+
+.minifig-component-tile-add:hover {
+  background: #e2e8f0;
+}
+
+.minifig-modal-instance-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+
 .owned-set-qty-modal-header {
   display: flex;
   align-items: center;

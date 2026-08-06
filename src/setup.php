@@ -200,6 +200,19 @@ function installDatabase(): void
             CONSTRAINT fk_minifigstorageitem_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
             UNIQUE KEY minifig_storage_item_unique (location_id, minifig_id, condition_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS minifig_storage_item_parts (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            minifig_storage_item_id INT NOT NULL,
+            part_id INT NOT NULL,
+            color_id INT DEFAULT NULL,
+            quantity INT NOT NULL DEFAULT 0,
+            damaged_quantity INT NOT NULL DEFAULT 0,
+            UNIQUE KEY minifig_storage_item_part_unique (minifig_storage_item_id, part_id, color_id),
+            CONSTRAINT fk_minifigstorageitempart_item FOREIGN KEY (minifig_storage_item_id) REFERENCES minifig_storage_items(id) ON DELETE CASCADE,
+            CONSTRAINT fk_minifigstorageitempart_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
+            CONSTRAINT fk_minifigstorageitempart_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
         'CREATE TABLE IF NOT EXISTS storage_movements (
             id INT AUTO_INCREMENT PRIMARY KEY,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
