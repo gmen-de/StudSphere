@@ -1251,6 +1251,35 @@ if (isset($_GET['action']) && $_GET['action'] === 'owned_set_bricklink_xml_check
     exit;
 }
 
+// A plain GET link (the action bar's PDF pill, src/routes/pages.php), not a
+// fetch()+JSON endpoint like the two above — the browser's native download
+// handling for a Content-Disposition: attachment response is all that's
+// needed here, no client-side JS. buildOwnedSetPdfReport() (src/pdf_report.php)
+// does all the work; errors are reported as JSON instead of a broken PDF
+// since no PDF bytes have been sent yet at that point.
+if (isset($_GET['action']) && $_GET['action'] === 'owned_set_pdf_report') {
+    $pdfReportOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));
+    if ($pdfReportOwnedSet === null) {
+        http_response_code(404);
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    try {
+        $pdfReportBytes = buildOwnedSetPdfReport($pdo, $pdfReportOwnedSet);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $pdfReportOwnedSet['rebrickable_set_num'] . '_Bericht.pdf"');
+    header('Content-Length: ' . strlen($pdfReportBytes));
+    echo $pdfReportBytes;
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_minifig_bricklink_id') {
     header('Content-Type: application/json');
     try {

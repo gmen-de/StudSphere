@@ -2382,6 +2382,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
 
     $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-bricklink-open" title="' . htmlspecialchars(t('owned_set_bricklink_xml_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_bricklink_xml_label')) . '">' . getActionIcon('bricklink_xml') . '</button>';
     $content .= renderOwnedSetBricklinkModal($ownedSet);
+    // Plain GET link — the browser's own download handling for the
+    // Content-Disposition response is all that's needed (see
+    // action=owned_set_pdf_report, src/routes/actions.php), no modal/JS.
+    $content .= '<a class="owned-set-action-pill" href="?action=owned_set_pdf_report&owned_set_id=' . $ownedSet['id'] . '" title="' . htmlspecialchars(t('owned_set_pdf_report_button')) . '" aria-label="' . htmlspecialchars(t('owned_set_pdf_report_button')) . '">' . getActionIcon('pdf') . '</a>';
     // Placeholder: matches missing/damaged parts against loose stock elsewhere
     // and lets the user queue them onto a pick list, eventually worked through
     // via a future mobile PWA that adjusts stock as items get picked — none of

@@ -3196,11 +3196,18 @@ function buildOwnedSetBricklinkXml(PDO $pdo, array $ownedSet): array
  * migration 22), not globally. Regular inventory and minifigs always show;
  * only these two are ever gated.
  */
-function renderOwnedSetDamagedMissingSection(PDO $pdo, array $ownedSet): string
+/**
+ * The row-collection logic behind renderOwnedSetDamagedMissingSection()
+ * (below), extracted so buildOwnedSetPdfReport() (src/pdf_report.php) can
+ * reuse the exact same "what's wrong with this instance" data — including
+ * the minifig-part drill-down — without duplicating it. The PDF report
+ * always passes $showSpares/$showStickers as true (an exhaustive report,
+ * unlike the web tab's user-toggled filters).
+ *
+ * @return array<int, array{category:string, thumbnail:?string, name:string, damaged:int, missing:int}>
+ */
+function getOwnedSetDamagedMissingRows(PDO $pdo, array $ownedSet, bool $showSpares, bool $showStickers): array
 {
-    $showSpares = $ownedSet['damaged_missing_show_spares'];
-    $showStickers = $ownedSet['damaged_missing_show_stickers'];
-
     $categories = [
         'owned_set_damaged_missing_category_parts' => getOwnedSetPartsWithStatus($pdo, $ownedSet, getLocale()),
     ];
@@ -3271,6 +3278,15 @@ function renderOwnedSetDamagedMissingSection(PDO $pdo, array $ownedSet): string
             }
         }
     }
+
+    return $rows;
+}
+
+function renderOwnedSetDamagedMissingSection(PDO $pdo, array $ownedSet): string
+{
+    $showSpares = $ownedSet['damaged_missing_show_spares'];
+    $showStickers = $ownedSet['damaged_missing_show_stickers'];
+    $rows = getOwnedSetDamagedMissingRows($pdo, $ownedSet, $showSpares, $showStickers);
 
     $html = '<div class="owned-set-damaged-missing-filters">';
     $html .= '<label class="checkbox-label"><input type="checkbox" id="owned-set-damaged-missing-spares"' . ($showSpares ? ' checked' : '') . '> ' . htmlspecialchars(t('owned_set_damaged_missing_show_spares')) . '</label>';

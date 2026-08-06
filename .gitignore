@@ -3,6 +3,11 @@
 /storage/rebrickable/*
 !/storage/.htaccess
 
+# mPDF's own scratch files during PDF report generation (src/pdf_report.php)
+# — already covered by storage/.htaccess's deny-all, kept out of git the
+# same way /storage/rebrickable/* is.
+/storage/mpdf_tmp/*
+
 # Downloaded set/minifig/part images (potentially tens of thousands of files).
 /public/images/
 
