@@ -8,6 +8,7 @@ require_once __DIR__ . '/owned_sets.php';
 require_once __DIR__ . '/sets.php';
 require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/i18n.php';
+require_once __DIR__ . '/bricklink_prices.php';
 
 /**
  * Resolves a project-relative image path (local_image_path/thumbnail/
