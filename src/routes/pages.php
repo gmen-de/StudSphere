@@ -2218,9 +2218,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     // its auto-generated storage location's name, see addOwnedSet()) — same
     // 1-based "position among this set's owned instances, oldest first"
     // getOwnedSetsForSet() already establishes for the catalog set_detail
-    // page's "#1, #2, ..." links.
+    // page's "#1, #2, ..." links. Reused below for the instance picker
+    // dropdown too, rather than querying the same sibling list twice.
+    $ownedSetSiblings = getOwnedSetsForSet($pdo, $ownedSet['set_id']);
     $ownedSetInstanceNumber = 1;
-    foreach (getOwnedSetsForSet($pdo, $ownedSet['set_id']) as $ownedSetInstanceIndex => $ownedSetInstance) {
+    foreach ($ownedSetSiblings as $ownedSetInstanceIndex => $ownedSetInstance) {
         if ($ownedSetInstance['id'] === $ownedSet['id']) {
             $ownedSetInstanceNumber = $ownedSetInstanceIndex + 1;
             break;
@@ -2268,6 +2270,33 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
         ? '<a href="?page=owned_set_detail&id=' . $adjacentOwnedSets['next']['id'] . '">' . htmlspecialchars($adjacentOwnedSets['next']['rebrickable_set_num']) . ' &rsaquo;</a>'
         : '<span></span>';
     $content .= '</div>';
+
+    // Instance picker — jumps straight to any other owned copy of this same
+    // set (getOwnedSetsForSet(), already fetched above as $ownedSetSiblings
+    // for the "#n" numbering), the set-detail-page counterpart to "Meine
+    // Sets"' grouped card (renderOwnedSetGroupCard()): that card links to
+    // just one representative copy, this is how the rest are reached.
+    // Deliberately separate from the prev/next nav above, which walks the
+    // whole catalog (getAdjacentOwnedSets()) rather than staying within this
+    // one set's own copies.
+    if (count($ownedSetSiblings) > 1) {
+        $content .= '<label class="minifig-modal-instance-picker">';
+        $content .= '<span>' . htmlspecialchars(t('owned_set_instance_picker_label')) . '</span>';
+        $content .= '<select onchange="if (this.value) { window.location.href = this.value; }">';
+        foreach ($ownedSetSiblings as $i => $sibling) {
+            $sibling['rebrickable_set_num'] = $ownedSet['rebrickable_set_num'];
+            $siblingLocationPath = getStorageLocationAncestors($sibling['location_id']);
+            array_pop($siblingLocationPath);
+            $optLocation = implode(' -> ', array_column($siblingLocationPath, 'name'));
+            $optCond = $sibling['condition_type'] === 'new' ? t('owned_set_condition_new') : t('owned_set_condition_used');
+            $optLabel = t('owned_set_instance_label', ['n' => (string) ($i + 1)])
+                . ' - ' . $optLocation . ' - ' . $optCond . ' - ' . t('owned_status_' . getOwnedSetInstanceStatus($pdo, $sibling));
+            $selectedAttr = $sibling['id'] === $ownedSet['id'] ? ' selected' : '';
+            $content .= '<option value="?page=owned_set_detail&id=' . $sibling['id'] . '"' . $selectedAttr . '>' . htmlspecialchars($optLabel) . '</option>';
+        }
+        $content .= '</select>';
+        $content .= '</label>';
+    }
 
     // Same general info table as the catalog set-detail page (Name/
     // Erschienen/Rücknahmejahr/Thema) — this is catalog-level set metadata,
@@ -2843,16 +2872,15 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_sets') {
 }
 
 if (isset($_GET['page']) && $_GET['page'] === 'my_sets_all') {
-    $ownedSets = getAllOwnedSets($pdo);
+    $ownedSetGroups = groupOwnedSetsByModel($pdo, getAllOwnedSets($pdo));
 
     $content = '<h1>' . htmlspecialchars(t('nav_my_sets_all')) . '</h1>';
-    if (empty($ownedSets)) {
+    if (empty($ownedSetGroups)) {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('my_sets_empty')) . '</p></section>';
     } else {
         $content .= '<div class="sets-grid">';
-        foreach ($ownedSets as $owned) {
-            $completeness = getOwnedSetCompleteness($pdo, $owned);
-            $content .= renderOwnedSetCard($owned, $completeness['percent']);
+        foreach ($ownedSetGroups as $group) {
+            $content .= renderOwnedSetGroupCard($group);
         }
         $content .= '</div>';
     }
@@ -2901,12 +2929,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_sets_themes') {
     }
 
     if ($themeParam !== null) {
-        $owned = getOwnedSetsForThemes($pdo, [$themeParam]);
-        if (!empty($owned)) {
+        $ownedSetGroups = groupOwnedSetsByModel($pdo, getOwnedSetsForThemes($pdo, [$themeParam]));
+        if (!empty($ownedSetGroups)) {
             $content .= '<div class="sets-grid">';
-            foreach ($owned as $inst) {
-                $completeness = getOwnedSetCompleteness($pdo, $inst);
-                $content .= renderOwnedSetCard($inst, $completeness['percent']);
+            foreach ($ownedSetGroups as $group) {
+                $content .= renderOwnedSetGroupCard($group);
             }
             $content .= '</div>';
         }
@@ -3098,7 +3125,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_minifig_detail') {
             $optLocation = implode(' -> ', array_column(getStorageLocationAncestors($inst['location_id']), 'name'));
             $optCond = $inst['condition_type'] === 'new' ? t('condition_new') : t('condition_used');
             $optLabel = t('owned_set_instance_label', ['n' => (string) ($i + 1)])
-                . ' - ' . $optLocation . ' - ' . $optCond . ' - ' . t('minifig_status_' . $inst['status']);
+                . ' - ' . $optLocation . ' - ' . $optCond . ' - ' . t('owned_status_' . $inst['status']);
             $selectedAttr = $inst['id'] === $ownedMinifigInstance['id'] ? ' selected' : '';
             $content .= '<option value="?page=owned_minifig_detail&id=' . $inst['id'] . '"' . $selectedAttr . '>' . htmlspecialchars($optLabel) . '</option>';
         }

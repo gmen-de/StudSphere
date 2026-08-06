@@ -32,13 +32,31 @@ function renderMinifigCard(array $fig, ?string $meta = null): string
 }
 
 /**
+ * Shared corner-badge markup for a grouped-by-model card — three ampel dots
+ * (green/yellow/red) with each bucket's own instance count. Used by both
+ * renderOwnedMinifigGroupCard() (below) and renderOwnedSetGroupCard()
+ * (src/owned_sets.php, which already requires this file) — see
+ * getOwnedMinifigInstanceStatus()/getOwnedSetInstanceStatus() for how an
+ * individual instance is bucketed into one of the three counts.
+ */
+function renderOwnedStatusBadges(int $completeCount, int $damagedCount, int $missingCount): string
+{
+    $html = '<span class="owned-status-badges">';
+    $html .= '<span class="owned-status-dot owned-status-dot-complete" title="' . htmlspecialchars(t('owned_status_complete')) . '">' . $completeCount . '</span>';
+    $html .= '<span class="owned-status-dot owned-status-dot-damaged" title="' . htmlspecialchars(t('owned_status_damaged')) . '">' . $damagedCount . '</span>';
+    $html .= '<span class="owned-status-dot owned-status-dot-missing" title="' . htmlspecialchars(t('owned_status_missing')) . '">' . $missingCount . '</span>';
+    $html .= '</span>';
+    return $html;
+}
+
+/**
  * One card per distinct minifig model for "Meine Minifiguren" (my_minifigs*)
- * — mirrors renderOwnedSetCard() (src/owned_sets.php) in that it's a real
- * link straight to a detail page (?page=owned_minifig_detail), not the
- * generic click-delegated modal every other minifig card on the site opens,
- * but unlike an owned-set card it represents every owned copy of this model
- * at once (groupLooseMinifigsByModel()) rather than one physical instance —
- * the location/condition meta line an ungrouped card would show doesn't
+ * — mirrors renderOwnedSetGroupCard() (src/owned_sets.php): a real link
+ * straight to a detail page (?page=owned_minifig_detail), not the generic
+ * click-delegated modal every other minifig card on the site opens,
+ * representing every owned copy of this model at once
+ * (groupLooseMinifigsByModel()) rather than one physical instance — the
+ * location/condition meta line an ungrouped card would show doesn't
  * generalize across copies, so the corner badges (each copy's own
  * complete/damaged/missing status, getOwnedMinifigInstanceStatus()) take its
  * place instead. The link lands on the group's representative (oldest)
@@ -49,12 +67,8 @@ function renderOwnedMinifigGroupCard(array $group): string
 {
     $name = (string) ($group['name'] ?? $group['fig_num']);
 
-    $html = '<a class="minifig-card minifig-group-card" href="?page=owned_minifig_detail&id=' . (int) $group['representative_id'] . '">';
-    $html .= '<span class="minifig-status-badges">';
-    $html .= '<span class="minifig-status-dot minifig-status-dot-complete" title="' . htmlspecialchars(t('minifig_status_complete')) . '">' . (int) $group['complete_count'] . '</span>';
-    $html .= '<span class="minifig-status-dot minifig-status-dot-damaged" title="' . htmlspecialchars(t('minifig_status_damaged')) . '">' . (int) $group['damaged_count'] . '</span>';
-    $html .= '<span class="minifig-status-dot minifig-status-dot-missing" title="' . htmlspecialchars(t('minifig_status_missing')) . '">' . (int) $group['missing_count'] . '</span>';
-    $html .= '</span>';
+    $html = '<a class="minifig-card owned-group-card" href="?page=owned_minifig_detail&id=' . (int) $group['representative_id'] . '">';
+    $html .= renderOwnedStatusBadges($group['complete_count'], $group['damaged_count'], $group['missing_count']);
     $html .= '<span class="minifig-card-image">' . ($group['thumbnail'] !== null ? '<img src="' . htmlspecialchars($group['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
     $html .= '<span class="minifig-card-num">' . htmlspecialchars($group['fig_num']) . '</span>';
     $html .= '<span class="minifig-card-name" title="' . htmlspecialchars($name) . '">' . htmlspecialchars($name) . '</span>';

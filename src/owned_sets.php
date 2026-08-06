@@ -1846,31 +1846,112 @@ function getOwnedSetsForThemes(PDO $pdo, array $themeIds): array
 }
 
 /**
- * Card for one owned instance (links to its own detail page, not the
- * catalog set) — visually matches renderSetCard() (same CSS classes) with
- * an optional completeness-percent meta line underneath the name.
+ * Classifies one owned set instance's overall condition — same missing >
+ * damaged > complete priority as ownedSetInventoryTileStatusClass(), rolled
+ * up across the whole instance (its own regular parts, via
+ * getOwnedSetCompleteness()'s own nominal/actual for "missing", plus every
+ * minifig's own damaged_quantity rollup for "damaged"). Spares and stickers
+ * are excluded from both checks, same as getOwnedSetCompleteness() already
+ * excludes them from its own ratio — an unapplied sticker sheet or a broken
+ * spare part doesn't make the SET itself incomplete/defective. A
+ * still-sealed ("new") instance trivially reads as complete: its
+ * storage_items were seeded to full nominal quantity with no damage when it
+ * was added (see openOwnedSet()'s doc comment), so no special-casing for
+ * that state is needed here either. Powers the "Meine Sets" grouped-by-model
+ * ampel counts and the detail page's instance picker.
+ *
+ * @return 'complete'|'damaged'|'missing'
  */
-function renderOwnedSetCard(array $ownedSet, ?float $completenessPercent = null): string
+function getOwnedSetInstanceStatus(PDO $pdo, array $ownedSet): string
 {
-    $html = '<a class="set-card" href="?page=owned_set_detail&id=' . (int) $ownedSet['id'] . '">';
-    $html .= '<span class="set-card-image">' . ($ownedSet['thumbnail'] !== null ? '<img src="' . htmlspecialchars($ownedSet['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
-    $html .= '<span class="set-card-num">' . htmlspecialchars($ownedSet['rebrickable_set_num']) . '</span>';
-    $html .= '<span class="set-card-name" title="' . htmlspecialchars($ownedSet['name']) . '">' . htmlspecialchars($ownedSet['name']) . '</span>';
-    if (isset($ownedSet['location_id'])) {
-        // Ancestors only, not the set's own auto-generated leaf location
-        // itself (location_type 'owned_set') — same exclusion the
-        // owned_set_detail page's own "Lagerort" row already uses, since
-        // showing the set's own name again here would be redundant.
-        $locationAncestors = getStorageLocationAncestors((int) $ownedSet['location_id']);
-        array_pop($locationAncestors);
-        if (!empty($locationAncestors)) {
-            $locationLabel = implode(' -> ', array_column($locationAncestors, 'name'));
-            $html .= '<span class="set-card-meta set-card-location">' . htmlspecialchars($locationLabel) . '</span>';
+    $completeness = getOwnedSetCompleteness($pdo, $ownedSet);
+    if ($completeness['nominal'] - $completeness['actual'] > 0) {
+        return 'missing';
+    }
+
+    $inventoryId = resolveOwnedSetInventoryId($pdo, $ownedSet);
+    $stickerPartIds = $inventoryId !== null ? array_keys(getStickerPartIds($pdo, $inventoryId)) : [];
+    $params = [$ownedSet['location_id']];
+    $stickerExclusion = '';
+    if (!empty($stickerPartIds)) {
+        $stickerExclusion = ' AND part_id NOT IN (' . implode(',', array_fill(0, count($stickerPartIds), '?')) . ')';
+        $params = array_merge($params, $stickerPartIds);
+    }
+    $damagedStmt = $pdo->prepare('SELECT COALESCE(SUM(damaged_quantity), 0) FROM storage_items WHERE location_id = ?' . $stickerExclusion);
+    $damagedStmt->execute($params);
+    if ((int) $damagedStmt->fetchColumn() > 0) {
+        return 'damaged';
+    }
+
+    foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSet) as $fig) {
+        if ($fig['damaged_quantity'] > 0) {
+            return 'damaged';
         }
     }
-    if ($completenessPercent !== null) {
-        $html .= '<span class="set-card-meta">' . htmlspecialchars(formatNumber($completenessPercent, 1)) . '%</span>';
+
+    return 'complete';
+}
+
+/**
+ * Groups a flat owned-set instance list (getAllOwnedSets()/
+ * getOwnedSetsForThemes()) by catalog set, one entry per distinct set —
+ * "Meine Sets" shows one card per set instead of one per physical copy, with
+ * a complete/damaged/missing instance count (getOwnedSetInstanceStatus())
+ * replacing the per-copy completeness percent that no longer generalizes
+ * once several copies (each with its own progress) are collapsed into one
+ * card. The representative instance is the oldest (lowest id) — both source
+ * queries sort by created_at DESC, so unlike groupLooseMinifigsByModel()
+ * (src/minifigs.php, whose source is id-ascending already) this tracks the
+ * minimum id explicitly. getOwnedSetsForSet() is how the detail page's own
+ * dropdown reaches the other copies afterwards.
+ *
+ * @param array<int, array{id:int, set_id:int, rebrickable_set_num:string, name:string, thumbnail:?string, location_id:int, condition_type:string, created_at:string}> $instances
+ * @return array<int, array{set_id:int, rebrickable_set_num:string, name:string, thumbnail:?string, representative_id:int, complete_count:int, damaged_count:int, missing_count:int}>
+ */
+function groupOwnedSetsByModel(PDO $pdo, array $instances): array
+{
+    $groups = [];
+    foreach ($instances as $instance) {
+        $setId = $instance['set_id'];
+        if (!isset($groups[$setId])) {
+            $groups[$setId] = [
+                'set_id' => $setId,
+                'rebrickable_set_num' => $instance['rebrickable_set_num'],
+                'name' => $instance['name'],
+                'thumbnail' => $instance['thumbnail'],
+                'representative_id' => $instance['id'],
+                'complete_count' => 0,
+                'damaged_count' => 0,
+                'missing_count' => 0,
+            ];
+        } elseif ($instance['id'] < $groups[$setId]['representative_id']) {
+            $groups[$setId]['representative_id'] = $instance['id'];
+        }
+        $status = getOwnedSetInstanceStatus($pdo, $instance);
+        $groups[$setId][$status . '_count']++;
     }
+    return array_values($groups);
+}
+
+/**
+ * One card per distinct set model for "Meine Sets" (my_sets_all/
+ * my_sets_themes) — mirrors renderOwnedMinifigGroupCard() (src/minifigs.php):
+ * represents every owned copy of this set at once (groupOwnedSetsByModel())
+ * rather than one physical instance, so the per-copy location/completeness
+ * meta line the previous ungrouped card showed doesn't generalize across
+ * copies; the corner badges (each copy's own complete/damaged/missing
+ * status, getOwnedSetInstanceStatus()) take its place instead. The link
+ * lands on the group's representative (oldest) instance; that page's own
+ * dropdown (getOwnedSetsForSet(), already used there for "#n" numbering) is
+ * how the other copies are reached from there.
+ */
+function renderOwnedSetGroupCard(array $group): string
+{
+    $html = '<a class="set-card owned-group-card" href="?page=owned_set_detail&id=' . (int) $group['representative_id'] . '">';
+    $html .= renderOwnedStatusBadges($group['complete_count'], $group['damaged_count'], $group['missing_count']);
+    $html .= '<span class="set-card-image">' . ($group['thumbnail'] !== null ? '<img src="' . htmlspecialchars($group['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
+    $html .= '<span class="set-card-num">' . htmlspecialchars($group['rebrickable_set_num']) . '</span>';
+    $html .= '<span class="set-card-name" title="' . htmlspecialchars($group['name']) . '">' . htmlspecialchars($group['name']) . '</span>';
     $html .= '</a>';
     return $html;
 }
