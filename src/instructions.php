@@ -47,13 +47,18 @@ function generateInstructionFilename(): string
     return bin2hex(random_bytes(16)) . '.pdf';
 }
 
+function generateInstructionThumbnailFilename(): string
+{
+    return bin2hex(random_bytes(16)) . '.png';
+}
+
 /**
- * @return array<int, array{id:int, set_id:int, label:?string, original_filename:string, stored_path:string, file_size:int, uploaded_at:string}>
+ * @return array<int, array{id:int, set_id:int, label:?string, original_filename:string, stored_path:string, thumbnail_path:?string, file_size:int, uploaded_at:string}>
  */
 function getSetInstructions(PDO $pdo, int $setId): array
 {
     $stmt = $pdo->prepare(
-        'SELECT id, set_id, label, original_filename, stored_path, file_size, uploaded_at
+        'SELECT id, set_id, label, original_filename, stored_path, thumbnail_path, file_size, uploaded_at
          FROM set_instructions WHERE set_id = ? ORDER BY id ASC'
     );
     $stmt->execute([$setId]);
@@ -70,7 +75,7 @@ function getSetInstructions(PDO $pdo, int $setId): array
 function getSetInstructionById(PDO $pdo, int $id): ?array
 {
     $stmt = $pdo->prepare(
-        'SELECT id, set_id, label, original_filename, stored_path, file_size, uploaded_at
+        'SELECT id, set_id, label, original_filename, stored_path, thumbnail_path, file_size, uploaded_at
          FROM set_instructions WHERE id = ?'
     );
     $stmt->execute([$id]);
@@ -85,15 +90,15 @@ function getSetInstructionById(PDO $pdo, int $id): ?array
 }
 
 /**
- * @return array{id:int, set_id:int, label:?string, original_filename:string, stored_path:string, file_size:int, uploaded_at:string}
+ * @return array{id:int, set_id:int, label:?string, original_filename:string, stored_path:string, thumbnail_path:?string, file_size:int, uploaded_at:string}
  */
-function addSetInstruction(PDO $pdo, int $setId, ?string $label, string $originalFilename, string $storedPath, int $fileSize, ?int $uploadedBy): array
+function addSetInstruction(PDO $pdo, int $setId, ?string $label, string $originalFilename, string $storedPath, ?string $thumbnailPath, int $fileSize, ?int $uploadedBy): array
 {
     $stmt = $pdo->prepare(
-        'INSERT INTO set_instructions (set_id, label, original_filename, stored_path, file_size, uploaded_by)
-         VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO set_instructions (set_id, label, original_filename, stored_path, thumbnail_path, file_size, uploaded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
-    $stmt->execute([$setId, $label, $originalFilename, $storedPath, $fileSize, $uploadedBy]);
+    $stmt->execute([$setId, $label, $originalFilename, $storedPath, $thumbnailPath, $fileSize, $uploadedBy]);
     $id = (int) $pdo->lastInsertId();
 
     $instruction = getSetInstructionById($pdo, $id);
@@ -101,6 +106,110 @@ function addSetInstruction(PDO $pdo, int $setId, ?string $label, string $origina
         throw new RuntimeException('Bauanleitung konnte nach dem Speichern nicht gefunden werden.');
     }
     return $instruction;
+}
+
+/**
+ * Best-effort first-page thumbnail for an uploaded instruction PDF. Tries,
+ * in order: (1) a CLI tool (pdftoppm, then Ghostscript) via exec(), which
+ * on a VPS with root access is the cheapest and most reliable path; (2) the
+ * Imagick extension, which also works on shared hosts that forbid exec()
+ * but expose Imagick — though it commonly fails there too, since
+ * ImageMagick's policy.xml disables the PDF/PS/EPS delegate on shared hosts
+ * by default (post-ImageTragick CVEs) even when the extension itself is
+ * installed; (3) nothing — the caller falls back to the generic PDF icon.
+ * Every step swallows its own failures so a missing tool never surfaces as
+ * an error to the user, it just moves on to the next step.
+ */
+function tryRenderInstructionThumbnail(string $pdfAbsolutePath, string $thumbnailAbsolutePath): bool
+{
+    if (tryRenderInstructionThumbnailViaSystemTool($pdfAbsolutePath, $thumbnailAbsolutePath)) {
+        return true;
+    }
+    return tryRenderInstructionThumbnailViaImagick($pdfAbsolutePath, $thumbnailAbsolutePath);
+}
+
+function instructionThumbnailToolAvailable(string $binary): bool
+{
+    if (!function_exists('exec')) {
+        return false;
+    }
+    exec('command -v ' . escapeshellarg($binary) . ' 2>/dev/null', $output, $exitCode);
+    return $exitCode === 0 && $output !== [];
+}
+
+function tryRenderInstructionThumbnailViaSystemTool(string $pdfAbsolutePath, string $thumbnailAbsolutePath): bool
+{
+    if (!function_exists('exec')) {
+        return false;
+    }
+
+    try {
+        if (instructionThumbnailToolAvailable('pdftoppm')) {
+            $tmpPrefix = sys_get_temp_dir() . '/studsphere_instr_' . bin2hex(random_bytes(8));
+            $cmd = sprintf(
+                'pdftoppm -f 1 -l 1 -png -scale-to-x 400 -scale-to-y -1 %s %s 2>&1',
+                escapeshellarg($pdfAbsolutePath),
+                escapeshellarg($tmpPrefix)
+            );
+            exec($cmd, $output, $exitCode);
+            $matches = glob($tmpPrefix . '*.png') ?: [];
+            if ($exitCode === 0 && $matches !== [] && is_file($matches[0]) && filesize($matches[0]) > 0) {
+                $ok = rename($matches[0], $thumbnailAbsolutePath);
+                foreach ($matches as $leftover) {
+                    if (is_file($leftover)) {
+                        @unlink($leftover);
+                    }
+                }
+                if ($ok) {
+                    return true;
+                }
+            } else {
+                foreach ($matches as $leftover) {
+                    @unlink($leftover);
+                }
+            }
+        }
+
+        if (instructionThumbnailToolAvailable('gs')) {
+            $cmd = sprintf(
+                'gs -q -dNOPAUSE -dBATCH -dSAFER -sDEVICE=png16m -r100 -dFirstPage=1 -dLastPage=1 -sOutputFile=%s %s 2>&1',
+                escapeshellarg($thumbnailAbsolutePath),
+                escapeshellarg($pdfAbsolutePath)
+            );
+            exec($cmd, $output, $exitCode);
+            if ($exitCode === 0 && is_file($thumbnailAbsolutePath) && filesize($thumbnailAbsolutePath) > 0) {
+                return true;
+            }
+            if (is_file($thumbnailAbsolutePath)) {
+                @unlink($thumbnailAbsolutePath);
+            }
+        }
+    } catch (\Throwable $e) {
+        return false;
+    }
+
+    return false;
+}
+
+function tryRenderInstructionThumbnailViaImagick(string $pdfAbsolutePath, string $thumbnailAbsolutePath): bool
+{
+    if (!class_exists('Imagick')) {
+        return false;
+    }
+    try {
+        $imagick = new Imagick();
+        $imagick->setResolution(150, 150);
+        $imagick->readImage($pdfAbsolutePath . '[0]');
+        $imagick->setImageBackgroundColor('white');
+        $imagick = $imagick->mergeImageLayers(Imagick::LAYERMETHOD_FLATTEN);
+        $imagick->setImageFormat('png');
+        $imagick->thumbnailImage(400, 0);
+        $written = $imagick->writeImage($thumbnailAbsolutePath);
+        $imagick->clear();
+        return $written;
+    } catch (\Throwable $e) {
+        return false;
+    }
 }
 
 /**
@@ -125,7 +234,11 @@ function renderInstructionTile(array $instruction): string
 
     $html = '<div class="owned-set-photo instruction-tile" data-id="' . (int) $instruction['id'] . '">';
     $html .= '<a class="owned-set-photo-view instruction-tile-open" href="' . htmlspecialchars($instruction['stored_path']) . '" target="_blank" rel="noopener">';
-    $html .= '<span class="instruction-tile-icon">' . getActionIcon('pdf') . '</span>';
+    if (!empty($instruction['thumbnail_path'])) {
+        $html .= '<img class="instruction-tile-thumbnail" src="' . htmlspecialchars($instruction['thumbnail_path']) . '" alt="">';
+    } else {
+        $html .= '<span class="instruction-tile-icon">' . getActionIcon('pdf') . '</span>';
+    }
     $html .= '</a>';
     $html .= '<span class="owned-set-photo-caption">' . htmlspecialchars($label) . '</span>';
     $html .= '<span class="owned-set-photo-caption instruction-tile-meta">' . htmlspecialchars($meta) . '</span>';
@@ -217,10 +330,18 @@ function renderSetInstructionsTab(int $setId): string
     open.href = instruction.url;
     open.target = '_blank';
     open.rel = 'noopener';
-    var icon = document.createElement('span');
-    icon.className = 'instruction-tile-icon';
-    icon.innerHTML = texts.pdfIcon;
-    open.appendChild(icon);
+    if (instruction.thumbnailUrl) {
+      var thumb = document.createElement('img');
+      thumb.className = 'instruction-tile-thumbnail';
+      thumb.src = instruction.thumbnailUrl;
+      thumb.alt = '';
+      open.appendChild(thumb);
+    } else {
+      var icon = document.createElement('span');
+      icon.className = 'instruction-tile-icon';
+      icon.innerHTML = texts.pdfIcon;
+      open.appendChild(icon);
+    }
     tile.appendChild(open);
 
     var caption = document.createElement('span');

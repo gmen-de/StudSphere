@@ -303,6 +303,7 @@ CREATE TABLE IF NOT EXISTS set_instructions (
     label VARCHAR(255) DEFAULT NULL,
     original_filename VARCHAR(255) NOT NULL,
     stored_path VARCHAR(512) NOT NULL,
+    thumbnail_path VARCHAR(512) DEFAULT NULL,
     file_size INT NOT NULL,
     uploaded_by INT DEFAULT NULL,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

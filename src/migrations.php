@@ -482,6 +482,14 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'sets', 'bricklink_price_currency', 'VARCHAR(10) DEFAULT NULL');
             addColumnIfMissing($pdo, 'sets', 'bricklink_price_checked_at', 'TIMESTAMP NULL DEFAULT NULL');
         },
+        31 => function (PDO $pdo): void {
+            // Best-effort PDF-first-page thumbnail (tryRenderInstructionThumbnail(),
+            // src/instructions.php) — null wherever Imagick/Ghostscript
+            // isn't available or the render failed; the tile falls back to
+            // a generic document icon in that case, so this is purely
+            // additive enrichment, never required.
+            addColumnIfMissing($pdo, 'set_instructions', 'thumbnail_path', 'VARCHAR(512) DEFAULT NULL');
+        },
     ];
 }
 
@@ -544,7 +552,7 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 30;
+const CURRENT_SCHEMA_VERSION = 31;
 
 function getInstalledSchemaVersion(): int
 {

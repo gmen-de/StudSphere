@@ -750,7 +750,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
         $fileSize = filesize($targetPath);
         $relativePath = getInstructionRelativePath($setId, $filename);
 
-        $instruction = addSetInstruction($pdo, $setId, $label, $originalFilename, $relativePath, $fileSize !== false ? $fileSize : (int) $file['size'], (int) $_SESSION['user_id']);
+        $thumbnailRelativePath = null;
+        $thumbnailFilename = generateInstructionThumbnailFilename();
+        $thumbnailTargetPath = getInstructionsStorageDir($setId) . '/' . $thumbnailFilename;
+        if (tryRenderInstructionThumbnail($targetPath, $thumbnailTargetPath)) {
+            $thumbnailRelativePath = getInstructionRelativePath($setId, $thumbnailFilename);
+        }
+
+        $instruction = addSetInstruction($pdo, $setId, $label, $originalFilename, $relativePath, $thumbnailRelativePath, $fileSize !== false ? $fileSize : (int) $file['size'], (int) $_SESSION['user_id']);
 
         echo json_encode([
             'success' => true,
@@ -759,6 +766,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
                 'label' => $instruction['label'],
                 'originalFilename' => $instruction['original_filename'],
                 'url' => $instruction['stored_path'],
+                'thumbnailUrl' => $instruction['thumbnail_path'],
                 'fileSize' => formatFileSize($instruction['file_size']),
                 'uploadedAt' => formatDate($instruction['uploaded_at']),
             ],
@@ -781,6 +789,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         $absolutePath = __DIR__ . '/' . $instruction['stored_path'];
         if (is_file($absolutePath)) {
             @unlink($absolutePath);
+        }
+        if (!empty($instruction['thumbnail_path'])) {
+            $thumbnailAbsolutePath = __DIR__ . '/' . $instruction['thumbnail_path'];
+            if (is_file($thumbnailAbsolutePath)) {
+                @unlink($thumbnailAbsolutePath);
+            }
         }
         echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
