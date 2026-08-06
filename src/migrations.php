@@ -541,9 +541,15 @@ function getSchemaMigrations(): array
             // this same release and holds no real data yet worth preserving.
             $pdo->exec('TRUNCATE TABLE minifig_storage_item_parts');
 
-            dropIndexIfExists($pdo, 'minifig_storage_items', 'minifig_storage_item_unique');
+            // The replacement indexes must exist BEFORE the old unique key is
+            // dropped: its leading column (location_id) is what currently
+            // satisfies InnoDB's "every FK column needs a supporting index"
+            // requirement for fk_minifigstorageitem_location, so dropping it
+            // first fails with "Cannot drop index ... needed in a foreign
+            // key constraint" (confirmed the hard way against the live DB).
             addIndexIfMissing($pdo, 'minifig_storage_items', 'idx_minifigstorageitem_location', 'location_id');
             addIndexIfMissing($pdo, 'minifig_storage_items', 'idx_minifigstorageitem_minifig', 'minifig_id');
+            dropIndexIfExists($pdo, 'minifig_storage_items', 'minifig_storage_item_unique');
             dropColumnIfExists($pdo, 'minifig_storage_items', 'quantity');
             dropColumnIfExists($pdo, 'minifig_storage_items', 'damaged_quantity');
         },
