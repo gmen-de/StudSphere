@@ -299,13 +299,7 @@ function renderMinifigDetailModal(): string
     partQtyModalContent.appendChild(saveBtn);
   }
 
-  // preferredInstanceId (optional): preselects one specific
-  // minifig_storage_items row instead of defaulting to the first — set from
-  // a card's data-instance-id (see renderMinifigCard(), src/minifigs.php),
-  // used by "Meine Minifiguren" where every tile IS one specific physical
-  // instance, same as clicking a set card jumps straight to that set's own
-  // page.
-  function openMinifigModal(minifigId, preferredInstanceId) {
+  function openMinifigModal(minifigId) {
     content.innerHTML = '';
     closePartQtyModal();
     // See the matching comment in part_modal.php's openPartModal(): keeps
@@ -321,14 +315,14 @@ function renderMinifigDetailModal(): string
           content.innerHTML = '<p>' + texts.notFound + '</p>';
           return;
         }
-        renderMinifigModal(data, preferredInstanceId || null);
+        renderMinifigModal(data);
       })
       .catch(function() {
         content.innerHTML = '<p>' + texts.errorRetry + '</p>';
       });
   }
 
-  function renderMinifigModal(data, preferredInstanceId) {
+  function renderMinifigModal(data) {
     var fig = data.minifig;
     content.innerHTML = '';
 
@@ -419,16 +413,6 @@ function renderMinifigDetailModal(): string
         .replace('{missing}', missing);
     }
 
-    // Which storage instance to start on — the one matching
-    // preferredInstanceId if given and still present, otherwise the first.
-    var initialInstanceIndex = 0;
-    if (preferredInstanceId) {
-      storageInstances.forEach(function(inst, idx) {
-        if (inst.id === preferredInstanceId) {
-          initialInstanceIndex = idx;
-        }
-      });
-    }
 
     var updatePriceLine = function() {};
     var instanceInfoSection = null;
@@ -448,7 +432,6 @@ function renderMinifigDetailModal(): string
           opt.textContent = inst.locationName + ' · ' + condLabel + ' · ' + instanceStatusSummary(inst);
           pickerSelect.appendChild(opt);
         });
-        pickerSelect.value = String(initialInstanceIndex);
         pickerSelect.addEventListener('change', function() {
           var inst = storageInstances[parseInt(pickerSelect.value, 10)];
           applyInstanceToTiles(grid, inst);
@@ -507,12 +490,12 @@ function renderMinifigDetailModal(): string
 
       content.appendChild(instanceInfoSection);
 
-      // Selects the initial instance immediately — applyInstanceToTiles()
+      // Selects the first instance immediately — applyInstanceToTiles()
       // (further below, once the parts grid exists) reassigns the same
       // value again when there are known parts, harmlessly redundant; this
       // covers the case where a minifig has storage instances but no known
       // parts breakdown, which applyInstanceToTiles() never runs for at all.
-      currentInstance = storageInstances[initialInstanceIndex];
+      currentInstance = storageInstances[0];
       updatePriceLine();
     }
 
@@ -573,7 +556,7 @@ function renderMinifigDetailModal(): string
       });
       content.appendChild(grid);
 
-      applyInstanceToTiles(grid, storageInstances.length > 0 ? storageInstances[initialInstanceIndex] : null);
+      applyInstanceToTiles(grid, storageInstances.length > 0 ? storageInstances[0] : null);
       updatePriceLine();
       if (storageInstances.length === 0) {
         var hint = document.createElement('p');
@@ -844,10 +827,14 @@ function renderMinifigDetailModal(): string
       });
   }
 
+  // .minifig-card is also used by renderOwnedMinifigCard() (src/minifigs.php)
+  // for a real <a href="?page=owned_minifig_detail&..."> link — that one has
+  // no data-minifig-id at all, so it's excluded here and just navigates
+  // natively instead of opening this generic catalog-wide modal.
   document.addEventListener('click', function(e) {
     var card = e.target.closest('.minifig-card');
-    if (card) {
-      openMinifigModal(card.dataset.minifigId, card.dataset.instanceId ? parseInt(card.dataset.instanceId, 10) : null);
+    if (card && card.dataset.minifigId) {
+      openMinifigModal(card.dataset.minifigId);
     }
   });
   document.addEventListener('keydown', function(e) {
@@ -855,9 +842,9 @@ function renderMinifigDetailModal(): string
       return;
     }
     var card = e.target.closest('.minifig-card');
-    if (card) {
+    if (card && card.dataset.minifigId) {
       e.preventDefault();
-      openMinifigModal(card.dataset.minifigId, card.dataset.instanceId ? parseInt(card.dataset.instanceId, 10) : null);
+      openMinifigModal(card.dataset.minifigId);
     }
   });
 })();

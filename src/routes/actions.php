@@ -785,6 +785,175 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'refre
     exit;
 }
 
+// owned_minifig_detail (src/routes/pages.php) — mirrors
+// upload_owned_set_photo/delete_owned_set_photo (src/owned_sets.php's
+// counterparts) against minifig_storage_item_photos instead.
+const MINIFIG_PHOTO_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'upload_minifig_photo') {
+    header('Content-Type: application/json');
+    try {
+        $photoInstanceId = (int) ($_POST['minifig_storage_item_id'] ?? 0);
+        if ($photoInstanceId <= 0 || getOwnedMinifigInstanceById($pdo, $photoInstanceId) === null) {
+            throw new RuntimeException(t('owned_set_photo_invalid'));
+        }
+
+        $photoCaption = trim((string) ($_POST['caption'] ?? ''));
+        $photoCaption = $photoCaption !== '' ? mb_substr($photoCaption, 0, 255) : null;
+
+        if (!isset($_FILES['photo_file'])) {
+            throw new RuntimeException(t('owned_set_photo_upload_failed'));
+        }
+        $photoFile = $_FILES['photo_file'];
+        if ($photoFile['error'] === UPLOAD_ERR_INI_SIZE || $photoFile['error'] === UPLOAD_ERR_FORM_SIZE) {
+            throw new RuntimeException(t('owned_set_photo_too_large', ['max' => (string) ini_get('upload_max_filesize')]));
+        }
+        if ($photoFile['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($photoFile['tmp_name'])) {
+            throw new RuntimeException(t('owned_set_photo_upload_failed'));
+        }
+
+        $photoFinfo = finfo_open(FILEINFO_MIME_TYPE);
+        $photoMime = $photoFinfo !== false ? finfo_file($photoFinfo, $photoFile['tmp_name']) : false;
+        if ($photoFinfo !== false) {
+            finfo_close($photoFinfo);
+        }
+        if (!in_array($photoMime, MINIFIG_PHOTO_ALLOWED_MIME_TYPES, true)) {
+            throw new RuntimeException(t('owned_set_photo_invalid_type'));
+        }
+
+        $photoOriginalFilename = basename((string) $photoFile['name']);
+        $photoFilename = generateOwnedMinifigPhotoFilename($photoOriginalFilename);
+        $photoTargetPath = getOwnedMinifigPhotosStorageDir($photoInstanceId) . '/' . $photoFilename;
+        if (!move_uploaded_file($photoFile['tmp_name'], $photoTargetPath)) {
+            throw new RuntimeException(t('owned_set_photo_upload_failed'));
+        }
+        $photoFileSize = filesize($photoTargetPath);
+        $photoRelativePath = getOwnedMinifigPhotoRelativePath($photoInstanceId, $photoFilename);
+
+        $photoId = addOwnedMinifigPhoto($pdo, $photoInstanceId, $photoCaption, $photoOriginalFilename, $photoRelativePath, $photoFileSize !== false ? $photoFileSize : (int) $photoFile['size'], (int) $_SESSION['user_id']);
+
+        echo json_encode([
+            'success' => true,
+            'photo' => ['id' => $photoId, 'url' => $photoRelativePath, 'caption' => $photoCaption],
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_minifig_photo') {
+    header('Content-Type: application/json');
+    try {
+        $deletePhotoId = (int) ($_POST['photo_id'] ?? 0);
+        $deletedPhoto = $deletePhotoId > 0 ? deleteOwnedMinifigPhoto($pdo, $deletePhotoId) : null;
+        if ($deletedPhoto === null) {
+            throw new RuntimeException(t('owned_set_photo_invalid'));
+        }
+        $deletedPhotoAbsolutePath = __DIR__ . '/' . $deletedPhoto['stored_path'];
+        if (is_file($deletedPhotoAbsolutePath)) {
+            @unlink($deletedPhotoAbsolutePath);
+        }
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// owned_minifig_detail's edit/sell/remove forms self-submit (no explicit
+// action="" attribute, plain POST to the current URL) — same pattern as
+// owned_set_detail's own edit/sell/remove forms: on success each redirects
+// explicitly, on failure this message is left set and execution falls
+// through to routes/pages.php's own GET-style render of the same page.
+$ownedMinifigDetailMessage = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_minifig_notes') {
+    $notesInstanceId = (int) ($_POST['instance_id'] ?? 0);
+    try {
+        $newNotes = trim((string) ($_POST['notes'] ?? ''));
+        saveOwnedMinifigNotes($pdo, $notesInstanceId, $newNotes !== '' ? $newNotes : null);
+        header('Location: ?page=owned_minifig_detail&id=' . $notesInstanceId);
+        exit;
+    } catch (Throwable $e) {
+        $ownedMinifigDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'sell_minifig_storage_item') {
+    $sellInstanceId = (int) ($_POST['instance_id'] ?? 0);
+    try {
+        $sellMinifigPriceRaw = trim((string) ($_POST['price'] ?? ''));
+        $sellMinifigPrice = $sellMinifigPriceRaw !== '' ? (float) str_replace(',', '.', $sellMinifigPriceRaw) : null;
+        $sellMinifigDateRaw = trim((string) ($_POST['sold_at'] ?? ''));
+        $sellMinifigDate = $sellMinifigDateRaw !== '' ? $sellMinifigDateRaw : null;
+        $sellMinifigPlatform = trim((string) ($_POST['platform'] ?? ''));
+        $sellMinifigNotes = trim((string) ($_POST['notes'] ?? ''));
+        sellOwnedMinifigInstance(
+            $pdo,
+            $sellInstanceId,
+            $sellMinifigPrice,
+            $sellMinifigDate,
+            $sellMinifigPlatform !== '' ? $sellMinifigPlatform : null,
+            $sellMinifigNotes !== '' ? $sellMinifigNotes : null,
+            (int) $_SESSION['user_id']
+        );
+        refreshAppStatsCache($pdo);
+        header('Location: ?page=my_minifigs_all');
+        exit;
+    } catch (Throwable $e) {
+        $ownedMinifigDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'remove_minifig_storage_item') {
+    $removeInstanceId = (int) ($_POST['instance_id'] ?? 0);
+    try {
+        removeOwnedMinifigInstance($pdo, $removeInstanceId);
+        refreshAppStatsCache($pdo);
+        header('Location: ?page=my_minifigs_all');
+        exit;
+    } catch (Throwable $e) {
+        $ownedMinifigDetailMessage = t('owned_set_save_failed', ['message' => $e->getMessage()]);
+    }
+}
+
+// owned_minifig_detail's BrickLink-XML pill (renderOwnedMinifigBricklinkModal(),
+// src/owned_minifigs.php) — mirrors owned_set_bricklink_parts_missing/
+// owned_set_bricklink_xml_check, minus the whole-missing-minifig manual-id
+// branch (never applicable here, see buildOwnedMinifigBricklinkXml()'s doc
+// comment) — 'ready' is therefore always true.
+if (isset($_GET['action']) && $_GET['action'] === 'owned_minifig_bricklink_parts_missing') {
+    header('Content-Type: application/json');
+    $missingPartsInstance = getOwnedMinifigInstanceById($pdo, (int) ($_GET['instance_id'] ?? 0));
+    if ($missingPartsInstance === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode([
+        'success' => true,
+        'partNums' => getOwnedMinifigBricklinkPartNums($pdo, $missingPartsInstance),
+        'batchSize' => REBRICKABLE_PART_BATCH_SIZE,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'owned_minifig_bricklink_xml_check') {
+    header('Content-Type: application/json');
+    $xmlCheckInstance = getOwnedMinifigInstanceById($pdo, (int) ($_GET['instance_id'] ?? 0));
+    if ($xmlCheckInstance === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('owned_set_invalid_set')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $minifigXmlExport = buildOwnedMinifigBricklinkXml($pdo, $xmlCheckInstance);
+    echo json_encode(['success' => true, 'xml' => $minifigXmlExport['xml']], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // The minifig modal's "appears in N sets" link (src/minifig_modal.php) —
 // mirrors action=part_sets.
 if (isset($_GET['action']) && $_GET['action'] === 'minifig_sets') {

@@ -568,6 +568,45 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'minifigs', 'bricklink_price_currency', 'VARCHAR(10) DEFAULT NULL');
             addColumnIfMissing($pdo, 'minifigs', 'bricklink_price_checked_at', 'TIMESTAMP NULL DEFAULT NULL');
         },
+        35 => function (PDO $pdo): void {
+            // Full owned_set_detail-style detail page for loose minifig
+            // instances (src/owned_minifigs.php) — notes field, a photo
+            // gallery, and a sales log, each mirroring the matching
+            // owned_sets/owned_set_photos/owned_set_sales piece exactly.
+            addColumnIfMissing($pdo, 'minifig_storage_items', 'notes', 'TEXT DEFAULT NULL');
+
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS minifig_storage_item_photos (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    minifig_storage_item_id INT NOT NULL,
+                    caption VARCHAR(255) DEFAULT NULL,
+                    original_filename VARCHAR(255) NOT NULL,
+                    stored_path VARCHAR(512) NOT NULL,
+                    file_size INT NOT NULL,
+                    uploaded_by INT DEFAULT NULL,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_minifigstorageitemphoto_item FOREIGN KEY (minifig_storage_item_id) REFERENCES minifig_storage_items(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_minifigstorageitemphoto_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS minifig_storage_item_sales (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    minifig_id INT DEFAULT NULL,
+                    fig_num VARCHAR(50) NOT NULL,
+                    name VARCHAR(255) DEFAULT NULL,
+                    price DECIMAL(10,2) DEFAULT NULL,
+                    sold_at DATE DEFAULT NULL,
+                    platform VARCHAR(255) DEFAULT NULL,
+                    notes TEXT DEFAULT NULL,
+                    sold_by INT DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_minifigsale_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE SET NULL,
+                    CONSTRAINT fk_minifigsale_user FOREIGN KEY (sold_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -648,7 +687,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 34;
+const CURRENT_SCHEMA_VERSION = 35;
 
 function getInstalledSchemaVersion(): int
 {

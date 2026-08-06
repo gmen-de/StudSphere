@@ -210,6 +210,7 @@ CREATE TABLE IF NOT EXISTS minifig_storage_items (
     location_id INT NOT NULL,
     minifig_id INT NOT NULL,
     condition_type ENUM('new','used') NOT NULL DEFAULT 'used',
+    notes TEXT DEFAULT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_minifigstorageitem_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
     CONSTRAINT fk_minifigstorageitem_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
@@ -228,6 +229,37 @@ CREATE TABLE IF NOT EXISTS minifig_storage_item_parts (
     CONSTRAINT fk_minifigstorageitempart_item FOREIGN KEY (minifig_storage_item_id) REFERENCES minifig_storage_items(id) ON DELETE CASCADE,
     CONSTRAINT fk_minifigstorageitempart_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
     CONSTRAINT fk_minifigstorageitempart_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS minifig_storage_item_photos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    minifig_storage_item_id INT NOT NULL,
+    caption VARCHAR(255) DEFAULT NULL,
+    original_filename VARCHAR(255) NOT NULL,
+    stored_path VARCHAR(512) NOT NULL,
+    file_size INT NOT NULL,
+    uploaded_by INT DEFAULT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_minifigstorageitemphoto_item FOREIGN KEY (minifig_storage_item_id) REFERENCES minifig_storage_items(id) ON DELETE CASCADE,
+    CONSTRAINT fk_minifigstorageitemphoto_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- minifig_id survives the instance's own deletion deliberately (ON DELETE
+-- SET NULL, not CASCADE) — mirrors owned_set_sales, a sale record is a
+-- permanent log entry, not tied to the storage row's lifecycle.
+CREATE TABLE IF NOT EXISTS minifig_storage_item_sales (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    minifig_id INT DEFAULT NULL,
+    fig_num VARCHAR(50) NOT NULL,
+    name VARCHAR(255) DEFAULT NULL,
+    price DECIMAL(10,2) DEFAULT NULL,
+    sold_at DATE DEFAULT NULL,
+    platform VARCHAR(255) DEFAULT NULL,
+    notes TEXT DEFAULT NULL,
+    sold_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_minifigsale_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE SET NULL,
+    CONSTRAINT fk_minifigsale_user FOREIGN KEY (sold_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS storage_movements (

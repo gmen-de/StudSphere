@@ -17,19 +17,9 @@ const MINIFIGS_SEARCH_PAGE_SIZE = 100;
  * (src/minifig_modal.php) listens for clicks on this globally, same pattern
  * as the part-detail modal.
  */
-function renderMinifigCard(array $fig, ?string $meta = null, ?int $instanceId = null): string
+function renderMinifigCard(array $fig, ?string $meta = null): string
 {
-    $html = '<div class="minifig-card" data-minifig-id="' . (int) $fig['id'] . '"';
-    if ($instanceId !== null) {
-        // Lets the click-delegated modal (renderMinifigDetailModal(),
-        // src/minifig_modal.php) preselect this exact physical instance
-        // instead of defaulting to the first one — used by "Meine
-        // Minifiguren" (my_minifigs*), where every tile IS one specific
-        // instance, same as clicking a set card jumps straight to that
-        // set's own owned_set_detail.
-        $html .= ' data-instance-id="' . $instanceId . '"';
-    }
-    $html .= ' role="button" tabindex="0">';
+    $html = '<div class="minifig-card" data-minifig-id="' . (int) $fig['id'] . '" role="button" tabindex="0">';
     $html .= '<span class="minifig-card-image">' . ($fig['thumbnail'] !== null ? '<img src="' . htmlspecialchars($fig['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
     $html .= '<span class="minifig-card-num">' . htmlspecialchars($fig['fig_num']) . '</span>';
     $name = (string) ($fig['name'] ?? $fig['fig_num']);
@@ -43,27 +33,26 @@ function renderMinifigCard(array $fig, ?string $meta = null, ?int $instanceId = 
 
 /**
  * One loose minifig instance tile for "Meine Minifiguren" (my_minifigs*) —
- * conceptually mirrors renderOwnedSetCard() (src/owned_sets.php): location +
- * condition instead of a completeness percentage. Built on top of
- * renderMinifigCard() rather than a parallel markup/CSS class, since
- * minifigs have no dedicated detail page to link to the way owned sets do
- * (?page=owned_set_detail) — only the shared detail modal, reached the same
- * document-level-click way every other minifig card on the site already
- * uses. The instance id (renderMinifigCard()'s optional third param)
- * preselects exactly this physical instance once the modal opens.
+ * mirrors renderOwnedSetCard() (src/owned_sets.php): a real link straight to
+ * this instance's own detail page (?page=owned_minifig_detail), not the
+ * generic click-delegated modal every other minifig card on the site opens
+ * — each tile here already IS one specific physical instance, same as an
+ * owned-set card links directly instead of opening a modal.
  */
 function renderOwnedMinifigCard(array $instance): string
 {
-    $fig = [
-        'id' => $instance['minifig_id'],
-        'thumbnail' => $instance['thumbnail'],
-        'fig_num' => $instance['fig_num'],
-        'name' => $instance['name'],
-    ];
     $locationLabel = implode(' -> ', array_column(getStorageLocationAncestors((int) $instance['location_id']), 'name'));
     $condLabel = $instance['condition_type'] === 'new' ? t('condition_new') : t('condition_used');
     $meta = $locationLabel !== '' ? $locationLabel . ' · ' . $condLabel : $condLabel;
-    return renderMinifigCard($fig, $meta, (int) $instance['id']);
+    $name = (string) ($instance['name'] ?? $instance['fig_num']);
+
+    $html = '<a class="minifig-card" href="?page=owned_minifig_detail&id=' . (int) $instance['id'] . '">';
+    $html .= '<span class="minifig-card-image">' . ($instance['thumbnail'] !== null ? '<img src="' . htmlspecialchars($instance['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
+    $html .= '<span class="minifig-card-num">' . htmlspecialchars($instance['fig_num']) . '</span>';
+    $html .= '<span class="minifig-card-name" title="' . htmlspecialchars($name) . '">' . htmlspecialchars($name) . '</span>';
+    $html .= '<span class="minifig-card-meta">' . htmlspecialchars($meta) . '</span>';
+    $html .= '</a>';
+    return $html;
 }
 
 /**

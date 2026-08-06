@@ -2928,12 +2928,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_all') {
     if (empty($looseMinifigs)) {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('my_minifigs_empty')) . '</p></section>';
     } else {
-        // Same reasoning as minifigs_search/the minifig modal itself — the
-        // click-to-open detail modal is delegated globally via a
-        // document-level listener, so it just needs its markup present
-        // somewhere on the page.
-        $content .= renderPartDetailModal();
-        $content .= renderMinifigDetailModal();
+        // renderOwnedMinifigCard() links straight to owned_minifig_detail —
+        // no modal-click delegation involved here (unlike a plain
+        // .minifig-card), so no renderPartDetailModal()/renderMinifigDetailModal()
+        // markup is needed on this page.
         $content .= '<div class="minifigs-grid">';
         foreach ($looseMinifigs as $instance) {
             $content .= renderOwnedMinifigCard($instance);
@@ -2994,8 +2992,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_themes') {
         // above) lead somewhere that does.
         $looseMinifigs = getLooseMinifigsForThemes($pdo, [$themeParam]);
         if (!empty($looseMinifigs)) {
-            $content .= renderPartDetailModal();
-            $content .= renderMinifigDetailModal();
             $content .= '<div class="minifigs-grid">';
             foreach ($looseMinifigs as $instance) {
                 $content .= renderOwnedMinifigCard($instance);
@@ -3005,5 +3001,337 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_themes') {
     }
 
     renderApp(t('nav_my_minifigs_themes'), $content, $user, computeAppStats($pdo), $myMinifigThemesBreadcrumbs);
+    exit;
+}
+
+// Mirrors page=owned_set_detail (see that block above for the full
+// reasoning behind the tab-AJAX pattern) — three tabs instead of seven
+// (Bauteile/Beschädigt-Fehlend/Fotos only, no Ersatzteile/Sticker/
+// Minifiguren/Bauanleitung — none apply to a single loose minifig, see
+// src/owned_minifigs.php's own doc comment) and no sealed-box special case
+// (a loose minifig's parts status is already captured at add time, there's
+// no "still sealed" state to gate tabs behind).
+if (isset($_GET['page']) && $_GET['page'] === 'owned_minifig_detail') {
+    $ownedMinifigInstanceId = (int) ($_GET['id'] ?? 0);
+    $ownedMinifigInstance = getOwnedMinifigInstanceById($pdo, $ownedMinifigInstanceId);
+
+    if ($ownedMinifigInstance === null) {
+        $content = '<h1>' . htmlspecialchars(t('owned_minifig_not_found_title')) . '</h1>';
+        $content .= '<section class="card alert"><p>' . htmlspecialchars(t('owned_minifig_not_found')) . '</p></section>';
+        renderApp(t('owned_minifig_not_found_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('nav_my_minifigs_all'), 'url' => '?page=my_minifigs_all']]);
+        exit;
+    }
+
+    $renderOwnedMinifigTabContent = function (string $tabKey) use ($pdo, $ownedMinifigInstance): string {
+        if ($tabKey === 'parts') {
+            $parts = getMinifigStorageItemPartsWithStatus($pdo, $ownedMinifigInstance['id'], $ownedMinifigInstance['fig_num'], getLocale());
+            return renderOwnedMinifigInventoryGrid($ownedMinifigInstance, $parts);
+        }
+        if ($tabKey === 'damaged_missing') {
+            return renderOwnedMinifigDamagedMissingSection($pdo, $ownedMinifigInstance);
+        }
+        return renderOwnedMinifigPhotoGallery($pdo, $ownedMinifigInstance);
+    };
+    $ownedMinifigTabKeys = ['parts', 'damaged_missing', 'gallery'];
+
+    if (($_GET['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        $ajaxMinifigTabKey = (string) ($_GET['tab'] ?? '');
+        if (!in_array($ajaxMinifigTabKey, $ownedMinifigTabKeys, true)) {
+            $ajaxMinifigTabKey = $ownedMinifigTabKeys[0];
+        }
+        echo json_encode([
+            'success' => true,
+            'html' => $renderOwnedMinifigTabContent($ajaxMinifigTabKey),
+            'stats' => computeAppStats($pdo),
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $ownedMinifigName = $ownedMinifigInstance['name'] ?? $ownedMinifigInstance['fig_num'];
+    $ownedMinifigBreadcrumbs = [
+        homeBreadcrumb(),
+        ['label' => t('nav_my_minifigs_all'), 'url' => '?page=my_minifigs_all'],
+    ];
+    $ownedMinifigInstanceNumber = getOwnedMinifigInstanceNumber($pdo, $ownedMinifigInstance['minifig_id'], $ownedMinifigInstance['id']);
+    $ownedMinifigBreadcrumbs[] = ['label' => $ownedMinifigName, 'url' => null];
+    $ownedMinifigBreadcrumbs[] = ['label' => t('owned_set_instance_label', ['n' => (string) $ownedMinifigInstanceNumber]), 'url' => null];
+
+    $adjacentOwnedMinifigs = getAdjacentOwnedMinifigInstances($pdo, $ownedMinifigInstance);
+
+    $content = '<div class="owned-set-layout">';
+
+    $content .= '<div class="owned-set-image-row">';
+    $content .= '<span class="set-detail-image">' . ($ownedMinifigInstance['thumbnail'] !== null ? '<img src="' . htmlspecialchars($ownedMinifigInstance['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
+    $content .= '</div>';
+
+    $content .= '<div class="owned-set-sidebar">';
+    $content .= '<h1 class="set-detail-title">' . htmlspecialchars($ownedMinifigName) . '</h1>';
+    $content .= '<p class="hint">' . htmlspecialchars($ownedMinifigInstance['fig_num']) . '</p>';
+
+    if ($ownedMinifigDetailMessage !== '') {
+        $content .= '<p class="owned-set-message">' . htmlspecialchars($ownedMinifigDetailMessage) . '</p>';
+    }
+
+    $content .= '<div class="set-detail-setnav">';
+    $content .= $adjacentOwnedMinifigs['prev'] !== null
+        ? '<a href="?page=owned_minifig_detail&id=' . $adjacentOwnedMinifigs['prev'] . '">&lsaquo; ' . htmlspecialchars(t('owned_set_instance_label', ['n' => (string) ($ownedMinifigInstanceNumber - 1)])) . '</a>'
+        : '<span></span>';
+    $content .= $adjacentOwnedMinifigs['next'] !== null
+        ? '<a href="?page=owned_minifig_detail&id=' . $adjacentOwnedMinifigs['next'] . '">' . htmlspecialchars(t('owned_set_instance_label', ['n' => (string) ($ownedMinifigInstanceNumber + 1)])) . ' &rsaquo;</a>'
+        : '<span></span>';
+    $content .= '</div>';
+
+    // Links row — same BrickLink/Rebrickable pair the compact minifig modal
+    // shows (getOrFetchBricklinkMinifigId()-backed search/catalog links, see
+    // action=minifig_detail, src/routes/actions.php); resolved fresh here
+    // rather than reusing that JSON endpoint, since this is a plain page
+    // render, not a fetch.
+    $ownedMinifigBricklinkId = getOrFetchBricklinkMinifigId($pdo, $ownedMinifigInstance['minifig_id'], $ownedMinifigInstance['fig_num']);
+    $ownedMinifigBricklinkUrl = $ownedMinifigBricklinkId !== null
+        ? 'https://www.bricklink.com/v2/catalog/catalogitem.page?M=' . urlencode($ownedMinifigBricklinkId)
+        : 'https://www.bricklink.com/v2/search.page?q=' . urlencode($ownedMinifigInstance['fig_num']);
+    $ownedMinifigRebrickableUrl = 'https://rebrickable.com/minifigs/' . urlencode($ownedMinifigInstance['fig_num']) . '/';
+    $content .= '<p class="part-modal-links">';
+    $content .= '<a href="' . htmlspecialchars($ownedMinifigBricklinkUrl) . '" target="_blank" rel="noopener">' . htmlspecialchars(t('bricklink_link')) . '</a> · ';
+    $content .= '<a href="' . htmlspecialchars($ownedMinifigRebrickableUrl) . '" target="_blank" rel="noopener">' . htmlspecialchars(t('rebrickable_link')) . '</a>';
+    $content .= '</p>';
+
+    $minifigParts = getMinifigStorageItemPartsWithStatus($pdo, $ownedMinifigInstance['id'], $ownedMinifigInstance['fig_num'], getLocale());
+    $minifigNominalTotal = 0;
+    $minifigActualTotal = 0;
+    foreach ($minifigParts as $minifigPart) {
+        $minifigNominalTotal += $minifigPart['nominal_quantity'];
+        $minifigActualTotal += $minifigPart['actual_quantity'];
+    }
+    $minifigCompletenessPercent = $minifigNominalTotal > 0 ? round(min(100.0, ($minifigActualTotal / $minifigNominalTotal) * 100), 1) : 100.0;
+
+    $content .= '<div class="set-detail-table-wrap">';
+    $content .= '<table class="set-detail-table">';
+    $content .= '<tr class="owned-set-total-row"><td colspan="2">' . renderOwnedSetTotalRing($minifigCompletenessPercent, $minifigActualTotal, $minifigNominalTotal) . '</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_location')) . '</th><td>';
+    $ownedMinifigLocationLinks = [];
+    foreach (getStorageLocationAncestors($ownedMinifigInstance['location_id']) as $ownedMinifigLocationAncestor) {
+        $ownedMinifigLocationLinks[] = '<a href="?page=location_detail&id=' . $ownedMinifigLocationAncestor['id'] . '">' . htmlspecialchars($ownedMinifigLocationAncestor['name']) . '</a>';
+    }
+    $content .= implode(' » ', $ownedMinifigLocationLinks);
+    $content .= '</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th><td>' . htmlspecialchars($ownedMinifigInstance['condition_type'] === 'new' ? t('owned_set_condition_new') : t('owned_set_condition_used')) . '</td></tr>';
+
+    $ownedMinifigPriceDisplay = formatBricklinkPriceSummary(
+        $ownedMinifigInstance['bricklink_price_new'],
+        $ownedMinifigInstance['bricklink_price_used'],
+        $ownedMinifigInstance['bricklink_price_currency'],
+        $ownedMinifigInstance['bricklink_price_checked_at'],
+        $ownedMinifigInstance['condition_type']
+    );
+    $content .= '<tr><th>' . htmlspecialchars(t('owned_set_bricklink_price_label')) . '</th><td>';
+    $content .= '<span id="minifig-bricklink-price-text"' . ($ownedMinifigPriceDisplay['title'] !== null ? ' title="' . htmlspecialchars($ownedMinifigPriceDisplay['title']) . '"' : '') . '>' . htmlspecialchars($ownedMinifigPriceDisplay['text']) . '</span> ';
+    $content .= '<button type="button" class="owned-set-bricklink-refresh-btn" id="minifig-bricklink-refresh" data-minifig-id="' . $ownedMinifigInstance['minifig_id'] . '" data-condition-type="' . htmlspecialchars($ownedMinifigInstance['condition_type']) . '" title="' . htmlspecialchars(t('owned_set_bricklink_price_refresh_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_bricklink_price_refresh_label')) . '">' . getActionIcon('refresh') . '</button>';
+    $content .= '</td></tr>';
+
+    if ($ownedMinifigInstance['notes'] !== null && $ownedMinifigInstance['notes'] !== '') {
+        $content .= '<tr><th>' . htmlspecialchars(t('owned_set_notes_label')) . '</th><td>' . htmlspecialchars($ownedMinifigInstance['notes']) . '</td></tr>';
+    }
+    $content .= '</table>';
+    $content .= '</div>';
+
+    $content .= '<div class="set-detail-table-wrap owned-set-actionbar">';
+    $content .= '<button type="button" class="owned-set-action-pill" id="minifig-edit-open" title="' . htmlspecialchars(t('owned_set_edit_heading')) . '" aria-label="' . htmlspecialchars(t('owned_set_edit_heading')) . '">' . getActionIcon('edit') . '</button>';
+    $content .= '<button type="button" class="owned-set-action-pill" id="minifig-move-open" title="' . htmlspecialchars(t('owned_set_move_heading')) . '" aria-label="' . htmlspecialchars(t('owned_set_move_heading')) . '">' . getActionIcon('move') . '</button>';
+
+    $content .= '<form method="post" id="remove-minifig-form" class="owned-set-action-pill-form">';
+    $content .= '<input type="hidden" name="action" value="remove_minifig_storage_item">';
+    $content .= '<input type="hidden" name="instance_id" value="' . $ownedMinifigInstance['id'] . '">';
+    $content .= '<button type="submit" class="owned-set-action-pill owned-set-action-pill-danger" title="' . htmlspecialchars(t('owned_minifig_remove_button')) . '" aria-label="' . htmlspecialchars(t('owned_minifig_remove_button')) . '">' . getActionIcon('delete') . '</button>';
+    $content .= '</form>';
+
+    $content .= '<button type="button" class="owned-set-action-pill" id="minifig-bricklink-open" title="' . htmlspecialchars(t('owned_minifig_bricklink_xml_label')) . '" aria-label="' . htmlspecialchars(t('owned_minifig_bricklink_xml_label')) . '">' . getActionIcon('bricklink_xml') . '</button>';
+    $content .= renderOwnedMinifigBricklinkModal($ownedMinifigInstance);
+    $content .= '<button type="button" class="owned-set-action-pill" id="minifig-sell-open" title="' . htmlspecialchars(t('owned_set_sell_heading')) . '" aria-label="' . htmlspecialchars(t('owned_set_sell_heading')) . '">' . getActionIcon('sell') . '</button>';
+
+    $removeMinifigConfirmJson = json_encode(t('owned_minifig_remove_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $content .= <<<SCRIPT
+<script>
+(function(){
+  var form = document.getElementById("remove-minifig-form");
+  if (!form) { return; }
+  form.addEventListener("submit", function(e) {
+    if (!window.confirm($removeMinifigConfirmJson)) {
+      e.preventDefault();
+    }
+  });
+})();
+</script>
+SCRIPT;
+
+    $minifigBricklinkRefreshFailedJson = json_encode(t('owned_set_bricklink_price_refresh_failed'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $content .= <<<SCRIPT
+<script>
+(function(){
+  var btn = document.getElementById("minifig-bricklink-refresh");
+  if (!btn) { return; }
+  btn.addEventListener("click", function() {
+    btn.disabled = true;
+    btn.classList.add("owned-set-bricklink-refresh-spinning");
+    var formData = new FormData();
+    formData.set("action", "refresh_minifig_bricklink_price");
+    formData.set("minifig_id", btn.dataset.minifigId);
+    formData.set("condition_type", btn.dataset.conditionType);
+    fetch("?", { method: "POST", body: formData, credentials: "same-origin" })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          window.location.reload();
+          return;
+        }
+        btn.disabled = false;
+        btn.classList.remove("owned-set-bricklink-refresh-spinning");
+        window.alert($minifigBricklinkRefreshFailedJson + " " + res.message);
+      })
+      .catch(function() {
+        btn.disabled = false;
+        btn.classList.remove("owned-set-bricklink-refresh-spinning");
+        window.alert($minifigBricklinkRefreshFailedJson);
+      });
+  });
+})();
+</script>
+SCRIPT;
+
+    $content .= '</div>';
+
+    $content .= renderOwnedMinifigEditModal($ownedMinifigInstance);
+    $content .= renderOwnedMinifigMoveModal($ownedMinifigInstance);
+    $content .= renderOwnedMinifigSellModal($ownedMinifigInstance);
+
+    $content .= '</div>'; // .owned-set-sidebar
+
+    $content .= '<div class="owned-set-tabs-row">';
+
+    $ownedMinifigTabs = [
+        'parts' => t('owned_minifig_tab_parts'),
+        'damaged_missing' => t('owned_set_tab_damaged_missing'),
+        'gallery' => t('owned_set_tab_gallery'),
+    ];
+    $activeMinifigTab = (string) ($_GET['tab'] ?? '');
+    if (!isset($ownedMinifigTabs[$activeMinifigTab])) {
+        $activeMinifigTab = array_key_first($ownedMinifigTabs);
+    }
+
+    $content .= '<nav class="set-detail-tabs" id="minifig-tabs-nav">';
+    foreach ($ownedMinifigTabs as $tabKey => $tabLabel) {
+        $activeAttr = $tabKey === $activeMinifigTab ? ' class="active"' : '';
+        $content .= '<a' . $activeAttr . ' data-tab="' . $tabKey . '" href="?page=owned_minifig_detail&id=' . $ownedMinifigInstanceId . '&tab=' . $tabKey . '">' . htmlspecialchars($tabLabel) . '</a>';
+    }
+    $content .= '</nav>';
+
+    $minifigLoadingHtml = '<div class="owned-set-tab-loading"><span class="owned-set-tab-spinner"></span><span>' . htmlspecialchars(t('owned_set_tab_loading')) . '</span></div>';
+    $content .= '<div id="minifig-tab-content" data-instance-id="' . $ownedMinifigInstanceId . '" data-active-tab="' . htmlspecialchars($activeMinifigTab) . '">' . $minifigLoadingHtml . '</div>';
+
+    $minifigTabLoadingLabelsJson = json_encode([
+        'loading' => t('owned_set_tab_loading'),
+        'errorRetry' => t('import_error_retry'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $minifigLoadingHtmlJson = json_encode($minifigLoadingHtml, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $minifigTabLocaleJson = json_encode(getLocale(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $content .= <<<SCRIPT
+<script>
+(function(){
+  var texts = $minifigTabLoadingLabelsJson;
+  var loadingHtml = $minifigLoadingHtmlJson;
+  var appLocale = $minifigTabLocaleJson;
+  var container = document.getElementById('minifig-tab-content');
+  var nav = document.getElementById('minifig-tabs-nav');
+  if (!container || !nav) {
+    return;
+  }
+  var instanceId = container.dataset.instanceId;
+
+  function runScripts(root) {
+    var scripts = root.querySelectorAll('script');
+    for (var i = 0; i < scripts.length; i++) {
+      var oldScript = scripts[i];
+      var freshScript = document.createElement('script');
+      freshScript.textContent = oldScript.textContent;
+      oldScript.parentNode.replaceChild(freshScript, oldScript);
+    }
+  }
+
+  function formatNumber(n) {
+    var sep = appLocale === 'de' ? '.' : ',';
+    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, sep);
+  }
+
+  function applyStats(stats) {
+    if (!stats) {
+      return;
+    }
+    Object.keys(stats).forEach(function(key) {
+      var el = document.getElementById('status-stat-' + key);
+      var strong = el ? el.querySelector('strong') : null;
+      if (strong) {
+        strong.textContent = formatNumber(stats[key]);
+      }
+    });
+  }
+
+  function loadTab(tabKey, pushState) {
+    container.innerHTML = loadingHtml;
+    var params = new URLSearchParams(window.location.search);
+    params.set('page', 'owned_minifig_detail');
+    params.set('id', instanceId);
+    params.set('tab', tabKey);
+    params.set('ajax', '1');
+    fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (!res.success) {
+          container.textContent = res.message || texts.errorRetry;
+          return;
+        }
+        container.innerHTML = res.html;
+        runScripts(container);
+        applyStats(res.stats);
+        var links = nav.querySelectorAll('a');
+        for (var i = 0; i < links.length; i++) {
+          links[i].classList.toggle('active', links[i].dataset.tab === tabKey);
+        }
+        container.dataset.activeTab = tabKey;
+        if (pushState) {
+          var urlParams = new URLSearchParams(window.location.search);
+          urlParams.set('tab', tabKey);
+          history.pushState({ tab: tabKey }, '', '?' + urlParams.toString());
+        }
+      })
+      .catch(function() {
+        container.textContent = texts.errorRetry;
+      });
+  }
+
+  var navLinks = nav.querySelectorAll('a');
+  for (var i = 0; i < navLinks.length; i++) {
+    navLinks[i].addEventListener('click', function(e) {
+      e.preventDefault();
+      loadTab(this.dataset.tab, true);
+    });
+  }
+
+  window.addEventListener('popstate', function() {
+    var params = new URLSearchParams(window.location.search);
+    loadTab(params.get('tab') || container.dataset.activeTab, false);
+  });
+
+  loadTab(container.dataset.activeTab, false);
+})();
+</script>
+SCRIPT;
+
+    $content .= '</div>'; // .owned-set-tabs-row
+    $content .= '</div>'; // .owned-set-layout
+
+    $ownedMinifigPageTitle = t('owned_minifig_detail_page_title', ['fig_num' => $ownedMinifigInstance['fig_num'], 'name' => $ownedMinifigName]);
+    renderApp($ownedMinifigPageTitle, $content, $user, computeAppStats($pdo), $ownedMinifigBreadcrumbs);
     exit;
 }
