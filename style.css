@@ -1694,6 +1694,49 @@ footer {
   outline: none;
 }
 
+/* "Meine Minifiguren" grouped-by-model card — one card per minifig type,
+   badges in the corner replace the per-copy location/condition meta line
+   (see renderOwnedMinifigGroupCard(), src/minifigs.php). Same
+   complete/damaged/missing colors as .owned-set-inventory-tile-* so the
+   two views read consistently. */
+.minifig-group-card {
+  position: relative;
+}
+
+.minifig-status-badges {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 0.25rem;
+}
+
+.minifig-status-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+
+.minifig-status-dot-complete {
+  background: #16a34a;
+}
+
+.minifig-status-dot-damaged {
+  background: #d97706;
+}
+
+.minifig-status-dot-missing {
+  background: #dc2626;
+}
+
 /* Part-detail overlay */
 .modal-overlay {
   position: fixed;

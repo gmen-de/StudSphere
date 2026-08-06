@@ -98,6 +98,31 @@ function getOwnedMinifigInstanceNumber(PDO $pdo, int $minifigId, int $instanceId
 }
 
 /**
+ * Every owned instance of one minifig model, oldest first, each tagged with
+ * its own complete/damaged/missing status (getOwnedMinifigInstanceStatus(),
+ * src/minifigs.php) — powers the detail page's instance picker dropdown,
+ * letting it jump straight to a specific physical copy of the same model
+ * shown in "Meine Minifiguren"'s grouped card (renderOwnedMinifigGroupCard()).
+ *
+ * @return array<int, array{id:int, location_id:int, condition_type:string, status:string}>
+ */
+function getOwnedMinifigInstancesForModel(PDO $pdo, int $minifigId, string $figNum, string $locale = 'en'): array
+{
+    $stmt = $pdo->prepare('SELECT id, location_id, condition_type FROM minifig_storage_items WHERE minifig_id = ? ORDER BY id ASC');
+    $stmt->execute([$minifigId]);
+    $result = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $result[] = [
+            'id' => (int) $row['id'],
+            'location_id' => (int) $row['location_id'],
+            'condition_type' => $row['condition_type'],
+            'status' => getOwnedMinifigInstanceStatus($pdo, (int) $row['id'], $figNum, $locale),
+        ];
+    }
+    return $result;
+}
+
+/**
  * Removes one minifig instance entirely: unlinks its photo files (DB rows
  * cascade via FK), deletes the row (minifig_storage_item_parts cascades via
  * FK too). No deleteStorageLocation() call, unlike removeOwnedSet() — a

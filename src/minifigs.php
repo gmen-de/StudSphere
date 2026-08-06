@@ -32,25 +32,32 @@ function renderMinifigCard(array $fig, ?string $meta = null): string
 }
 
 /**
- * One loose minifig instance tile for "Meine Minifiguren" (my_minifigs*) —
- * mirrors renderOwnedSetCard() (src/owned_sets.php): a real link straight to
- * this instance's own detail page (?page=owned_minifig_detail), not the
- * generic click-delegated modal every other minifig card on the site opens
- * — each tile here already IS one specific physical instance, same as an
- * owned-set card links directly instead of opening a modal.
+ * One card per distinct minifig model for "Meine Minifiguren" (my_minifigs*)
+ * — mirrors renderOwnedSetCard() (src/owned_sets.php) in that it's a real
+ * link straight to a detail page (?page=owned_minifig_detail), not the
+ * generic click-delegated modal every other minifig card on the site opens,
+ * but unlike an owned-set card it represents every owned copy of this model
+ * at once (groupLooseMinifigsByModel()) rather than one physical instance —
+ * the location/condition meta line an ungrouped card would show doesn't
+ * generalize across copies, so the corner badges (each copy's own
+ * complete/damaged/missing status, getOwnedMinifigInstanceStatus()) take its
+ * place instead. The link lands on the group's representative (oldest)
+ * instance; that page's own dropdown (getOwnedMinifigInstancesForModel(),
+ * src/owned_minifigs.php) is how the other copies are reached from there.
  */
-function renderOwnedMinifigCard(array $instance): string
+function renderOwnedMinifigGroupCard(array $group): string
 {
-    $locationLabel = implode(' -> ', array_column(getStorageLocationAncestors((int) $instance['location_id']), 'name'));
-    $condLabel = $instance['condition_type'] === 'new' ? t('condition_new') : t('condition_used');
-    $meta = $locationLabel !== '' ? $locationLabel . ' · ' . $condLabel : $condLabel;
-    $name = (string) ($instance['name'] ?? $instance['fig_num']);
+    $name = (string) ($group['name'] ?? $group['fig_num']);
 
-    $html = '<a class="minifig-card" href="?page=owned_minifig_detail&id=' . (int) $instance['id'] . '">';
-    $html .= '<span class="minifig-card-image">' . ($instance['thumbnail'] !== null ? '<img src="' . htmlspecialchars($instance['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
-    $html .= '<span class="minifig-card-num">' . htmlspecialchars($instance['fig_num']) . '</span>';
+    $html = '<a class="minifig-card minifig-group-card" href="?page=owned_minifig_detail&id=' . (int) $group['representative_id'] . '">';
+    $html .= '<span class="minifig-status-badges">';
+    $html .= '<span class="minifig-status-dot minifig-status-dot-complete" title="' . htmlspecialchars(t('minifig_status_complete')) . '">' . (int) $group['complete_count'] . '</span>';
+    $html .= '<span class="minifig-status-dot minifig-status-dot-damaged" title="' . htmlspecialchars(t('minifig_status_damaged')) . '">' . (int) $group['damaged_count'] . '</span>';
+    $html .= '<span class="minifig-status-dot minifig-status-dot-missing" title="' . htmlspecialchars(t('minifig_status_missing')) . '">' . (int) $group['missing_count'] . '</span>';
+    $html .= '</span>';
+    $html .= '<span class="minifig-card-image">' . ($group['thumbnail'] !== null ? '<img src="' . htmlspecialchars($group['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
+    $html .= '<span class="minifig-card-num">' . htmlspecialchars($group['fig_num']) . '</span>';
     $html .= '<span class="minifig-card-name" title="' . htmlspecialchars($name) . '">' . htmlspecialchars($name) . '</span>';
-    $html .= '<span class="minifig-card-meta">' . htmlspecialchars($meta) . '</span>';
     $html .= '</a>';
     return $html;
 }
@@ -315,6 +322,76 @@ function getLooseMinifigsForThemes(PDO $pdo, array $themeIds): array
     }
     unset($row);
     return $rows;
+}
+
+/**
+ * Classifies one owned minifig instance's overall condition from its own
+ * parts (getMinifigStorageItemPartsWithStatus()) — same missing > damaged >
+ * complete priority as ownedSetInventoryTileStatusClass()
+ * (src/owned_sets.php), just rolled up across all of the instance's parts
+ * instead of one tile. Powers the "Meine Minifiguren" grouped-by-model
+ * ampel counts and the detail page's instance picker.
+ *
+ * @return 'complete'|'damaged'|'missing'
+ */
+function getOwnedMinifigInstanceStatus(PDO $pdo, int $instanceId, string $figNum, string $locale = 'en'): string
+{
+    $hasMissing = false;
+    $hasDamaged = false;
+    foreach (getMinifigStorageItemPartsWithStatus($pdo, $instanceId, $figNum, $locale) as $part) {
+        if ($part['nominal_quantity'] - $part['actual_quantity'] > 0) {
+            $hasMissing = true;
+        }
+        if ($part['damaged_quantity'] > 0) {
+            $hasDamaged = true;
+        }
+    }
+    if ($hasMissing) {
+        return 'missing';
+    }
+    if ($hasDamaged) {
+        return 'damaged';
+    }
+    return 'complete';
+}
+
+/**
+ * Groups a flat instance list (getAllLooseMinifigs()/
+ * getLooseMinifigsForThemes()) by minifig type, one entry per distinct
+ * model — "Meine Minifiguren" shows one card per model instead of one per
+ * physical copy, with a complete/damaged/missing instance count
+ * (getOwnedMinifigInstanceStatus()) replacing the per-copy location/
+ * condition detail that no longer applies once several copies (possibly in
+ * different locations/conditions) are collapsed into one card. The
+ * representative instance (lowest id, i.e. first added — guaranteed by the
+ * id-ascending order both source queries already sort by) is what the card
+ * links to; getOwnedMinifigInstancesForModel() (src/owned_minifigs.php) is
+ * how the detail page's own dropdown reaches the others afterwards.
+ *
+ * @param array<int, array{id:int, minifig_id:int, fig_num:string, name:?string, thumbnail:?string}> $instances
+ * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, representative_id:int, complete_count:int, damaged_count:int, missing_count:int}>
+ */
+function groupLooseMinifigsByModel(PDO $pdo, array $instances, string $locale = 'en'): array
+{
+    $groups = [];
+    foreach ($instances as $instance) {
+        $minifigId = $instance['minifig_id'];
+        if (!isset($groups[$minifigId])) {
+            $groups[$minifigId] = [
+                'minifig_id' => $minifigId,
+                'fig_num' => $instance['fig_num'],
+                'name' => $instance['name'],
+                'thumbnail' => $instance['thumbnail'],
+                'representative_id' => $instance['id'],
+                'complete_count' => 0,
+                'damaged_count' => 0,
+                'missing_count' => 0,
+            ];
+        }
+        $status = getOwnedMinifigInstanceStatus($pdo, $instance['id'], $instance['fig_num'], $locale);
+        $groups[$minifigId][$status . '_count']++;
+    }
+    return array_values($groups);
 }
 
 /**

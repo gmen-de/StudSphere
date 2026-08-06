@@ -827,10 +827,11 @@ function renderMinifigDetailModal(): string
       });
   }
 
-  // .minifig-card is also used by renderOwnedMinifigCard() (src/minifigs.php)
-  // for a real <a href="?page=owned_minifig_detail&..."> link — that one has
-  // no data-minifig-id at all, so it's excluded here and just navigates
-  // natively instead of opening this generic catalog-wide modal.
+  // .minifig-card is also used by renderOwnedMinifigGroupCard()
+  // (src/minifigs.php) for a real <a href="?page=owned_minifig_detail&...">
+  // link — that one has no data-minifig-id at all, so it's excluded here and
+  // just navigates natively instead of opening this generic catalog-wide
+  // modal.
   document.addEventListener('click', function(e) {
     var card = e.target.closest('.minifig-card');
     if (card && card.dataset.minifigId) {

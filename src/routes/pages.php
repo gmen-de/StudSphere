@@ -2922,19 +2922,19 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs') {
 }
 
 if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_all') {
-    $looseMinifigs = getAllLooseMinifigs($pdo);
+    $minifigGroups = groupLooseMinifigsByModel($pdo, getAllLooseMinifigs($pdo), getLocale());
 
     $content = '<h1>' . htmlspecialchars(t('nav_my_minifigs_all')) . '</h1>';
-    if (empty($looseMinifigs)) {
+    if (empty($minifigGroups)) {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('my_minifigs_empty')) . '</p></section>';
     } else {
-        // renderOwnedMinifigCard() links straight to owned_minifig_detail —
-        // no modal-click delegation involved here (unlike a plain
-        // .minifig-card), so no renderPartDetailModal()/renderMinifigDetailModal()
-        // markup is needed on this page.
+        // renderOwnedMinifigGroupCard() links straight to
+        // owned_minifig_detail — no modal-click delegation involved here
+        // (unlike a plain .minifig-card), so no renderPartDetailModal()/
+        // renderMinifigDetailModal() markup is needed on this page.
         $content .= '<div class="minifigs-grid">';
-        foreach ($looseMinifigs as $instance) {
-            $content .= renderOwnedMinifigCard($instance);
+        foreach ($minifigGroups as $group) {
+            $content .= renderOwnedMinifigGroupCard($group);
         }
         $content .= '</div>';
     }
@@ -2990,11 +2990,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_themes') {
         // parent still correctly shows nothing here while its subtheme
         // tiles (which DO use the recursive id group, for the tile grid
         // above) lead somewhere that does.
-        $looseMinifigs = getLooseMinifigsForThemes($pdo, [$themeParam]);
-        if (!empty($looseMinifigs)) {
+        $minifigGroups = groupLooseMinifigsByModel($pdo, getLooseMinifigsForThemes($pdo, [$themeParam]), getLocale());
+        if (!empty($minifigGroups)) {
             $content .= '<div class="minifigs-grid">';
-            foreach ($looseMinifigs as $instance) {
-                $content .= renderOwnedMinifigCard($instance);
+            foreach ($minifigGroups as $group) {
+                $content .= renderOwnedMinifigGroupCard($group);
             }
             $content .= '</div>';
         }
@@ -3081,6 +3081,30 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_minifig_detail') {
         ? '<a href="?page=owned_minifig_detail&id=' . $adjacentOwnedMinifigs['next'] . '">' . htmlspecialchars(t('owned_set_instance_label', ['n' => (string) ($ownedMinifigInstanceNumber + 1)])) . ' &rsaquo;</a>'
         : '<span></span>';
     $content .= '</div>';
+
+    // Instance picker — jumps straight to any other owned copy of this same
+    // model (getOwnedMinifigInstancesForModel()), the detail-page counterpart
+    // to "Meine Minifiguren"'s grouped card (renderOwnedMinifigGroupCard()):
+    // that card links to just one representative copy, this is how the rest
+    // are reached. Plain navigation (not a live DOM swap, unlike the compact
+    // modal's own instance picker) since the whole page - tabs, sidebar
+    // table, action bar - differs per instance.
+    $ownedMinifigAllInstances = getOwnedMinifigInstancesForModel($pdo, $ownedMinifigInstance['minifig_id'], $ownedMinifigInstance['fig_num'], getLocale());
+    if (count($ownedMinifigAllInstances) > 1) {
+        $content .= '<label class="minifig-modal-instance-picker">';
+        $content .= '<span>' . htmlspecialchars(t('owned_minifig_instance_picker_label')) . '</span>';
+        $content .= '<select onchange="if (this.value) { window.location.href = this.value; }">';
+        foreach ($ownedMinifigAllInstances as $i => $inst) {
+            $optLocation = implode(' -> ', array_column(getStorageLocationAncestors($inst['location_id']), 'name'));
+            $optCond = $inst['condition_type'] === 'new' ? t('condition_new') : t('condition_used');
+            $optLabel = t('owned_set_instance_label', ['n' => (string) ($i + 1)])
+                . ' - ' . $optLocation . ' - ' . $optCond . ' - ' . t('minifig_status_' . $inst['status']);
+            $selectedAttr = $inst['id'] === $ownedMinifigInstance['id'] ? ' selected' : '';
+            $content .= '<option value="?page=owned_minifig_detail&id=' . $inst['id'] . '"' . $selectedAttr . '>' . htmlspecialchars($optLabel) . '</option>';
+        }
+        $content .= '</select>';
+        $content .= '</label>';
+    }
 
     // Links row — same BrickLink/Rebrickable pair the compact minifig modal
     // shows (getOrFetchBricklinkMinifigId()-backed search/catalog links, see
