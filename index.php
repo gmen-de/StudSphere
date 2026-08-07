@@ -132,6 +132,13 @@ function getNavMenu(PDO $pdo): array
 
     $ownedMinifigThemeTree = getOwnedMinifigThemeTree($pdo);
     $myMinifigsChildren = buildOwnedThemeNavItems($ownedMinifigThemeTree, getSetThemeChildren($ownedMinifigThemeTree, null), '?page=my_minifigs_themes&theme=');
+    // Static entry ahead of the dynamic theme list, set off by a divider
+    // (see renderNavDropdownItems()'s 'divider' handling below).
+    array_unshift(
+        $myMinifigsChildren,
+        ['labelKey' => 'nav_my_minifigs_top100', 'href' => '?page=my_minifigs_top100'],
+        ['divider' => true]
+    );
 
     return [
         ['icon' => 'dashboard', 'labelKey' => 'dashboard_title', 'href' => $_SERVER['PHP_SELF'], 'children' => []],
@@ -190,14 +197,22 @@ function buildOwnedThemeNavItems(array $tree, array $themeNodes, string $baseHre
  * Renders one level of nav-dropdown items, recursing into a ".nav-subdropdown"
  * flyout for any item that carries its own 'children' (see
  * buildOwnedThemeNavItems()). Items may use either 'label' (already a
- * display string, e.g. a theme name) or 'labelKey' (translated).
+ * display string, e.g. a theme name) or 'labelKey' (translated). An item
+ * shaped as ['divider' => true] (see getNavMenu()'s "Meine Minifiguren"
+ * entry) renders as a plain separator instead of a link — generic, not
+ * specific to any one dropdown, so any future static-entry-above-a-dynamic-
+ * list case can reuse it the same way.
  *
- * @param array<int, array{label?:string, labelKey?:string, href:string, children?:array}> $items
+ * @param array<int, array{label?:string, labelKey?:string, href?:string, children?:array, divider?:bool}> $items
  */
 function renderNavDropdownItems(array $items): string
 {
     $html = '';
     foreach ($items as $item) {
+        if (!empty($item['divider'])) {
+            $html .= '<hr class="nav-dropdown-divider">';
+            continue;
+        }
         $label = $item['label'] ?? t($item['labelKey']);
         $href = htmlspecialchars($item['href']);
         if (!empty($item['children'])) {

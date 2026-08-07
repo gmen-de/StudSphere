@@ -123,6 +123,46 @@ function getOwnedMinifigInstancesForModel(PDO $pdo, int $minifigId, string $figN
 }
 
 /**
+ * The N owned minifigs (model + condition) with the highest unit BrickLink
+ * price, most expensive first — powers the "Top 100 Mini Figuren" nav
+ * entry. Ranked by unit price, not total holdings value (price × quantity):
+ * a model owned in both conditions gets one row per condition (its own
+ * bricklink_price_new/used), since the two aren't really the same product
+ * from a valuation standpoint — a model can therefore appear twice.
+ * $quantity is how many of that exact model+condition combo are owned,
+ * shown alongside but not factored into the ranking.
+ *
+ * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, condition_type:string, quantity:int, representative_instance_id:int, unit_price:float, currency:?string}>
+ */
+function getTopValuedOwnedMinifigs(PDO $pdo, int $limit = 100): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT m.id AS minifig_id, m.fig_num, m.name, m.local_image_path AS thumbnail,
+                msi.condition_type, COUNT(*) AS quantity, MIN(msi.id) AS representative_instance_id,
+                CASE msi.condition_type WHEN 'new' THEN m.bricklink_price_new ELSE m.bricklink_price_used END AS unit_price,
+                m.bricklink_price_currency AS currency
+         FROM minifig_storage_items msi
+         INNER JOIN minifigs m ON m.id = msi.minifig_id
+         GROUP BY m.id, msi.condition_type, m.fig_num, m.name, m.local_image_path,
+                  m.bricklink_price_new, m.bricklink_price_used, m.bricklink_price_currency
+         HAVING unit_price IS NOT NULL
+         ORDER BY unit_price DESC
+         LIMIT ?"
+    );
+    $stmt->bindValue(1, $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['minifig_id'] = (int) $row['minifig_id'];
+        $row['quantity'] = (int) $row['quantity'];
+        $row['representative_instance_id'] = (int) $row['representative_instance_id'];
+        $row['unit_price'] = (float) $row['unit_price'];
+    }
+    unset($row);
+    return $rows;
+}
+
+/**
  * Removes one minifig instance entirely: unlinks its photo files (DB rows
  * cascade via FK), deletes the row (minifig_storage_item_parts cascades via
  * FK too). No deleteStorageLocation() call, unlike removeOwnedSet() — a

@@ -355,6 +355,12 @@ header .brand small {
   text-decoration: none;
 }
 
+.nav-dropdown-divider {
+  border: none;
+  border-top: 1px solid rgba(148, 163, 184, 0.3);
+  margin: 0.3rem 0.5rem;
+}
+
 .nav-dropdown-item {
   position: relative;
 }
@@ -2194,6 +2200,32 @@ footer {
 .set-detail-table td {
   padding: 0.4rem 0;
   width: 100%;
+}
+
+/* "Top 100 Mini Figuren" (my_minifigs_top100, src/routes/pages.php) — a
+   multi-column data table, unlike .set-detail-table's usual two-column
+   key/value layout, so its own td width overrides the 100%-width default
+   above (which only makes sense with a single data column). */
+.my-minifigs-top100-table td {
+  width: auto;
+  vertical-align: middle;
+}
+
+.my-minifigs-top100-thumb-cell {
+  width: 2.5rem;
+}
+
+.my-minifigs-top100-thumb-cell img {
+  display: block;
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: contain;
+}
+
+.my-minifigs-top100-thumb-cell svg {
+  width: 2rem;
+  height: 2rem;
+  color: #94a3b8;
 }
 
 .set-detail-table-heading {

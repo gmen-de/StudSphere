@@ -3046,6 +3046,43 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_themes') {
     exit;
 }
 
+// Static nav entry above the theme dropdown (getNavMenu(), index.php) —
+// getTopValuedOwnedMinifigs() (src/owned_minifigs.php) does the ranking,
+// this just renders it as a table.
+if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_top100') {
+    $topMinifigs = getTopValuedOwnedMinifigs($pdo, 100);
+
+    $content = '<h1>' . htmlspecialchars(t('nav_my_minifigs_top100')) . '</h1>';
+    if (empty($topMinifigs)) {
+        $content .= '<section class="card"><p>' . htmlspecialchars(t('my_minifigs_top100_empty')) . '</p></section>';
+    } else {
+        $content .= '<div class="set-detail-table-wrap">';
+        $content .= '<table class="set-detail-table my-minifigs-top100-table">';
+        $content .= '<thead><tr>';
+        $content .= '<th>#</th><th></th>';
+        $content .= '<th>' . htmlspecialchars(t('pdf_report_col_name')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('pdf_report_col_quantity')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('my_minifigs_top100_price_column')) . '</th>';
+        $content .= '</tr></thead><tbody>';
+        foreach ($topMinifigs as $i => $row) {
+            $name = $row['name'] ?? $row['fig_num'];
+            $content .= '<tr>';
+            $content .= '<td>' . ($i + 1) . '</td>';
+            $content .= '<td class="my-minifigs-top100-thumb-cell">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</td>';
+            $content .= '<td><a href="?page=owned_minifig_detail&id=' . $row['representative_instance_id'] . '">' . htmlspecialchars($name) . '</a> <span class="hint">' . htmlspecialchars($row['fig_num']) . '</span></td>';
+            $content .= '<td>' . htmlspecialchars($row['condition_type'] === 'new' ? t('condition_new') : t('condition_used')) . '</td>';
+            $content .= '<td>' . formatNumber($row['quantity']) . '</td>';
+            $content .= '<td>' . formatNumber($row['unit_price'], 2) . ' ' . htmlspecialchars(bricklinkCurrencySymbol($row['currency'])) . '</td>';
+            $content .= '</tr>';
+        }
+        $content .= '</tbody></table></div>';
+    }
+
+    renderApp(t('nav_my_minifigs_top100'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('nav_my_minifigs_top100'), 'url' => null]]);
+    exit;
+}
+
 // Mirrors page=owned_set_detail (see that block above for the full
 // reasoning behind the tab-AJAX pattern) — three tabs instead of seven
 // (Bauteile/Beschädigt-Fehlend/Fotos only, no Ersatzteile/Sticker/
