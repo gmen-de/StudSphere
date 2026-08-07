@@ -3064,16 +3064,19 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_top100') {
         $content .= '<th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th>';
         $content .= '<th>' . htmlspecialchars(t('pdf_report_col_quantity')) . '</th>';
         $content .= '<th>' . htmlspecialchars(t('my_minifigs_top100_price_column')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('my_minifigs_top100_total_column')) . '</th>';
         $content .= '</tr></thead><tbody>';
         foreach ($topMinifigs as $i => $row) {
             $name = $row['name'] ?? $row['fig_num'];
+            $currencySymbol = bricklinkCurrencySymbol($row['currency']);
             $content .= '<tr>';
             $content .= '<td>' . ($i + 1) . '</td>';
             $content .= '<td class="my-minifigs-top100-thumb-cell">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</td>';
             $content .= '<td><a href="?page=owned_minifig_detail&id=' . $row['representative_instance_id'] . '">' . htmlspecialchars($name) . '</a> <span class="hint">' . htmlspecialchars($row['fig_num']) . '</span></td>';
             $content .= '<td>' . htmlspecialchars($row['condition_type'] === 'new' ? t('condition_new') : t('condition_used')) . '</td>';
             $content .= '<td>' . formatNumber($row['quantity']) . '</td>';
-            $content .= '<td>' . formatNumber($row['unit_price'], 2) . ' ' . htmlspecialchars(bricklinkCurrencySymbol($row['currency'])) . '</td>';
+            $content .= '<td>' . formatNumber($row['unit_price'], 2) . ' ' . htmlspecialchars($currencySymbol) . '</td>';
+            $content .= '<td>' . formatNumber($row['total_value'], 2) . ' ' . htmlspecialchars($currencySymbol) . '</td>';
             $content .= '</tr>';
         }
         $content .= '</tbody></table></div>';

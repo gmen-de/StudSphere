@@ -130,9 +130,11 @@ function getOwnedMinifigInstancesForModel(PDO $pdo, int $minifigId, string $figN
  * bricklink_price_new/used), since the two aren't really the same product
  * from a valuation standpoint — a model can therefore appear twice.
  * $quantity is how many of that exact model+condition combo are owned,
- * shown alongside but not factored into the ranking.
+ * shown alongside but not factored into the ranking; $total_value
+ * (unit_price × quantity) is likewise just a displayed figure, not the sort
+ * key.
  *
- * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, condition_type:string, quantity:int, representative_instance_id:int, unit_price:float, currency:?string}>
+ * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, condition_type:string, quantity:int, representative_instance_id:int, unit_price:float, total_value:float, currency:?string}>
  */
 function getTopValuedOwnedMinifigs(PDO $pdo, int $limit = 100): array
 {
@@ -157,6 +159,7 @@ function getTopValuedOwnedMinifigs(PDO $pdo, int $limit = 100): array
         $row['quantity'] = (int) $row['quantity'];
         $row['representative_instance_id'] = (int) $row['representative_instance_id'];
         $row['unit_price'] = (float) $row['unit_price'];
+        $row['total_value'] = $row['unit_price'] * $row['quantity'];
     }
     unset($row);
     return $rows;

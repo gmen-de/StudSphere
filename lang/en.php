@@ -314,6 +314,7 @@ return [
     'nav_my_minifigs_top100' => 'Top 100 Minifigs',
     'my_minifigs_top100_empty' => 'No priced minifigs found.',
     'my_minifigs_top100_price_column' => 'Price',
+    'my_minifigs_top100_total_column' => 'Total',
     'feature_not_implemented' => 'This feature is not implemented yet.',
     'search_scope_label' => 'Search scope',
     'search_scope_all' => 'StudSphere',
