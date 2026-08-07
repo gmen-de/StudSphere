@@ -334,7 +334,6 @@ return [
     'minifigs_search_placeholder' => 'Nach Minifiguren suchen',
     'minifigs_categories_empty' => 'Keine Minifiguren gefunden.',
     'minifigs_found_count' => '{count} Minifiguren gefunden',
-    'filter_theme_title' => 'Thema',
     'set_detail_not_found_title' => 'Set nicht gefunden',
     'set_detail_page_title' => 'LEGO: {set_num} - {name}',
     'set_detail_not_found' => 'Dieses Set existiert nicht (mehr).',

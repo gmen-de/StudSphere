@@ -1657,107 +1657,40 @@ SCRIPT;
 
 if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
     $searchQuery = trim((string) ($_GET['q'] ?? ''));
-    $selectedThemes = array_values(array_filter(array_map('strval', (array) ($_GET['theme'] ?? []))));
+    $themeParam = isset($_GET['theme']) && $_GET['theme'] !== '' ? (int) $_GET['theme'] : null;
     $pageNum = max(1, (int) ($_GET['p'] ?? 1));
     $perPage = MINIFIGS_SEARCH_PAGE_SIZE;
-    $isBrowsing = $searchQuery === '' && empty($selectedThemes);
+    $isTextSearch = $searchQuery !== '';
+    // Same "text search ignores the theme hierarchy entirely" rule as
+    // sets_search (see that block above) — browsing into a theme shows only
+    // minifigs tagged with that exact theme_id, subthemes are reached by
+    // drilling further into their own tile, not folded into this level.
+    $hasResultsGrid = $isTextSearch || $themeParam !== null;
 
-    // Infinite-scroll continuation request: return just the next batch of
-    // cards as JSON instead of a full page render (mirrors bricks_search).
-    if (!$isBrowsing && ($_GET['ajax'] ?? '') === '1') {
-        header('Content-Type: application/json');
-        $results = searchMinifigs($pdo, $searchQuery, $selectedThemes, $pageNum, $perPage);
-        $lastYearParam = $_GET['lastYear'] ?? null;
-        $startYearKnown = $lastYearParam !== null;
-        $startYear = ($lastYearParam !== null && $lastYearParam !== 'unknown') ? (int) $lastYearParam : null;
-        $grouped = renderYearGroupedCards($results['items'], $startYear, $startYearKnown, 'renderMinifigCard');
-        $hasMore = ($pageNum * $perPage) < $results['total'];
-        echo json_encode([
-            'html' => $grouped['html'],
-            'hasMore' => $hasMore,
-            'lastYear' => $grouped['lastYearKnown'] ? ($grouped['lastYear'] ?? 'unknown') : null,
-        ], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-
-    $content = '<h1>' . htmlspecialchars(t('nav_minifigs_search')) . '</h1>';
-    $content .= '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-search-form">';
-    $content .= '<input type="hidden" name="page" value="minifigs_search">';
-    $content .= '<input type="text" name="q" value="' . htmlspecialchars($searchQuery) . '" placeholder="' . htmlspecialchars(t('minifigs_search_placeholder')) . '">';
-    $content .= '<button type="submit">' . htmlspecialchars(t('search_button')) . '</button>';
-    $content .= '</form>';
-
-    $minifigsBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_minifigs_search'), 'url' => $isBrowsing ? null : '?page=minifigs_search']];
-
-    if ($isBrowsing) {
-        $themes = getMinifigThemes($pdo);
-        if (empty($themes)) {
-            $content .= '<section class="card"><p>' . htmlspecialchars(t('minifigs_categories_empty')) . '</p></section>';
-        } else {
-            $tileImages = getMinifigThemeTileImages($pdo, array_map(function ($theme) {
-                return $theme['theme_id'];
-            }, $themes));
-            $content .= '<div class="category-tile-grid minifig-theme-grid">';
-            foreach ($themes as $theme) {
-                $img = $tileImages[(string) $theme['theme_id']] ?? null;
-                $content .= '<a class="category-tile minifig-theme-tile" href="?page=minifigs_search&theme%5B%5D=' . urlencode((string) $theme['theme_id']) . '">';
-                $content .= '<span class="category-tile-image minifig-theme-tile-image">' . ($img !== null ? '<img src="' . htmlspecialchars($img) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
-                $content .= '<span class="category-tile-label minifig-theme-tile-label">' . htmlspecialchars($theme['name']) . '</span>';
-                $content .= '</a>';
-            }
-            $content .= '</div>';
-        }
-    } else {
-        $results = searchMinifigs($pdo, $searchQuery, $selectedThemes, $pageNum, $perPage);
-        $allThemes = getMinifigThemes($pdo);
-
-        if ($searchQuery !== '') {
-            $minifigsBreadcrumbs[] = ['label' => t('search_results_for', ['query' => $searchQuery]), 'url' => null];
-        } elseif (count($selectedThemes) === 1) {
-            foreach ($allThemes as $theme) {
-                if ((string) $theme['theme_id'] === $selectedThemes[0]) {
-                    $minifigsBreadcrumbs[] = ['label' => $theme['name'], 'url' => null];
-                    break;
-                }
-            }
-        }
-
-        $sidebar = '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-filter-sidebar">';
-        $sidebar .= '<input type="hidden" name="page" value="minifigs_search">';
-        if ($searchQuery !== '') {
-            $sidebar .= '<input type="hidden" name="q" value="' . htmlspecialchars($searchQuery) . '">';
-        }
-        $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('filter_theme_title')) . '</h3><div class="filter-options">';
-        foreach ($allThemes as $theme) {
-            $themeIdStr = (string) $theme['theme_id'];
-            $checked = in_array($themeIdStr, $selectedThemes, true) ? ' checked' : '';
-            $sidebar .= '<label class="filter-checkbox"><input type="checkbox" name="theme[]" value="' . htmlspecialchars($themeIdStr) . '"' . $checked . '> ' . htmlspecialchars($theme['name']) . ' <span class="filter-count">(' . (int) $theme['cnt'] . ')</span></label>';
-        }
-        $sidebar .= '</div></div>';
-        $sidebar .= '<button type="submit" class="filter-apply-button">' . htmlspecialchars(t('filter_apply_button')) . '</button>';
-        $sidebar .= '</form>';
-
-        $main = '<p><a href="?page=minifigs_search">&larr; ' . htmlspecialchars(t('back_to_categories')) . '</a></p>';
-        $main .= '<span class="results-summary">' . htmlspecialchars(t('minifigs_found_count', ['count' => formatNumber($results['total'])])) . '</span>';
-
+    // Mirrors sets_search's own $renderSetsResultsGrid closure — shared by
+    // the text-search branch and the theme-drill-down branch below so the
+    // card grid + infinite-scroll markup isn't duplicated between them.
+    $renderMinifigsResultsGrid = function (array $results, int $pageNum, int $perPage) use ($pdo): string {
+        $html = '<span class="results-summary">' . htmlspecialchars(t('minifigs_found_count', ['count' => formatNumber($results['total'])])) . '</span>';
         if (empty($results['items'])) {
-            $main .= '<section class="card"><p>' . htmlspecialchars(t('minifigs_categories_empty')) . '</p></section>';
-        } else {
-            // Included so a component-part tile inside the minifig modal
-            // (built as a plain .part-card, see renderMinifigDetailModal()'s
-            // script) is picked up by this modal's own document-level click
-            // delegation — same "works unchanged wherever its cards show up"
-            // reasoning as everywhere else renderPartDetailModal() is used.
-            $main .= renderPartDetailModal();
-            $main .= renderMinifigDetailModal();
-            $hasMore = $perPage < $results['total'];
-            $grouped = renderYearGroupedCards($results['items'], null, false, 'renderMinifigCard');
-            $lastYearAttr = $grouped['lastYearKnown'] ? ($grouped['lastYear'] ?? 'unknown') : 'unknown';
-            $main .= '<div class="minifigs-grid" id="minifigs-grid">' . $grouped['html'] . '</div>';
-            $main .= '<div id="minifigs-load-sentinel" class="parts-load-sentinel" data-has-more="' . ($hasMore ? '1' : '0') . '" data-next-page="2" data-last-year="' . htmlspecialchars((string) $lastYearAttr) . '">';
-            $main .= '<span class="parts-load-status" data-loading-text="' . htmlspecialchars(t('parts_loading_more')) . '" data-end-text="' . htmlspecialchars(t('parts_no_more')) . '">' . ($hasMore ? '' : htmlspecialchars(t('parts_no_more'))) . '</span>';
-            $main .= '</div>';
-            $main .= <<<SCRIPT
+            $html .= '<section class="card"><p>' . htmlspecialchars(t('minifigs_categories_empty')) . '</p></section>';
+            return $html;
+        }
+        // Included so a component-part tile inside the minifig modal
+        // (built as a plain .part-card, see renderMinifigDetailModal()'s
+        // script) is picked up by this modal's own document-level click
+        // delegation — same "works unchanged wherever its cards show up"
+        // reasoning as everywhere else renderPartDetailModal() is used.
+        $html .= renderPartDetailModal();
+        $html .= renderMinifigDetailModal();
+        $hasMore = $perPage < $results['total'];
+        $grouped = renderYearGroupedCards($results['items'], null, false, 'renderMinifigCard');
+        $lastYearAttr = $grouped['lastYearKnown'] ? ($grouped['lastYear'] ?? 'unknown') : 'unknown';
+        $html .= '<div class="minifigs-grid" id="minifigs-grid">' . $grouped['html'] . '</div>';
+        $html .= '<div id="minifigs-load-sentinel" class="parts-load-sentinel" data-has-more="' . ($hasMore ? '1' : '0') . '" data-next-page="2" data-last-year="' . htmlspecialchars((string) $lastYearAttr) . '">';
+        $html .= '<span class="parts-load-status" data-loading-text="' . htmlspecialchars(t('parts_loading_more')) . '" data-end-text="' . htmlspecialchars(t('parts_no_more')) . '">' . ($hasMore ? '' : htmlspecialchars(t('parts_no_more'))) . '</span>';
+        $html .= '</div>';
+        $html .= <<<SCRIPT
 <script>
 (function(){
   var sentinel = document.getElementById('minifigs-load-sentinel');
@@ -1823,9 +1756,83 @@ if (isset($_GET['page']) && $_GET['page'] === 'minifigs_search') {
 })();
 </script>
 SCRIPT;
+        return $html;
+    };
+
+    // Infinite-scroll continuation request: return just the next batch of
+    // cards as JSON instead of a full page render (mirrors bricks_search).
+    if ($hasResultsGrid && ($_GET['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        if ($isTextSearch) {
+            $selectedThemeIds = [];
+        } else {
+            $selectedThemeIds = [(string) $themeParam];
+        }
+        $results = searchMinifigs($pdo, $searchQuery, $selectedThemeIds, $pageNum, $perPage);
+        $lastYearParam = $_GET['lastYear'] ?? null;
+        $startYearKnown = $lastYearParam !== null;
+        $startYear = ($lastYearParam !== null && $lastYearParam !== 'unknown') ? (int) $lastYearParam : null;
+        $grouped = renderYearGroupedCards($results['items'], $startYear, $startYearKnown, 'renderMinifigCard');
+        $hasMore = ($pageNum * $perPage) < $results['total'];
+        echo json_encode([
+            'html' => $grouped['html'],
+            'hasMore' => $hasMore,
+            'lastYear' => $grouped['lastYearKnown'] ? ($grouped['lastYear'] ?? 'unknown') : null,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $content = '<h1>' . htmlspecialchars(t('nav_minifigs_search')) . '</h1>';
+    $content .= '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-search-form">';
+    $content .= '<input type="hidden" name="page" value="minifigs_search">';
+    $content .= '<input type="text" name="q" value="' . htmlspecialchars($searchQuery) . '" placeholder="' . htmlspecialchars(t('minifigs_search_placeholder')) . '">';
+    $content .= '<button type="submit">' . htmlspecialchars(t('search_button')) . '</button>';
+    $content .= '</form>';
+
+    $minifigsBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_minifigs_search'), 'url' => $hasResultsGrid ? '?page=minifigs_search' : null]];
+
+    if ($isTextSearch) {
+        $minifigsBreadcrumbs[] = ['label' => t('search_results_for', ['query' => $searchQuery]), 'url' => null];
+        $results = searchMinifigs($pdo, $searchQuery, [], $pageNum, $perPage);
+        $content .= $renderMinifigsResultsGrid($results, $pageNum, $perPage);
+    } else {
+        $tree = getMinifigThemeTree($pdo);
+
+        if ($themeParam !== null) {
+            $ancestors = getThemeAncestors($tree, $themeParam);
+            foreach ($ancestors as $i => $ancestor) {
+                $isLast = $i === count($ancestors) - 1;
+                $minifigsBreadcrumbs[] = [
+                    'label' => $ancestor['name'],
+                    'url' => $isLast ? null : '?page=minifigs_search&theme=' . $ancestor['theme_id'],
+                ];
+            }
         }
 
-        $content .= '<div class="parts-search-layout">' . $sidebar . '<div class="parts-search-main">' . $main . '</div></div>';
+        $children = getSetThemeChildren($tree, $themeParam);
+        if (!empty($children)) {
+            $tileImageGroups = [];
+            foreach ($children as $child) {
+                $tileImageGroups[$child['theme_id']] = getThemeAndDescendantIds($tree, $child['theme_id']);
+            }
+            $tileImages = getMinifigThemeTileImages($pdo, $tileImageGroups);
+            $content .= '<div class="category-tile-grid sets-theme-grid">';
+            foreach ($children as $child) {
+                $img = $tileImages[(string) $child['theme_id']] ?? null;
+                $content .= '<a class="category-tile sets-theme-tile" href="?page=minifigs_search&theme=' . $child['theme_id'] . '">';
+                $content .= '<span class="category-tile-image sets-theme-tile-image">' . ($img !== null ? '<img src="' . htmlspecialchars($img) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
+                $content .= '<span class="category-tile-label sets-theme-tile-label">' . htmlspecialchars($child['name']) . ' (' . $child['recursive_count'] . ')</span>';
+                $content .= '</a>';
+            }
+            $content .= '</div>';
+        } elseif ($themeParam === null) {
+            $content .= '<section class="card"><p>' . htmlspecialchars(t('minifigs_categories_empty')) . '</p></section>';
+        }
+
+        if ($themeParam !== null) {
+            $results = searchMinifigs($pdo, '', [(string) $themeParam], $pageNum, $perPage);
+            $content .= $renderMinifigsResultsGrid($results, $pageNum, $perPage);
+        }
     }
 
     renderApp(t('nav_minifigs_search'), $content, $user, computeAppStats($pdo), $minifigsBreadcrumbs);
@@ -3003,7 +3010,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_themes') {
         foreach ($children as $child) {
             $tileImageGroups[$child['theme_id']] = getThemeAndDescendantIds($tree, $child['theme_id']);
         }
-        $tileImages = getOwnedMinifigThemeTileImages($pdo, $tileImageGroups);
+        $tileImages = getMinifigThemeTileImages($pdo, $tileImageGroups);
         $content .= '<div class="category-tile-grid sets-theme-grid">';
         foreach ($children as $child) {
             $img = $tileImages[(string) $child['theme_id']] ?? null;

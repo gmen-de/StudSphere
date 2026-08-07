@@ -1347,11 +1347,6 @@ footer {
   grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
 }
 
-.minifig-theme-grid {
-  /* Wider column to match the 2x-larger minifig theme tile (see .minifig-theme-tile-image). */
-  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
-}
-
 .parts-grid {
   /* Wider than the category grid: translated (German) names run
      noticeably longer than the English originals, mostly compound words
@@ -1526,24 +1521,6 @@ footer {
 .minifig-card-meta {
   font-size: 0.8rem;
   color: #94a3b8;
-}
-
-/* Minifig theme-overview tiles are their own size independent of the
-   shared .category-tile-image (also used by bricks/sets theme tiles) — 2x
-   the shared 4.5rem base, i.e. what .minifig-card-image used to be before
-   it became 4x. */
-.minifig-theme-tile-image {
-  width: 9rem;
-  height: 9rem;
-}
-
-.minifig-theme-tile-image svg {
-  width: 4.5rem;
-  height: 4.5rem;
-}
-
-.minifig-theme-tile-label {
-  font-size: 0.9rem;
 }
 
 /* Sets theme-overview tiles matched to .set-card-image's 3x scale

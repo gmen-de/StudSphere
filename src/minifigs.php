@@ -233,59 +233,30 @@ function getMinifigSets(PDO $pdo, int $minifigId): array
 }
 
 /**
- * Minifigs have no category field of their own — the only place Rebrickable
- * groups them is via the sets they appear in, so "theme" here is derived by
- * walking minifigs -> inventory_minifigs -> rebrickable_inventories -> sets
- * -> themes (see sets.php's getSetThemes() for why that last join, through
+ * Same tree shape as getSetThemeTree() (src/sets.php) — full parent/child
+ * hierarchy via buildThemeTree(), just counting distinct catalog minifigs
+ * instead of sets. Minifigs have no category field of their own — the only
+ * place Rebrickable groups them is via the sets they appear in, so "theme"
+ * here is derived by walking
+ * minifigs -> inventory_minifigs -> rebrickable_inventories -> sets ->
+ * themes (see sets.php's getSetThemes() for why that last join, through
  * sets.theme, is needed for a display name). A minifig that appears in sets
  * from more than one theme is counted under each — expected, not a bug.
- *
- * @return array<int, array{theme_id:int, name:string, cnt:int}>
+ * Powers the minifigs_search catalog browse; getOwnedMinifigThemeTree()
+ * below is the ownership-scoped counterpart for "Meine Minifiguren".
  */
-function getMinifigThemes(PDO $pdo): array
+function getMinifigThemeTree(PDO $pdo): array
 {
-    $stmt = $pdo->query(
-        'SELECT th.theme_id, th.name, COUNT(DISTINCT m.id) AS cnt
+    $rows = $pdo->query(
+        'SELECT th.theme_id, th.name, th.parent_theme_id, COUNT(DISTINCT m.id) AS direct_count
          FROM themes th
-         INNER JOIN sets s ON s.theme = th.theme_id
-         INNER JOIN rebrickable_inventories ri ON ri.set_num = s.rebrickable_set_num
-         INNER JOIN inventory_minifigs im ON im.inventory_id = ri.inventory_id
-         INNER JOIN minifigs m ON m.id = im.minifig_id
-         GROUP BY th.theme_id, th.name
-         HAVING cnt > 0
-         ORDER BY th.name ASC'
-    );
-    return $stmt->fetchAll();
-}
-
-/**
- * One representative minifig image per theme, for the theme tile grid —
- * mirrors sets.php's getThemeTileImages().
- *
- * @param int[] $themeIds
- * @return array<string, string>
- */
-function getMinifigThemeTileImages(PDO $pdo, array $themeIds): array
-{
-    $stmt = $pdo->prepare(
-        "SELECT m.local_image_path
-         FROM minifigs m
-         INNER JOIN inventory_minifigs im ON im.minifig_id = m.id
-         INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
-         INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num
-         WHERE s.theme = ? AND m.local_image_path IS NOT NULL AND m.local_image_path != ''
-         LIMIT 1"
-    );
-
-    $result = [];
-    foreach ($themeIds as $themeId) {
-        $stmt->execute([$themeId]);
-        $path = $stmt->fetchColumn();
-        if ($path !== false) {
-            $result[(string) $themeId] = (string) $path;
-        }
-    }
-    return $result;
+         LEFT JOIN sets s ON s.theme = CAST(th.theme_id AS CHAR)
+         LEFT JOIN rebrickable_inventories ri ON ri.set_num = s.rebrickable_set_num
+         LEFT JOIN inventory_minifigs im ON im.inventory_id = ri.inventory_id
+         LEFT JOIN minifigs m ON m.id = im.minifig_id
+         GROUP BY th.theme_id, th.name, th.parent_theme_id'
+    )->fetchAll();
+    return buildThemeTree($rows);
 }
 
 /**
@@ -293,7 +264,7 @@ function getMinifigThemeTileImages(PDO $pdo, array $themeIds): array
  * child hierarchy via buildThemeTree(), just counting loose minifig
  * instances (minifig_storage_items) instead of owned_sets rows. A minifig's
  * theme is always derived through the sets it appears in (see
- * getMinifigThemes()'s doc comment above), hence the extra two joins
+ * getMinifigThemeTree()'s doc comment above), hence the extra two joins
  * compared to getOwnedSetThemeTree(). Powers "Meine Minifiguren"'s theme
  * menu (nav flyout + my_minifigs_themes).
  */
@@ -314,16 +285,17 @@ function getOwnedMinifigThemeTree(PDO $pdo): array
 /**
  * Mirrors sets.php's getThemeTileImages() — one representative minifig
  * image per theme tile, searched across the tile's own theme plus every
- * descendant (a parent tile can have zero loose minifigs tagged with it
- * directly while its subthemes have plenty). Deliberately not
- * getMinifigThemeTileImages() above: that one only searches a theme's own
- * literal id (fine for the flat catalog-wide minifig browse it serves), not
- * a group of descendant ids.
+ * descendant (a parent tile can have zero minifigs tagged with it directly
+ * while its subthemes have plenty). Despite the shape matching an "owned"
+ * query, this never actually filters by ownership — it searches all
+ * catalog minifigs regardless of who owns what, so it powers both
+ * "Meine Minifiguren" (my_minifigs_themes) and the minifigs_search catalog
+ * browse's own theme tiles.
  *
  * @param array<int, int[]> $themeIdGroups keyed by the tile's own theme_id
  * @return array<string, string>
  */
-function getOwnedMinifigThemeTileImages(PDO $pdo, array $themeIdGroups): array
+function getMinifigThemeTileImages(PDO $pdo, array $themeIdGroups): array
 {
     $result = [];
     foreach ($themeIdGroups as $tileThemeId => $searchIds) {
@@ -694,7 +666,7 @@ function searchMinifigs(PDO $pdo, string $query, array $selectedThemes, int $pag
 
     $perPage = max(1, $perPage);
     $offset = (max(1, $page) - 1) * $perPage;
-    // Minifigs have no year field of their own (see getMinifigThemes()'s
+    // Minifigs have no year field of their own (see getMinifigThemeTree()'s
     // doc comment) — the earliest year among sets they appear in stands in
     // for it, same derivation, just MIN(year) instead of theme names.
     $stmt = $pdo->prepare(
