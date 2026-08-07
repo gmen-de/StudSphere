@@ -134,34 +134,64 @@ function getOwnedMinifigInstancesForModel(PDO $pdo, int $minifigId, string $figN
  * (unit_price × quantity) is likewise just a displayed figure, not the sort
  * key.
  *
+ * Only instances with getOwnedMinifigInstanceStatus() === 'complete' count
+ * — a damaged or missing-parts copy isn't really worth its full catalog
+ * price, so it's excluded from both the quantity and (if that was the only
+ * owned copy of that model+condition) the list entirely. Status can't be
+ * checked in SQL (it depends on minifig_storage_item_parts vs. the
+ * catalog's own parts list, the same per-part comparison
+ * getMinifigStorageItemPartsWithStatus() does), so this fetches every
+ * priced instance first and groups/filters in PHP — bounded by however many
+ * priced instances exist, fine at personal-collection scale (same tradeoff
+ * groupLooseMinifigsByModel() already makes, src/minifigs.php).
+ *
  * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, condition_type:string, quantity:int, representative_instance_id:int, unit_price:float, total_value:float, currency:?string}>
  */
 function getTopValuedOwnedMinifigs(PDO $pdo, int $limit = 100): array
 {
-    $stmt = $pdo->prepare(
-        "SELECT m.id AS minifig_id, m.fig_num, m.name, m.local_image_path AS thumbnail,
-                msi.condition_type, COUNT(*) AS quantity, MIN(msi.id) AS representative_instance_id,
+    $stmt = $pdo->query(
+        "SELECT msi.id AS instance_id, m.id AS minifig_id, m.fig_num, m.name, m.local_image_path AS thumbnail,
+                msi.condition_type,
                 CASE msi.condition_type WHEN 'new' THEN m.bricklink_price_new ELSE m.bricklink_price_used END AS unit_price,
                 m.bricklink_price_currency AS currency
          FROM minifig_storage_items msi
          INNER JOIN minifigs m ON m.id = msi.minifig_id
-         GROUP BY m.id, msi.condition_type, m.fig_num, m.name, m.local_image_path,
-                  m.bricklink_price_new, m.bricklink_price_used, m.bricklink_price_currency
-         HAVING unit_price IS NOT NULL
-         ORDER BY unit_price DESC
-         LIMIT ?"
+         WHERE (CASE msi.condition_type WHEN 'new' THEN m.bricklink_price_new ELSE m.bricklink_price_used END) IS NOT NULL"
     );
-    $stmt->bindValue(1, $limit, PDO::PARAM_INT);
-    $stmt->execute();
-    $rows = $stmt->fetchAll();
+
+    $locale = getLocale();
+    $groups = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $instanceId = (int) $row['instance_id'];
+        if (getOwnedMinifigInstanceStatus($pdo, $instanceId, $row['fig_num'], $locale) !== 'complete') {
+            continue;
+        }
+        $key = $row['minifig_id'] . ':' . $row['condition_type'];
+        if (!isset($groups[$key])) {
+            $groups[$key] = [
+                'minifig_id' => (int) $row['minifig_id'],
+                'fig_num' => $row['fig_num'],
+                'name' => $row['name'],
+                'thumbnail' => $row['thumbnail'],
+                'condition_type' => $row['condition_type'],
+                'quantity' => 0,
+                'representative_instance_id' => $instanceId,
+                'unit_price' => (float) $row['unit_price'],
+                'currency' => $row['currency'],
+            ];
+        } elseif ($instanceId < $groups[$key]['representative_instance_id']) {
+            $groups[$key]['representative_instance_id'] = $instanceId;
+        }
+        $groups[$key]['quantity']++;
+    }
+
+    $rows = array_values($groups);
     foreach ($rows as &$row) {
-        $row['minifig_id'] = (int) $row['minifig_id'];
-        $row['quantity'] = (int) $row['quantity'];
-        $row['representative_instance_id'] = (int) $row['representative_instance_id'];
-        $row['unit_price'] = (float) $row['unit_price'];
         $row['total_value'] = $row['unit_price'] * $row['quantity'];
     }
     unset($row);
+    usort($rows, fn (array $a, array $b): int => $b['unit_price'] <=> $a['unit_price']);
+    $rows = array_slice($rows, 0, $limit);
     return $rows;
 }
 
