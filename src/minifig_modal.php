@@ -67,6 +67,12 @@ function renderMinifigDetailModal(): string
         'selectPlaceholder' => t('add_stock_select_placeholder'),
         'noChildren' => t('add_stock_no_children'),
         'addButton' => t('add_stock_button'),
+        // Raw template, {count} left in place (no $vars passed to t()) — the
+        // actual count is only known client-side once $parts loads, filled
+        // in via a plain .replace() the same way instanceStatusSummary()
+        // already does for {intact}/{damaged}/{missing} further down.
+        'fetchMissingImagesLabelTemplate' => t('part_color_images_fetch_missing_button'),
+        'fetchMissingImagesDone' => t('part_color_images_fetch_done'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $main .= <<<SCRIPT
@@ -505,6 +511,93 @@ function renderMinifigDetailModal(): string
       empty.textContent = texts.componentsEmpty;
       content.appendChild(empty);
     } else {
+      // "Fehlende Bilder holen" — parts without a cached color-correct
+      // (LDraw-rendered) image show a generic/possibly-wrong-colored
+      // fallback (see the thumbnail fallback chain below) with no way to
+      // fix that from this modal, unlike a set's own inventory grid
+      // (renderFetchMissingImagesButton()/Script(), src/part_images.php).
+      // Reimplemented here (not those shared functions) rather than reused:
+      // this modal's tiles already use data-color-id for the surrogate
+      // colors.id (part status lookups), colliding with what that generic
+      // click handler expects there (Rebrickable's own numeric color_id) —
+      // data-fetch-color-id avoids the clash. One button covers both the
+      // components tiles below and the add-to-collection rows further down
+      // (same underlying $parts, scoped to the whole modal content div).
+      var missingImageParts = parts.filter(function(p) {
+        return !p.ldraw_thumbnail && p.rebrickable_color_id;
+      });
+      if (missingImageParts.length > 0) {
+        var fetchBar = document.createElement('div');
+        fetchBar.className = 'fetch-missing-images-bar';
+        var fetchBtn = document.createElement('button');
+        fetchBtn.type = 'button';
+        fetchBtn.className = 'fetch-missing-images-btn';
+        var fetchLabel = document.createElement('span');
+        fetchLabel.className = 'fetch-missing-images-label';
+        fetchLabel.textContent = texts.fetchMissingImagesLabelTemplate.replace('{count}', String(missingImageParts.length));
+        fetchBtn.appendChild(fetchLabel);
+        fetchBar.appendChild(fetchBtn);
+        var fetchStatus = document.createElement('span');
+        fetchStatus.className = 'fetch-missing-images-status';
+        fetchStatus.setAttribute('aria-live', 'polite');
+        fetchBar.appendChild(fetchStatus);
+        content.appendChild(fetchBar);
+
+        fetchBtn.addEventListener('click', function() {
+          var targets = Array.prototype.slice.call(content.querySelectorAll('[data-fetch-color-id]'));
+          if (targets.length === 0 || fetchBtn.disabled) {
+            return;
+          }
+          fetchBtn.disabled = true;
+          var total = targets.length;
+          var doneCount = 0;
+          var failedCount = 0;
+          var updateStatus = function() {
+            fetchStatus.textContent = doneCount + ' / ' + total;
+          };
+          updateStatus();
+
+          var processNext = function(index) {
+            if (index >= targets.length) {
+              fetchLabel.textContent = texts.fetchMissingImagesDone;
+              if (failedCount > 0) {
+                fetchStatus.textContent += ' (' + failedCount + ' ✗)';
+              }
+              return;
+            }
+            var el = targets[index];
+            var fd = new FormData();
+            fd.set('action', 'fetch_part_color_image');
+            fd.set('part_id', el.dataset.partId);
+            fd.set('color_id', el.dataset.fetchColorId);
+            fetch('?', { method: 'POST', body: fd, credentials: 'same-origin' })
+              .then(function(r) { return r.json(); })
+              .then(function(res) {
+                el.removeAttribute('data-fetch-color-id');
+                if (res.success) {
+                  var imgSpan = el.querySelector('.part-card-image');
+                  if (imgSpan) {
+                    imgSpan.innerHTML = '<img src="' + res.imagePath + '" alt="">';
+                  }
+                } else {
+                  failedCount++;
+                }
+                doneCount++;
+                updateStatus();
+                processNext(index + 1);
+              })
+              .catch(function() {
+                el.removeAttribute('data-fetch-color-id');
+                failedCount++;
+                doneCount++;
+                updateStatus();
+                processNext(index + 1);
+              });
+          };
+          processNext(0);
+        });
+      }
+
       // .part-card stays the base class (shared box/border styling, plus
       // it's what renderPartDetailModal()'s document-level click delegation
       // matches on — required so the "+" button below can still open that
@@ -523,6 +616,9 @@ function renderMinifigDetailModal(): string
         card.dataset.name = part.name;
         var partThumb = part.ldraw_thumbnail || part.thumbnail || part.remote_thumbnail;
         card.dataset.thumbnail = partThumb || '';
+        if (!part.ldraw_thumbnail && part.rebrickable_color_id) {
+          card.dataset.fetchColorId = part.rebrickable_color_id;
+        }
 
         var addBtn = document.createElement('button');
         addBtn.type = 'button';
@@ -686,6 +782,10 @@ function renderMinifigDetailModal(): string
         var key = part.part_id + ':' + part.color_id;
         var row = document.createElement('div');
         row.className = 'owned-set-minifig-part-row';
+        if (!part.ldraw_thumbnail && part.rebrickable_color_id) {
+          row.dataset.partId = part.part_id;
+          row.dataset.fetchColorId = part.rebrickable_color_id;
+        }
 
         var thumbSpan = document.createElement('span');
         thumbSpan.className = 'part-card-image';
