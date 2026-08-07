@@ -315,6 +315,7 @@ return [
     'my_minifigs_top100_empty' => 'Keine bepreisten Minifiguren gefunden.',
     'my_minifigs_top100_price_column' => 'Preis',
     'my_minifigs_top100_total_column' => 'Gesamt',
+    'my_minifigs_top100_grand_total_label' => 'Gesamtsumme',
     'feature_not_implemented' => 'Diese Funktion ist noch nicht implementiert.',
     'search_scope_label' => 'Suchbereich',
     'search_scope_all' => 'StudSphere',

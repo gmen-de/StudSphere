@@ -3079,7 +3079,17 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_top100') {
             $content .= '<td>' . formatNumber($row['total_value'], 2) . ' ' . htmlspecialchars($currencySymbol) . '</td>';
             $content .= '</tr>';
         }
-        $content .= '</tbody></table></div>';
+        $totalQuantity = array_sum(array_column($topMinifigs, 'quantity'));
+        $totalValue = array_sum(array_column($topMinifigs, 'total_value'));
+        $grandTotalCurrencySymbol = bricklinkCurrencySymbol($topMinifigs[0]['currency']);
+        $content .= '</tbody>';
+        $content .= '<tfoot><tr class="my-minifigs-top100-grand-total">';
+        $content .= '<td colspan="4">' . htmlspecialchars(t('my_minifigs_top100_grand_total_label')) . '</td>';
+        $content .= '<td>' . formatNumber($totalQuantity) . '</td>';
+        $content .= '<td></td>';
+        $content .= '<td>' . formatNumber($totalValue, 2) . ' ' . htmlspecialchars($grandTotalCurrencySymbol) . '</td>';
+        $content .= '</tr></tfoot>';
+        $content .= '</table></div>';
     }
 
     renderApp(t('nav_my_minifigs_top100'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('nav_my_minifigs_top100'), 'url' => null]]);
