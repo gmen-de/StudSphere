@@ -1839,6 +1839,45 @@ SCRIPT;
     exit;
 }
 
+// "Bauen" nav dropdown entry — getBuildableMinifigs() (src/build.php) does
+// all the work, this just renders it as a ranked table. Each row reuses the
+// existing catalog minifig-detail modal (.minifig-card[data-minifig-id],
+// renderMinifigDetailModal(), src/minifig_modal.php) rather than linking
+// anywhere of its own — there's no "owned instance" here to link to, these
+// are plain catalog minifigs the user could assemble, not ones they own yet.
+if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
+    $buildableMinifigs = getBuildableMinifigs($pdo, getLocale());
+
+    $content = '<h1>' . htmlspecialchars(t('nav_build_minifigs')) . '</h1>';
+    if (empty($buildableMinifigs)) {
+        $content .= '<section class="card"><p>' . htmlspecialchars(t('build_minifigs_empty')) . '</p></section>';
+    } else {
+        $content .= renderPartDetailModal();
+        $content .= renderMinifigDetailModal();
+        $content .= '<div class="set-detail-table-wrap">';
+        $content .= '<table class="set-detail-table build-minifigs-table">';
+        $content .= '<thead><tr>';
+        $content .= '<th></th>';
+        $content .= '<th>' . htmlspecialchars(t('pdf_report_col_name')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_buildable')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_missing')) . '</th>';
+        $content .= '</tr></thead><tbody>';
+        foreach ($buildableMinifigs as $row) {
+            $name = $row['name'] ?? $row['fig_num'];
+            $content .= '<tr class="minifig-card" data-minifig-id="' . $row['minifig_id'] . '" role="button" tabindex="0">';
+            $content .= '<td class="build-minifigs-thumb-cell">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</td>';
+            $content .= '<td>' . htmlspecialchars($name) . ' <span class="hint">' . htmlspecialchars($row['fig_num']) . '</span></td>';
+            $content .= '<td>' . formatNumber($row['buildable']) . '</td>';
+            $content .= '<td>' . formatNumber($row['missing_for_next']) . '</td>';
+            $content .= '</tr>';
+        }
+        $content .= '</tbody></table></div>';
+    }
+
+    renderApp(t('nav_build_minifigs'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('nav_build_minifigs'), 'url' => null]]);
+    exit;
+}
+
 if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
     $setId = (int) ($_GET['id'] ?? 0);
     $set = getSetById($pdo, $setId);
