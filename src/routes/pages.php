@@ -1863,10 +1863,13 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
         // filtering happens in-memory after getBuildableMinifigs() rather
         // than pushing it into that function's own SQL, which already does
         // a non-trivial multi-step computation of its own.
+        $buildSearchQuery = trim((string) ($_GET['q'] ?? ''));
         $selectedThemeIds = array_map('intval', (array) ($_GET['theme'] ?? []));
         $priceFrom = isset($_GET['price_from']) && $_GET['price_from'] !== '' ? (float) $_GET['price_from'] : null;
         $priceTo = isset($_GET['price_to']) && $_GET['price_to'] !== '' ? (float) $_GET['price_to'] : null;
         $selectedYear = isset($_GET['year']) && $_GET['year'] !== '' ? (int) $_GET['year'] : null;
+        $pricedOnly = ($_GET['priced_only'] ?? '') === '1';
+        $minBuildable = isset($_GET['min_buildable']) && $_GET['min_buildable'] !== '' ? max(0, (int) $_GET['min_buildable']) : null;
 
         $themeFacetCounts = [];
         $yearFacetCounts = [];
@@ -1890,8 +1893,17 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
         }
         krsort($yearFacetCounts);
 
-        $buildableMinifigs = array_values(array_filter($buildableMinifigs, function (array $row) use ($selectedThemeIds, $priceFrom, $priceTo, $selectedYear): bool {
+        $buildableMinifigs = array_values(array_filter($buildableMinifigs, function (array $row) use ($buildSearchQuery, $selectedThemeIds, $priceFrom, $priceTo, $selectedYear, $pricedOnly, $minBuildable): bool {
+            if ($buildSearchQuery !== '') {
+                $haystack = ($row['name'] ?? '') . ' ' . $row['fig_num'];
+                if (stripos($haystack, $buildSearchQuery) === false) {
+                    return false;
+                }
+            }
             if (!empty($selectedThemeIds) && empty(array_intersect($selectedThemeIds, $row['theme_ids']))) {
+                return false;
+            }
+            if ($pricedOnly && $row['bricklink_price_used'] === null) {
                 return false;
             }
             if ($priceFrom !== null || $priceTo !== null) {
@@ -1908,11 +1920,65 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
             if ($selectedYear !== null && $row['year'] !== $selectedYear) {
                 return false;
             }
+            if ($minBuildable !== null && $row['buildable'] < $minBuildable) {
+                return false;
+            }
             return true;
         }));
 
+        // Two separate <form>s (search bar + sidebar), each carrying the
+        // other's current state as hidden fields, so submitting either one
+        // preserves both — the same pattern bricks_search's own text search
+        // + filter sidebar already use.
+        $buildFilterParams = ['page' => 'build_minifigs'];
+        if ($buildSearchQuery !== '') {
+            $buildFilterParams['q'] = $buildSearchQuery;
+        }
+        if (!empty($selectedThemeIds)) {
+            $buildFilterParams['theme'] = $selectedThemeIds;
+        }
+        if ($priceFrom !== null) {
+            $buildFilterParams['price_from'] = $priceFrom;
+        }
+        if ($priceTo !== null) {
+            $buildFilterParams['price_to'] = $priceTo;
+        }
+        if ($selectedYear !== null) {
+            $buildFilterParams['year'] = $selectedYear;
+        }
+        if ($pricedOnly) {
+            $buildFilterParams['priced_only'] = '1';
+        }
+        if ($minBuildable !== null) {
+            $buildFilterParams['min_buildable'] = $minBuildable;
+        }
+
+        $renderBuildHiddenFields = function (array $params, array $exclude) {
+            $html = '';
+            foreach ($params as $key => $value) {
+                if (in_array($key, $exclude, true)) {
+                    continue;
+                }
+                foreach ((array) $value as $singleValue) {
+                    $name = is_array($value) ? $key . '[]' : $key;
+                    $html .= '<input type="hidden" name="' . htmlspecialchars($name) . '" value="' . htmlspecialchars((string) $singleValue) . '">';
+                }
+            }
+            return $html;
+        };
+
+        $hasActiveFilter = $buildSearchQuery !== '' || !empty($selectedThemeIds) || $priceFrom !== null || $priceTo !== null || $selectedYear !== null || $pricedOnly || $minBuildable !== null;
+
+        $content .= '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-search-form">';
+        $content .= '<input type="hidden" name="page" value="build_minifigs">';
+        $content .= $renderBuildHiddenFields($buildFilterParams, ['page', 'q']);
+        $content .= '<input type="text" name="q" value="' . htmlspecialchars($buildSearchQuery) . '" placeholder="' . htmlspecialchars(t('build_minifigs_search_placeholder')) . '">';
+        $content .= '<button type="submit">' . htmlspecialchars(t('search_button')) . '</button>';
+        $content .= '</form>';
+
         $sidebar = '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-filter-sidebar">';
         $sidebar .= '<input type="hidden" name="page" value="build_minifigs">';
+        $sidebar .= $renderBuildHiddenFields($buildFilterParams, ['page', 'theme', 'price_from', 'price_to', 'year', 'priced_only', 'min_buildable']);
 
         $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('build_minifigs_filter_theme')) . '</h3><div class="filter-options">';
         foreach ($themeFacetNames as $themeId => $themeName) {
@@ -1925,7 +1991,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
         $sidebar .= '<input type="number" step="0.01" min="0" name="price_from" placeholder="' . htmlspecialchars(t('build_minifigs_filter_price_from')) . '" value="' . ($priceFrom !== null ? htmlspecialchars((string) $priceFrom) : '') . '">';
         $sidebar .= '<span>&ndash;</span>';
         $sidebar .= '<input type="number" step="0.01" min="0" name="price_to" placeholder="' . htmlspecialchars(t('build_minifigs_filter_price_to')) . '" value="' . ($priceTo !== null ? htmlspecialchars((string) $priceTo) : '') . '">';
-        $sidebar .= '</div></div>';
+        $sidebar .= '</div>';
+        $sidebar .= '<label class="filter-checkbox"><input type="checkbox" name="priced_only" value="1"' . ($pricedOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_minifigs_filter_priced_only')) . '</label>';
+        $sidebar .= '</div>';
 
         $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('build_minifigs_filter_year')) . '</h3>';
         $sidebar .= '<select name="year"><option value="">' . htmlspecialchars(t('build_minifigs_filter_year_all')) . '</option>';
@@ -1935,8 +2003,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
         }
         $sidebar .= '</select></div>';
 
+        $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('build_minifigs_filter_min_buildable')) . '</h3>';
+        $sidebar .= '<input type="number" min="1" step="1" name="min_buildable" placeholder="' . htmlspecialchars(t('build_minifigs_filter_min_buildable_placeholder')) . '" value="' . ($minBuildable !== null ? (string) $minBuildable : '') . '"></div>';
+
         $sidebar .= '<button type="submit" class="filter-apply-button">' . htmlspecialchars(t('filter_apply_button')) . '</button>';
-        if (!empty($selectedThemeIds) || $priceFrom !== null || $priceTo !== null || $selectedYear !== null) {
+        if ($hasActiveFilter) {
             $sidebar .= '<a href="?page=build_minifigs" class="filter-reset-link">' . htmlspecialchars(t('filter_reset_button')) . '</a>';
         }
         $sidebar .= '</form>';
