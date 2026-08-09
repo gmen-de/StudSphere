@@ -110,7 +110,13 @@ function getBuildableSetsResults(PDO $pdo, bool $exclusiveOnly, bool $exclusiveR
     $sql = 'SELECT bsc.*, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail, s.year
             FROM buildable_sets_cache bsc
             INNER JOIN sets s ON s.id = bsc.set_id';
-    $conditions = [];
+    // total_nominal = 0 means this catalog entry has no own inventory_parts
+    // at all — mostly "Super Pack"/bundle set numbers that just repackage
+    // other complete sets rather than listing their own parts. Without this
+    // exclusion they'd trivially read 100% (same zero-nominal convention as
+    // getOwnedSetCompleteness()) and clutter the top of a % sort with
+    // entries that aren't a genuine "build this from parts" target.
+    $conditions = ['bsc.total_nominal > 0'];
     if ($exclusiveOnly || $exclusiveRareOnly) {
         $conditions[] = 'bsc.exclusive_actual >= bsc.exclusive_nominal';
     }
