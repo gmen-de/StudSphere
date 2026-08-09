@@ -1840,11 +1840,11 @@ SCRIPT;
 }
 
 // "Bauen" nav dropdown entry — getBuildableMinifigs() (src/build.php) does
-// all the work, this just renders it as a ranked table. Each row reuses the
-// existing catalog minifig-detail modal (.minifig-card[data-minifig-id],
-// renderMinifigDetailModal(), src/minifig_modal.php) rather than linking
-// anywhere of its own — there's no "owned instance" here to link to, these
-// are plain catalog minifigs the user could assemble, not ones they own yet.
+// all the work, this just renders it as a ranked table. Each row opens the
+// dedicated "Bauen" modal (renderBuildMinifigModal(), .build-minifig-row
+// click delegation defined in that same function) — not the generic
+// catalog minifig-detail modal these cards would otherwise open elsewhere,
+// since this page's whole point is a build action, not just viewing.
 if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
     $buildableMinifigs = getBuildableMinifigs($pdo, getLocale());
 
@@ -1852,8 +1852,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
     if (empty($buildableMinifigs)) {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('build_minifigs_empty')) . '</p></section>';
     } else {
-        $content .= renderPartDetailModal();
-        $content .= renderMinifigDetailModal();
+        $content .= renderBuildMinifigModal();
 
         // Minifig IDs still needing a BrickLink price — a fetch is 2-3
         // sequential external HTTP calls each (see refreshBricklinkPriceForMinifig()'s
@@ -1947,7 +1946,7 @@ SCRIPT;
             $priceText = $row['bricklink_price_used'] !== null
                 ? formatNumber($row['bricklink_price_used'], 2) . ' ' . bricklinkCurrencySymbol($row['bricklink_price_currency'])
                 : t('build_minifigs_price_unknown');
-            $content .= '<tr class="minifig-card" data-minifig-id="' . $row['minifig_id'] . '" role="button" tabindex="0">';
+            $content .= '<tr class="build-minifig-row" data-minifig-id="' . $row['minifig_id'] . '" role="button" tabindex="0">';
             $content .= '<td class="build-minifigs-thumb-cell">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</td>';
             $content .= '<td>' . htmlspecialchars($name) . ' <span class="hint">' . htmlspecialchars($row['fig_num']) . '</span></td>';
             $content .= '<td>' . htmlspecialchars($priceText) . '</td>';

@@ -1774,6 +1774,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_m
     exit;
 }
 
+// "Bauen" modal (renderBuildMinifigModal(), src/build.php) — mirrors
+// action=minifig_detail's bare-object response shape (no success/true
+// wrapper on the happy path, the JS side just checks for a minifig_id key).
+if (isset($_GET['action']) && $_GET['action'] === 'build_minifig_detail') {
+    header('Content-Type: application/json');
+    $buildDetailMinifigId = (int) ($_GET['minifig_id'] ?? 0);
+    $buildDetail = $buildDetailMinifigId > 0 ? getBuildableMinifigDetail($pdo, $buildDetailMinifigId, getLocale()) : null;
+    if ($buildDetail === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('minifig_not_found')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $buildDetail['price_text'] = $buildDetail['bricklink_price_used'] !== null
+        ? formatNumber($buildDetail['bricklink_price_used'], 2) . ' ' . bricklinkCurrencySymbol($buildDetail['bricklink_price_currency'])
+        : null;
+    echo json_encode($buildDetail, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'build_minifig') {
+    header('Content-Type: application/json');
+    try {
+        $buildMinifigId = (int) ($_POST['minifig_id'] ?? 0);
+        $buildQuantity = (int) ($_POST['quantity'] ?? 0);
+        $buildConditionType = ($_POST['condition_type'] ?? '') === 'new' ? 'new' : 'used';
+        $buildDestinationLocationId = (int) ($_POST['destination_location_id'] ?? 0);
+
+        if ($buildMinifigId <= 0 || $buildQuantity <= 0 || $buildDestinationLocationId <= 0) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        $buildResult = buildMinifigFromStock($pdo, $buildMinifigId, $buildQuantity, $buildConditionType, $buildDestinationLocationId);
+        $stats = refreshAppStatsCache($pdo);
+
+        echo json_encode([
+            'success' => true,
+            'createdCount' => count($buildResult['createdInstanceIds']),
+            'stats' => $stats,
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 // Dashboard widget management — add/remove are plain form POSTs (no
 // action="" on the <form>, so they submit back to the bare dashboard URL and
 // the request just falls through to the normal dashboard render further

@@ -466,13 +466,13 @@ function setStorageItemSpareQuantity(int $locationId, int $partId, int $colorId,
  * does, so a part materialized into a set's own inventory doesn't show up
  * here as if it were separately-stored loose stock.
  *
- * @return array<int, array{location_id:int, location_path:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int}>
+ * @return array<int, array{location_id:int, location_path:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int, damaged_quantity:int}>
  */
 function getPartStock(int $partId): array
 {
     $pdo = getPDO();
     $stmt = $pdo->prepare(
-        "SELECT si.location_id, si.condition_type, si.quantity,
+        "SELECT si.location_id, si.condition_type, si.quantity, si.damaged_quantity,
                 c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb
          FROM storage_items si
          INNER JOIN storage_locations sl ON sl.id = si.location_id
@@ -488,6 +488,7 @@ function getPartStock(int $partId): array
         $row['location_path'] = getStorageLocationPath($row['location_id']);
         $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
         $row['quantity'] = (int) $row['quantity'];
+        $row['damaged_quantity'] = (int) $row['damaged_quantity'];
     }
     unset($row);
     return $rows;

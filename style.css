@@ -2234,26 +2234,26 @@ footer {
   font-weight: 700;
 }
 
-/* "Baubare Minifiguren" (build_minifigs, src/routes/pages.php) — each row
-   doubles as a .minifig-card for the existing catalog-wide click delegation
-   (renderMinifigDetailModal(), src/minifig_modal.php), so it needs its
-   table-row display explicitly restored: tr.minifig-card (tag+class) beats
-   the shared .minifig-card selector's own display:flex (class-only) on
-   specificity alone. Also needs the plain .set-detail-table td width:100%
-   default overridden the same way the Top-100 table already does, since
-   this is likewise a multi-column table, not a two-column key/value one. */
+/* "Baubare Minifiguren" (build_minifigs, src/routes/pages.php) — needs the
+   plain .set-detail-table td width:100% default overridden the same way
+   the Top-100 table already does, since this is likewise a multi-column
+   table, not a two-column key/value one. */
 .build-minifigs-table td {
   width: auto;
   vertical-align: middle;
 }
 
-tr.minifig-card {
-  display: table-row;
+/* Each row opens the "Bauen" modal (renderBuildMinifigModal(),
+   src/build.php) via its own click delegation — a plain custom class with
+   no other rule setting `display`, so (unlike reusing an existing card
+   class here would) a <tr> naturally keeps its default table-row display,
+   no override needed. */
+.build-minifig-row {
   cursor: pointer;
 }
 
-tr.minifig-card:hover,
-tr.minifig-card:focus-visible {
+.build-minifig-row:hover,
+.build-minifig-row:focus-visible {
   background: #eff6ff;
   outline: none;
 }
