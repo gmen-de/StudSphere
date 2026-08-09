@@ -2144,11 +2144,12 @@ footer {
 
 /* "Bauen" modal (renderBuildMinifigModal(), src/build.php) — the full
    40rem detail-page hero size is too large for a compact dialog, scaled to
-   66% (combined-class selector beats .set-detail-image's own width/height
-   on specificity, no !important needed). */
+   50% (combined-class selector beats .set-detail-image's own width/height/
+   padding on specificity, no !important needed). */
 .set-detail-image.build-minifig-image {
-  width: 26.4rem;
-  height: 26.4rem;
+  width: 20rem;
+  height: 20rem;
+  padding: 3px;
 }
 
 .set-detail-info {
