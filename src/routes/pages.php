@@ -1948,7 +1948,6 @@ SCRIPT;
         $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_theme')) . '</th>';
         $content .= '<th>' . htmlspecialchars(t('my_minifigs_top100_price_column')) . '</th>';
         $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_buildable')) . '</th>';
-        $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_missing')) . '</th>';
         $content .= '</tr></thead><tbody>';
         foreach ($buildableMinifigs as $row) {
             $name = $row['name'] ?? $row['fig_num'];
@@ -1961,7 +1960,6 @@ SCRIPT;
             $content .= '<td class="hint">' . htmlspecialchars($row['theme_path']) . '</td>';
             $content .= '<td>' . htmlspecialchars($priceText) . '</td>';
             $content .= '<td>' . formatNumber($row['buildable']) . '</td>';
-            $content .= '<td>' . formatNumber($row['missing']) . '</td>';
             $content .= '</tr>';
         }
         $content .= '</tbody></table></div>';
