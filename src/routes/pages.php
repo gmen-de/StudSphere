@@ -1952,7 +1952,7 @@ SCRIPT;
             $content .= '<td>' . htmlspecialchars($name) . ' <span class="hint">' . htmlspecialchars($row['fig_num']) . '</span></td>';
             $content .= '<td>' . htmlspecialchars($priceText) . '</td>';
             $content .= '<td>' . formatNumber($row['buildable']) . '</td>';
-            $content .= '<td>' . formatNumber($row['missing_for_next']) . '</td>';
+            $content .= '<td>' . formatNumber($row['missing']) . '</td>';
             $content .= '</tr>';
         }
         $content .= '</tbody></table></div>';

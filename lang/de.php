@@ -297,7 +297,7 @@ return [
     'nav_build_minifigs' => 'Baubare Minifiguren',
     'build_minifigs_empty' => 'Mit deinem aktuellen losen Teile-Bestand passt noch keine Minifigur aus dem Katalog.',
     'build_minifigs_col_buildable' => 'Baubar',
-    'build_minifigs_col_missing' => 'Fehlend für 1 weitere',
+    'build_minifigs_col_missing' => 'Fehlende Teile',
     'build_minifigs_price_unknown' => 'Noch nicht abgerufen',
     'build_minifigs_fetch_prices_button' => 'Preise abrufen ({count})',
     'build_minifigs_fetch_prices_heading' => 'BrickLink-Preise werden abgerufen',

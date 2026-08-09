@@ -297,7 +297,7 @@ return [
     'nav_build_minifigs' => 'Buildable Minifigs',
     'build_minifigs_empty' => 'No catalog minifig matches your current loose parts stock yet.',
     'build_minifigs_col_buildable' => 'Buildable',
-    'build_minifigs_col_missing' => 'Missing for 1 more',
+    'build_minifigs_col_missing' => 'Missing parts',
     'build_minifigs_price_unknown' => 'Not fetched yet',
     'build_minifigs_fetch_prices_button' => 'Fetch prices ({count})',
     'build_minifigs_fetch_prices_heading' => 'Fetching BrickLink prices',

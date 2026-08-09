@@ -32,17 +32,21 @@ require_once __DIR__ . '/minifigs.php';
  *
  * $buildable = how many complete copies are assembleable right now (the
  * bottleneck part's floor(stock / needed-per-copy) across every required
- * part). $missing_for_next = total individual pieces still needed to push
- * that up by one more copy — more useful than "missing to build one from
- * zero", since $buildable is already folded in.
+ * part). $missing = total individual pieces still short of a single first
+ * copy (sum of max(0, needed - have) per part) — deliberately NOT "missing
+ * for one more beyond what's already buildable": that alternative can
+ * mathematically never read 0 (there's always something short of an
+ * *additional* copy), which misleadingly hid the real answer to "is there
+ * a figure I already have everything for" — yes, whenever $missing is 0,
+ * exactly the same condition as $buildable >= 1.
  *
  * Sorted by BrickLink price (bricklink_price_used — a hand-assembled figure
  * realistically compares to the used market, not factory-sealed "new")
- * descending, unpriced ones last, missing_for_next ascending as tiebreak.
+ * descending, unpriced ones last, $missing ascending as tiebreak.
  * $buildable is returned but deliberately not part of the sort — the user
  * wants value first, buildability is just supporting info per row.
  *
- * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, buildable:int, missing_for_next:int, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}>
+ * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, buildable:int, missing:int, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}>
  */
 function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
 {
@@ -101,10 +105,10 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
         }
         $buildable ??= 0;
 
-        $missingForNext = 0;
+        $missing = 0;
         foreach ($parts as $part) {
             $have = $stock[$part['part_id'] . ':' . $part['color_id']] ?? 0;
-            $missingForNext += max(0, $part['quantity'] * ($buildable + 1) - $have);
+            $missing += max(0, $part['quantity'] - $have);
         }
 
         $results[] = [
@@ -113,7 +117,7 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
             'name' => $candidate['name'],
             'thumbnail' => $candidate['thumbnail'],
             'buildable' => $buildable,
-            'missing_for_next' => $missingForNext,
+            'missing' => $missing,
             'bricklink_price_used' => $candidate['bricklink_price_used'] !== null ? (float) $candidate['bricklink_price_used'] : null,
             'bricklink_price_currency' => $candidate['bricklink_price_currency'],
             'bricklink_price_checked_at' => $candidate['bricklink_price_checked_at'],
@@ -127,7 +131,7 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
         // "unknown".
         $priceA = $a['bricklink_price_used'] ?? -INF;
         $priceB = $b['bricklink_price_used'] ?? -INF;
-        return $priceB <=> $priceA ?: $a['missing_for_next'] <=> $b['missing_for_next'];
+        return $priceB <=> $priceA ?: $a['missing'] <=> $b['missing'];
     });
 
     return $results;
