@@ -283,6 +283,53 @@ function getOwnedMinifigThemeTree(PDO $pdo): array
 }
 
 /**
+ * One display string per minifig id — every distinct theme path
+ * ("Root » ... » Leaf", same separator set_detail's own theme row uses) the
+ * minifig appears under, joined with "; ". A minifig has no theme of its
+ * own (see getMinifigThemeTree()'s doc comment) so one appearing in sets
+ * from several themes shows all of them — same "counted under each,
+ * expected not a bug" convention. Batched into a single query for the whole
+ * $minifigIds list rather than one query per minifig, for list views like
+ * getBuildableMinifigs().
+ *
+ * @param int[] $minifigIds
+ * @return array<int, string> keyed by minifig_id, only minifigs with at
+ *         least one set appearance are present
+ */
+function getMinifigThemePathsMap(PDO $pdo, array $minifigIds): array
+{
+    if (empty($minifigIds)) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($minifigIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT DISTINCT im.minifig_id, s.theme AS theme_id
+         FROM inventory_minifigs im
+         INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
+         INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num
+         WHERE im.minifig_id IN ($placeholders) AND s.theme IS NOT NULL"
+    );
+    $stmt->execute($minifigIds);
+
+    $themeIdsByMinifig = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $themeIdsByMinifig[(int) $row['minifig_id']][(int) $row['theme_id']] = true;
+    }
+
+    $tree = getSetThemeTree($pdo);
+    $result = [];
+    foreach ($themeIdsByMinifig as $minifigId => $themeIds) {
+        $paths = [];
+        foreach (array_keys($themeIds) as $themeId) {
+            $paths[] = implode(' » ', array_column(getThemeAncestors($tree, $themeId), 'name'));
+        }
+        sort($paths);
+        $result[$minifigId] = implode('; ', array_unique($paths));
+    }
+    return $result;
+}
+
+/**
  * Mirrors sets.php's getThemeTileImages() — one representative minifig
  * image per theme tile, searched across the tile's own theme plus every
  * descendant (a parent tile can have zero minifigs tagged with it directly

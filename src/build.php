@@ -48,7 +48,7 @@ require_once __DIR__ . '/storage.php';
  * $buildable is returned but deliberately not part of the sort — the user
  * wants value first, buildability is just supporting info per row.
  *
- * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, buildable:int, missing:int, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}>
+ * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, buildable:int, missing:int, theme_path:string, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}>
  */
 function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
 {
@@ -125,6 +125,12 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
             'bricklink_price_checked_at' => $candidate['bricklink_price_checked_at'],
         ];
     }
+
+    $themePaths = getMinifigThemePathsMap($pdo, array_column($results, 'minifig_id'));
+    foreach ($results as &$result) {
+        $result['theme_path'] = $themePaths[$result['minifig_id']] ?? '';
+    }
+    unset($result);
 
     usort($results, function (array $a, array $b): int {
         // Unpriced rows (bricklink_price_used === null) always sort last,

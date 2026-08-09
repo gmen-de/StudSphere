@@ -296,6 +296,7 @@ return [
     'nav_build' => 'Build',
     'nav_build_minifigs' => 'Buildable Minifigs',
     'build_minifigs_empty' => 'No catalog minifig matches your current loose parts stock yet.',
+    'build_minifigs_col_theme' => 'Theme',
     'build_minifigs_col_buildable' => 'Buildable',
     'build_minifigs_col_missing' => 'Missing parts',
     'build_minifigs_price_unknown' => 'Not fetched yet',
