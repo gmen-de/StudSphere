@@ -32,7 +32,16 @@ require_once __DIR__ . '/storage.php';
  * browsable while a new scan is in progress.
  */
 
-const BUILD_SETS_SCAN_BATCH_SIZE = 500;
+// The time-budget check inside stepBuildSetsScan()'s own while-loop only
+// bounds how many sets get *gathered* into a batch (near-instant) — the
+// real cost is the batched inventory_parts/inventory_minifigs queries and
+// per-set summing that happen afterwards for the whole batch in one go, and
+// that isn't practically interruptible mid-query. A live-timed batch of 500
+// against the full catalog measured ~10.3s, well past any reasonable
+// shared-hosting request timeout — BATCH_SIZE is the real safety lever, not
+// the time budget below (kept only as a soft additional guard on unusually
+// slow individual ticks). ~150 measured comfortably under 4s.
+const BUILD_SETS_SCAN_BATCH_SIZE = 150;
 const BUILD_SETS_SCAN_TIME_BUDGET_SECONDS = 4.0;
 
 const BUILD_SETS_CACHE_COMPUTED_AT_KEY = 'buildable_sets_cache_computed_at';
