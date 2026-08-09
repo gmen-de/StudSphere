@@ -1854,17 +1854,25 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
     } else {
         $content .= renderBuildMinifigModal();
 
-        // Minifig IDs still needing a BrickLink price — a fetch is 2-3
-        // sequential external HTTP calls each (see refreshBricklinkPriceForMinifig()'s
-        // doc comment, src/bricklink_prices.php), too slow to do inline for
-        // potentially hundreds of rows in one request, so it's an opt-in
-        // tick loop instead (same pacing as the BrickLink XML part-id sync,
+        // Minifig IDs still needing a BrickLink price — never checked, or
+        // checked more than 3 months ago (deliberately longer than the
+        // passive per-owned-minifig background sync's own 30-day interval,
+        // BRICKLINK_SYNC_INTERVAL_DAYS in src/bricklink_prices.php — that
+        // one trickles through page loads a few at a time, this is a much
+        // bigger, user-triggered batch, so a longer "still fresh enough"
+        // window keeps it from re-running unnecessarily often). A fetch is
+        // 2-3 sequential external HTTP calls each (see
+        // refreshBricklinkPriceForMinifig()'s doc comment,
+        // src/bricklink_prices.php), too slow to do inline for potentially
+        // hundreds of rows in one request, so it's an opt-in tick loop
+        // instead (same pacing as the BrickLink XML part-id sync,
         // renderOwnedSetBricklinkModal(), src/owned_sets.php), driven by the
         // existing single-minifig action=refresh_minifig_bricklink_price —
         // no new backend endpoint needed.
+        $bricklinkPriceStaleBefore = date('Y-m-d H:i:s', strtotime('-3 months'));
         $unpricedMinifigIds = [];
         foreach ($buildableMinifigs as $row) {
-            if ($row['bricklink_price_checked_at'] === null) {
+            if ($row['bricklink_price_checked_at'] === null || $row['bricklink_price_checked_at'] < $bricklinkPriceStaleBefore) {
                 $unpricedMinifigIds[] = $row['minifig_id'];
             }
         }

@@ -359,7 +359,7 @@ function renderBuildMinifigModal(): string
     content.innerHTML = '';
 
     var img = document.createElement('span');
-    img.className = 'set-detail-image';
+    img.className = 'set-detail-image build-minifig-image';
     img.innerHTML = data.thumbnail ? '<img src="' + data.thumbnail + '" alt="">' : texts.minifigIcon;
     content.appendChild(img);
 
