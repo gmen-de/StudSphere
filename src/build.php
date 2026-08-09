@@ -48,7 +48,7 @@ require_once __DIR__ . '/storage.php';
  * $buildable is returned but deliberately not part of the sort — the user
  * wants value first, buildability is just supporting info per row.
  *
- * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, buildable:int, missing:int, theme_path:string, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}>
+ * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, buildable:int, missing:int, theme_ids:int[], theme_path:string, year:?int, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}>
  */
 function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
 {
@@ -140,9 +140,12 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
         ];
     }
 
-    $themePaths = getMinifigThemePathsMap($pdo, array_column($results, 'minifig_id'));
+    $facets = getMinifigCatalogFacetsMap($pdo, array_column($results, 'minifig_id'));
     foreach ($results as &$result) {
-        $result['theme_path'] = $themePaths[$result['minifig_id']] ?? '';
+        $facet = $facets[$result['minifig_id']] ?? ['theme_ids' => [], 'theme_path' => '', 'year' => null];
+        $result['theme_ids'] = $facet['theme_ids'];
+        $result['theme_path'] = $facet['theme_path'];
+        $result['year'] = $facet['year'];
     }
     unset($result);
 

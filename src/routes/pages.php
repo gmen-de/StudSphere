@@ -1854,6 +1854,96 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
     } else {
         $content .= renderBuildMinifigModal();
 
+        // Filter sidebar, mirroring bricks_search's own filter-facet
+        // pattern (src/parts.php's getPartCategoriesWithCounts()/
+        // getColorFacet()): facet options/counts are computed from the
+        // full, unfiltered candidate list, same convention as that page —
+        // not re-scoped as other filters get applied. The whole list is
+        // already fully materialized in PHP (no pagination here), so
+        // filtering happens in-memory after getBuildableMinifigs() rather
+        // than pushing it into that function's own SQL, which already does
+        // a non-trivial multi-step computation of its own.
+        $selectedThemeIds = array_map('intval', (array) ($_GET['theme'] ?? []));
+        $priceFrom = isset($_GET['price_from']) && $_GET['price_from'] !== '' ? (float) $_GET['price_from'] : null;
+        $priceTo = isset($_GET['price_to']) && $_GET['price_to'] !== '' ? (float) $_GET['price_to'] : null;
+        $selectedYear = isset($_GET['year']) && $_GET['year'] !== '' ? (int) $_GET['year'] : null;
+
+        $themeFacetCounts = [];
+        $yearFacetCounts = [];
+        foreach ($buildableMinifigs as $facetRow) {
+            foreach ($facetRow['theme_ids'] as $themeId) {
+                $themeFacetCounts[$themeId] = ($themeFacetCounts[$themeId] ?? 0) + 1;
+            }
+            if ($facetRow['year'] !== null) {
+                $yearFacetCounts[$facetRow['year']] = ($yearFacetCounts[$facetRow['year']] ?? 0) + 1;
+            }
+        }
+        $themeFacetNames = [];
+        if (!empty($themeFacetCounts)) {
+            $themeNamePlaceholders = implode(',', array_fill(0, count($themeFacetCounts), '?'));
+            $themeNameStmt = $pdo->prepare("SELECT theme_id, name FROM themes WHERE theme_id IN ($themeNamePlaceholders)");
+            $themeNameStmt->execute(array_keys($themeFacetCounts));
+            foreach ($themeNameStmt->fetchAll() as $themeNameRow) {
+                $themeFacetNames[(int) $themeNameRow['theme_id']] = $themeNameRow['name'];
+            }
+            asort($themeFacetNames, SORT_STRING | SORT_FLAG_CASE);
+        }
+        krsort($yearFacetCounts);
+
+        $buildableMinifigs = array_values(array_filter($buildableMinifigs, function (array $row) use ($selectedThemeIds, $priceFrom, $priceTo, $selectedYear): bool {
+            if (!empty($selectedThemeIds) && empty(array_intersect($selectedThemeIds, $row['theme_ids']))) {
+                return false;
+            }
+            if ($priceFrom !== null || $priceTo !== null) {
+                if ($row['bricklink_price_used'] === null) {
+                    return false;
+                }
+                if ($priceFrom !== null && $row['bricklink_price_used'] < $priceFrom) {
+                    return false;
+                }
+                if ($priceTo !== null && $row['bricklink_price_used'] > $priceTo) {
+                    return false;
+                }
+            }
+            if ($selectedYear !== null && $row['year'] !== $selectedYear) {
+                return false;
+            }
+            return true;
+        }));
+
+        $sidebar = '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-filter-sidebar">';
+        $sidebar .= '<input type="hidden" name="page" value="build_minifigs">';
+
+        $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('build_minifigs_filter_theme')) . '</h3><div class="filter-options">';
+        foreach ($themeFacetNames as $themeId => $themeName) {
+            $checked = in_array($themeId, $selectedThemeIds, true) ? ' checked' : '';
+            $sidebar .= '<label class="filter-checkbox"><input type="checkbox" name="theme[]" value="' . $themeId . '"' . $checked . '> ' . htmlspecialchars($themeName) . ' <span class="filter-count">(' . $themeFacetCounts[$themeId] . ')</span></label>';
+        }
+        $sidebar .= '</div></div>';
+
+        $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('build_minifigs_filter_price')) . '</h3><div class="filter-range-inputs">';
+        $sidebar .= '<input type="number" step="0.01" min="0" name="price_from" placeholder="' . htmlspecialchars(t('build_minifigs_filter_price_from')) . '" value="' . ($priceFrom !== null ? htmlspecialchars((string) $priceFrom) : '') . '">';
+        $sidebar .= '<span>&ndash;</span>';
+        $sidebar .= '<input type="number" step="0.01" min="0" name="price_to" placeholder="' . htmlspecialchars(t('build_minifigs_filter_price_to')) . '" value="' . ($priceTo !== null ? htmlspecialchars((string) $priceTo) : '') . '">';
+        $sidebar .= '</div></div>';
+
+        $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('build_minifigs_filter_year')) . '</h3>';
+        $sidebar .= '<select name="year"><option value="">' . htmlspecialchars(t('build_minifigs_filter_year_all')) . '</option>';
+        foreach ($yearFacetCounts as $yearOption => $yearCount) {
+            $selectedAttr = $selectedYear === $yearOption ? ' selected' : '';
+            $sidebar .= '<option value="' . $yearOption . '"' . $selectedAttr . '>' . $yearOption . ' (' . $yearCount . ')</option>';
+        }
+        $sidebar .= '</select></div>';
+
+        $sidebar .= '<button type="submit" class="filter-apply-button">' . htmlspecialchars(t('filter_apply_button')) . '</button>';
+        if (!empty($selectedThemeIds) || $priceFrom !== null || $priceTo !== null || $selectedYear !== null) {
+            $sidebar .= '<a href="?page=build_minifigs" class="filter-reset-link">' . htmlspecialchars(t('filter_reset_button')) . '</a>';
+        }
+        $sidebar .= '</form>';
+
+        $content .= '<div class="parts-search-layout">' . $sidebar . '<div class="parts-search-main">';
+        $content .= '<span class="results-summary">' . htmlspecialchars(t('build_minifigs_results_count', ['count' => formatNumber(count($buildableMinifigs))])) . '</span>';
+
         // Minifig IDs still needing a BrickLink price — never checked, or
         // checked more than 3 months ago (deliberately longer than the
         // passive per-owned-minifig background sync's own 30-day interval,
@@ -1940,29 +2030,34 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
 SCRIPT;
         }
 
-        $content .= '<div class="set-detail-table-wrap">';
-        $content .= '<table class="set-detail-table build-minifigs-table">';
-        $content .= '<thead><tr>';
-        $content .= '<th></th>';
-        $content .= '<th>' . htmlspecialchars(t('pdf_report_col_name')) . '</th>';
-        $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_theme')) . '</th>';
-        $content .= '<th>' . htmlspecialchars(t('my_minifigs_top100_price_column')) . '</th>';
-        $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_buildable')) . '</th>';
-        $content .= '</tr></thead><tbody>';
-        foreach ($buildableMinifigs as $row) {
-            $name = $row['name'] ?? $row['fig_num'];
-            $priceText = $row['bricklink_price_used'] !== null
-                ? formatNumber($row['bricklink_price_used'], 2) . ' ' . bricklinkCurrencySymbol($row['bricklink_price_currency'])
-                : t('build_minifigs_price_unknown');
-            $content .= '<tr class="build-minifig-row" data-minifig-id="' . $row['minifig_id'] . '" role="button" tabindex="0">';
-            $content .= '<td class="build-minifigs-thumb-cell">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</td>';
-            $content .= '<td>' . htmlspecialchars($name) . ' <span class="hint">' . htmlspecialchars($row['fig_num']) . '</span></td>';
-            $content .= '<td class="hint">' . htmlspecialchars($row['theme_path']) . '</td>';
-            $content .= '<td>' . htmlspecialchars($priceText) . '</td>';
-            $content .= '<td>' . formatNumber($row['buildable']) . '</td>';
-            $content .= '</tr>';
+        if (empty($buildableMinifigs)) {
+            $content .= '<section class="card"><p>' . htmlspecialchars(t('build_minifigs_filtered_empty')) . '</p></section>';
+        } else {
+            $content .= '<div class="set-detail-table-wrap">';
+            $content .= '<table class="set-detail-table build-minifigs-table">';
+            $content .= '<thead><tr>';
+            $content .= '<th></th>';
+            $content .= '<th>' . htmlspecialchars(t('pdf_report_col_name')) . '</th>';
+            $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_theme')) . '</th>';
+            $content .= '<th>' . htmlspecialchars(t('my_minifigs_top100_price_column')) . '</th>';
+            $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_buildable')) . '</th>';
+            $content .= '</tr></thead><tbody>';
+            foreach ($buildableMinifigs as $row) {
+                $name = $row['name'] ?? $row['fig_num'];
+                $priceText = $row['bricklink_price_used'] !== null
+                    ? formatNumber($row['bricklink_price_used'], 2) . ' ' . bricklinkCurrencySymbol($row['bricklink_price_currency'])
+                    : t('build_minifigs_price_unknown');
+                $content .= '<tr class="build-minifig-row" data-minifig-id="' . $row['minifig_id'] . '" role="button" tabindex="0">';
+                $content .= '<td class="build-minifigs-thumb-cell">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</td>';
+                $content .= '<td>' . htmlspecialchars($name) . ' <span class="hint">' . htmlspecialchars($row['fig_num']) . '</span></td>';
+                $content .= '<td class="hint">' . htmlspecialchars($row['theme_path']) . '</td>';
+                $content .= '<td>' . htmlspecialchars($priceText) . '</td>';
+                $content .= '<td>' . formatNumber($row['buildable']) . '</td>';
+                $content .= '</tr>';
+            }
+            $content .= '</tbody></table></div>';
         }
-        $content .= '</tbody></table></div>';
+        $content .= '</div></div>';
     }
 
     renderApp(t('nav_build_minifigs'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('nav_build_minifigs'), 'url' => null]]);

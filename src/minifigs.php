@@ -283,27 +283,31 @@ function getOwnedMinifigThemeTree(PDO $pdo): array
 }
 
 /**
- * One display string per minifig id — every distinct theme path
- * ("Root » ... » Leaf", same separator set_detail's own theme row uses) the
- * minifig appears under, joined with "; ". A minifig has no theme of its
- * own (see getMinifigThemeTree()'s doc comment) so one appearing in sets
- * from several themes shows all of them — same "counted under each,
- * expected not a bug" convention. Batched into a single query for the whole
- * $minifigIds list rather than one query per minifig, for list views like
- * getBuildableMinifigs().
+ * Per-minifig catalog facets for the "Baubare Minifiguren" filter sidebar
+ * (getBuildableMinifigs(), src/build.php): every distinct theme the minifig
+ * appears under, plus its earliest set-appearance year. A minifig has no
+ * theme or year of its own (see getMinifigThemeTree()'s doc comment) — both
+ * are derived through the sets it appears in, so one appearing in sets from
+ * several themes carries all of them (same "counted under each, expected
+ * not a bug" convention), and year is the earliest of them.
+ * theme_path joins every distinct theme's full ancestor path
+ * ("Root » ... » Leaf", same separator set_detail's own theme row uses)
+ * with "; " for display; theme_ids carries the raw ids for filter-matching.
+ * Batched into one query for the whole $minifigIds list rather than one per
+ * minifig.
  *
  * @param int[] $minifigIds
- * @return array<int, string> keyed by minifig_id, only minifigs with at
- *         least one set appearance are present
+ * @return array<int, array{theme_ids:int[], theme_path:string, year:?int}> keyed
+ *         by minifig_id, only minifigs with at least one set appearance are present
  */
-function getMinifigThemePathsMap(PDO $pdo, array $minifigIds): array
+function getMinifigCatalogFacetsMap(PDO $pdo, array $minifigIds): array
 {
     if (empty($minifigIds)) {
         return [];
     }
     $placeholders = implode(',', array_fill(0, count($minifigIds), '?'));
     $stmt = $pdo->prepare(
-        "SELECT DISTINCT im.minifig_id, s.theme AS theme_id
+        "SELECT DISTINCT im.minifig_id, s.theme AS theme_id, s.year AS year
          FROM inventory_minifigs im
          INNER JOIN rebrickable_inventories ri ON ri.inventory_id = im.inventory_id
          INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num
@@ -311,20 +315,32 @@ function getMinifigThemePathsMap(PDO $pdo, array $minifigIds): array
     );
     $stmt->execute($minifigIds);
 
-    $themeIdsByMinifig = [];
+    $rowsByMinifig = [];
     foreach ($stmt->fetchAll() as $row) {
-        $themeIdsByMinifig[(int) $row['minifig_id']][(int) $row['theme_id']] = true;
+        $rowsByMinifig[(int) $row['minifig_id']][] = $row;
     }
 
     $tree = getSetThemeTree($pdo);
     $result = [];
-    foreach ($themeIdsByMinifig as $minifigId => $themeIds) {
+    foreach ($rowsByMinifig as $minifigId => $rows) {
+        $themeIds = [];
+        $years = [];
+        foreach ($rows as $row) {
+            $themeIds[(int) $row['theme_id']] = true;
+            if ($row['year'] !== null) {
+                $years[] = (int) $row['year'];
+            }
+        }
         $paths = [];
         foreach (array_keys($themeIds) as $themeId) {
             $paths[] = implode(' » ', array_column(getThemeAncestors($tree, $themeId), 'name'));
         }
         sort($paths);
-        $result[$minifigId] = implode('; ', array_unique($paths));
+        $result[$minifigId] = [
+            'theme_ids' => array_keys($themeIds),
+            'theme_path' => implode('; ', array_unique($paths)),
+            'year' => !empty($years) ? min($years) : null,
+        ];
     }
     return $result;
 }

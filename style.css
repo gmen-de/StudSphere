@@ -1644,6 +1644,24 @@ footer {
   margin-top: 0.25rem;
 }
 
+.filter-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filter-range-inputs input {
+  min-width: 0;
+}
+
+.filter-reset-link {
+  display: block;
+  text-align: center;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
 .results-summary {
   display: block;
   color: #64748b;
