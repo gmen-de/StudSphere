@@ -1854,19 +1854,103 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
     } else {
         $content .= renderPartDetailModal();
         $content .= renderMinifigDetailModal();
+
+        // Minifig IDs still needing a BrickLink price — a fetch is 2-3
+        // sequential external HTTP calls each (see refreshBricklinkPriceForMinifig()'s
+        // doc comment, src/bricklink_prices.php), too slow to do inline for
+        // potentially hundreds of rows in one request, so it's an opt-in
+        // tick loop instead (same pacing as the BrickLink XML part-id sync,
+        // renderOwnedSetBricklinkModal(), src/owned_sets.php), driven by the
+        // existing single-minifig action=refresh_minifig_bricklink_price —
+        // no new backend endpoint needed.
+        $unpricedMinifigIds = [];
+        foreach ($buildableMinifigs as $row) {
+            if ($row['bricklink_price_checked_at'] === null) {
+                $unpricedMinifigIds[] = $row['minifig_id'];
+            }
+        }
+
+        if (!empty($unpricedMinifigIds)) {
+            $fetchPricesLabel = t('build_minifigs_fetch_prices_button', ['count' => (string) count($unpricedMinifigIds)]);
+            $content .= '<button type="button" class="fetch-missing-images-btn" id="build-minifigs-fetch-prices-open">' . htmlspecialchars($fetchPricesLabel) . '</button>';
+
+            $content .= '<div class="modal-overlay" id="build-minifigs-price-modal" style="display:none;">';
+            $content .= '<div class="modal-box"><button type="button" class="modal-close" id="build-minifigs-price-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+            $content .= '<h2>' . htmlspecialchars(t('build_minifigs_fetch_prices_heading')) . '</h2>';
+            $content .= '<p class="hint" id="build-minifigs-price-status">0 / ' . count($unpricedMinifigIds) . '</p>';
+            $content .= '</div></div>';
+
+            $unpricedIdsJson = json_encode($unpricedMinifigIds, JSON_HEX_TAG | JSON_HEX_AMP);
+            $doneLabelJson = json_encode(t('build_minifigs_fetch_prices_done'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+            $content .= <<<SCRIPT
+<script>
+(function(){
+  var ids = {$unpricedIdsJson};
+  var openBtn = document.getElementById('build-minifigs-fetch-prices-open');
+  var modal = document.getElementById('build-minifigs-price-modal');
+  var closeBtn = document.getElementById('build-minifigs-price-modal-close');
+  var status = document.getElementById('build-minifigs-price-status');
+  if (!openBtn || !modal || !closeBtn || !status) {
+    return;
+  }
+  openBtn.addEventListener('click', function() {
+    modal.style.display = 'flex';
+    openBtn.disabled = true;
+    var total = ids.length;
+    var done = 0;
+    function nextTick(index) {
+      if (index >= ids.length) {
+        status.textContent = {$doneLabelJson};
+        window.location.reload();
+        return;
+      }
+      var startedAt = Date.now();
+      var formData = new FormData();
+      formData.set('action', 'refresh_minifig_bricklink_price');
+      formData.set('minifig_id', ids[index]);
+      formData.set('condition_type', 'used');
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .catch(function() { return { success: false }; })
+        .then(function() {
+          done++;
+          status.textContent = done + ' / ' + total;
+          // BrickLink's own pages, same ~1 req/sec courtesy pacing as the
+          // part-id sync — timed from when this tick started, not when it
+          // finished, so a slow response doesn't get "made up for".
+          var elapsed = Date.now() - startedAt;
+          var wait = Math.max(0, 1000 - elapsed);
+          setTimeout(function() { nextTick(index + 1); }, wait);
+        });
+    }
+    nextTick(0);
+  });
+  closeBtn.addEventListener('click', function() {
+    modal.style.display = 'none';
+  });
+})();
+</script>
+SCRIPT;
+        }
+
         $content .= '<div class="set-detail-table-wrap">';
         $content .= '<table class="set-detail-table build-minifigs-table">';
         $content .= '<thead><tr>';
         $content .= '<th></th>';
         $content .= '<th>' . htmlspecialchars(t('pdf_report_col_name')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('my_minifigs_top100_price_column')) . '</th>';
         $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_buildable')) . '</th>';
         $content .= '<th>' . htmlspecialchars(t('build_minifigs_col_missing')) . '</th>';
         $content .= '</tr></thead><tbody>';
         foreach ($buildableMinifigs as $row) {
             $name = $row['name'] ?? $row['fig_num'];
+            $priceText = $row['bricklink_price_used'] !== null
+                ? formatNumber($row['bricklink_price_used'], 2) . ' ' . bricklinkCurrencySymbol($row['bricklink_price_currency'])
+                : t('build_minifigs_price_unknown');
             $content .= '<tr class="minifig-card" data-minifig-id="' . $row['minifig_id'] . '" role="button" tabindex="0">';
             $content .= '<td class="build-minifigs-thumb-cell">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</td>';
             $content .= '<td>' . htmlspecialchars($name) . ' <span class="hint">' . htmlspecialchars($row['fig_num']) . '</span></td>';
+            $content .= '<td>' . htmlspecialchars($priceText) . '</td>';
             $content .= '<td>' . formatNumber($row['buildable']) . '</td>';
             $content .= '<td>' . formatNumber($row['missing_for_next']) . '</td>';
             $content .= '</tr>';

@@ -36,7 +36,13 @@ require_once __DIR__ . '/minifigs.php';
  * that up by one more copy — more useful than "missing to build one from
  * zero", since $buildable is already folded in.
  *
- * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, buildable:int, missing_for_next:int}>
+ * Sorted by BrickLink price (bricklink_price_used — a hand-assembled figure
+ * realistically compares to the used market, not factory-sealed "new")
+ * descending, unpriced ones last, missing_for_next ascending as tiebreak.
+ * $buildable is returned but deliberately not part of the sort — the user
+ * wants value first, buildability is just supporting info per row.
+ *
+ * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, buildable:int, missing_for_next:int, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}>
  */
 function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
 {
@@ -61,6 +67,7 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
     // with a "fig-NNNNNN" string.
     $candidateStmt = $pdo->query(
         "SELECT ri.set_num AS fig_num, m.id AS minifig_id, m.name, m.local_image_path AS thumbnail,
+                m.bricklink_price_used, m.bricklink_price_currency, m.bricklink_price_checked_at,
                 COUNT(DISTINCT CONCAT(ip.part_id,':',c.id)) AS total_pairs,
                 COUNT(DISTINCT CASE WHEN si.part_id IS NOT NULL THEN CONCAT(ip.part_id,':',c.id) END) AS matched_pairs
          FROM inventory_parts ip
@@ -70,7 +77,8 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
          LEFT JOIN (SELECT DISTINCT part_id, color_id FROM storage_items WHERE quantity > 0) si
                 ON si.part_id = ip.part_id AND si.color_id = c.id
          WHERE ip.is_spare = 0
-         GROUP BY ri.set_num, m.id, m.name, m.local_image_path
+         GROUP BY ri.set_num, m.id, m.name, m.local_image_path,
+                  m.bricklink_price_used, m.bricklink_price_currency, m.bricklink_price_checked_at
          HAVING total_pairs = matched_pairs"
     );
 
@@ -106,11 +114,20 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
             'thumbnail' => $candidate['thumbnail'],
             'buildable' => $buildable,
             'missing_for_next' => $missingForNext,
+            'bricklink_price_used' => $candidate['bricklink_price_used'] !== null ? (float) $candidate['bricklink_price_used'] : null,
+            'bricklink_price_currency' => $candidate['bricklink_price_currency'],
+            'bricklink_price_checked_at' => $candidate['bricklink_price_checked_at'],
         ];
     }
 
     usort($results, function (array $a, array $b): int {
-        return $b['buildable'] <=> $a['buildable'] ?: $a['missing_for_next'] <=> $b['missing_for_next'];
+        // Unpriced rows (bricklink_price_used === null) always sort last,
+        // regardless of which side of the comparison they're on — treated
+        // as -INF rather than 0, so a real (if small) price still outranks
+        // "unknown".
+        $priceA = $a['bricklink_price_used'] ?? -INF;
+        $priceB = $b['bricklink_price_used'] ?? -INF;
+        return $priceB <=> $priceA ?: $a['missing_for_next'] <=> $b['missing_for_next'];
     });
 
     return $results;
