@@ -442,3 +442,40 @@ CREATE TABLE IF NOT EXISTS owned_set_minifig_parts (
     CONSTRAINT fk_ownedsetminifigpart_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
     CONSTRAINT fk_ownedsetminifigpart_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- "Baubare Sets" (?page=build_sets, src/build_sets.php): one row per catalog
+-- set that was in scope of the last scan, actual/nominal piece counts split
+-- into the same total/exclusive/rare/minifig buckets set_detail already
+-- computes live per set (getSetInventorySummary()/getOwnedSetCompleteness(),
+-- src/sets.php + src/owned_sets.php) — percentages are derived at render
+-- time, not stored. Scan metadata (computed_at, scope, stale flag) lives in
+-- app_settings instead of a column here, same lightweight pattern
+-- refreshAppStatsCache() already uses.
+CREATE TABLE IF NOT EXISTS buildable_sets_cache (
+    set_id INT NOT NULL PRIMARY KEY,
+    total_nominal INT NOT NULL,
+    total_actual INT NOT NULL,
+    exclusive_nominal INT NOT NULL,
+    exclusive_actual INT NOT NULL,
+    rare_nominal INT NOT NULL,
+    rare_actual INT NOT NULL,
+    minifig_nominal INT NOT NULL,
+    minifig_actual INT NOT NULL,
+    CONSTRAINT fk_buildablesetscache_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Same shape as buildable_sets_cache — a scan in progress writes here tick
+-- by tick, so the currently-displayed cache stays a consistent, complete
+-- snapshot until the scan finishes and swaps the two (stepBuildSetsScan()).
+CREATE TABLE IF NOT EXISTS buildable_sets_cache_staging (
+    set_id INT NOT NULL PRIMARY KEY,
+    total_nominal INT NOT NULL,
+    total_actual INT NOT NULL,
+    exclusive_nominal INT NOT NULL,
+    exclusive_actual INT NOT NULL,
+    rare_nominal INT NOT NULL,
+    rare_actual INT NOT NULL,
+    minifig_nominal INT NOT NULL,
+    minifig_actual INT NOT NULL,
+    CONSTRAINT fk_buildablesetscachestaging_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

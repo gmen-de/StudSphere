@@ -607,6 +607,36 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        36 => function (PDO $pdo): void {
+            // "Baubare Sets" (?page=build_sets, src/build_sets.php) — one
+            // cached row per catalog set with actual/nominal piece counts
+            // split into total/exclusive/rare/minifig buckets. Two
+            // identical tables: the scan writes into the staging table tick
+            // by tick, so the live cache stays a complete, consistent
+            // snapshot until the scan finishes and atomically swaps the two
+            // (stepBuildSetsScan()).
+            $columns = 'set_id INT NOT NULL PRIMARY KEY,
+                    total_nominal INT NOT NULL,
+                    total_actual INT NOT NULL,
+                    exclusive_nominal INT NOT NULL,
+                    exclusive_actual INT NOT NULL,
+                    rare_nominal INT NOT NULL,
+                    rare_actual INT NOT NULL,
+                    minifig_nominal INT NOT NULL,
+                    minifig_actual INT NOT NULL';
+            $pdo->exec(
+                "CREATE TABLE IF NOT EXISTS buildable_sets_cache (
+                    $columns,
+                    CONSTRAINT fk_buildablesetscache_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            );
+            $pdo->exec(
+                "CREATE TABLE IF NOT EXISTS buildable_sets_cache_staging (
+                    $columns,
+                    CONSTRAINT fk_buildablesetscachestaging_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            );
+        },
     ];
 }
 
@@ -687,7 +717,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 35;
+const CURRENT_SCHEMA_VERSION = 36;
 
 function getInstalledSchemaVersion(): int
 {

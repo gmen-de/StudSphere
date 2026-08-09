@@ -26,6 +26,7 @@ require_once __DIR__ . '/src/minifig_modal.php';
 require_once __DIR__ . '/src/owned_minifigs.php';
 require_once __DIR__ . '/src/pdf_report.php';
 require_once __DIR__ . '/src/build.php';
+require_once __DIR__ . '/src/build_sets.php';
 require_once __DIR__ . '/src/stats.php';
 require_once __DIR__ . '/src/dashboard.php';
 
@@ -145,6 +146,7 @@ function getNavMenu(PDO $pdo): array
         ['icon' => 'dashboard', 'labelKey' => 'dashboard_title', 'href' => $_SERVER['PHP_SELF'], 'children' => []],
         ['icon' => 'build', 'labelKey' => 'nav_build', 'href' => '?page=build', 'children' => [
             ['labelKey' => 'nav_build_minifigs', 'href' => '?page=build_minifigs'],
+            ['labelKey' => 'nav_build_sets', 'href' => '?page=build_sets'],
         ]],
         ['icon' => 'sets', 'labelKey' => 'nav_sets', 'href' => '?page=sets', 'children' => [
             ['labelKey' => 'nav_sets_search', 'href' => '?page=sets_search'],

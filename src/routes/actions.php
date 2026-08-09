@@ -90,6 +90,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rebri
     exit;
 }
 
+// "Baubare Sets" scan tick (?page=build_sets, src/build_sets.php) — same
+// $_SESSION-state/bounded-chunk-per-request pattern as
+// rebrickable_update_tick above, just for the internal set-completeness
+// scan instead of a Rebrickable download. Every tick (not just the first)
+// carries the chosen scope (theme/year_from/year_to) as POST fields —
+// cheap, and it lets a scope mismatch against the session's stored state be
+// detected below.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'build_sets_scan_tick') {
+    header('Content-Type: application/json');
+    try {
+        $scanThemeId = isset($_POST['theme']) && $_POST['theme'] !== '' ? (int) $_POST['theme'] : null;
+        $scanYearFrom = isset($_POST['year_from']) && $_POST['year_from'] !== '' ? (int) $_POST['year_from'] : null;
+        $scanYearTo = isset($_POST['year_to']) && $_POST['year_to'] !== '' ? (int) $_POST['year_to'] : null;
+        $requestedScope = ['theme_id' => $scanThemeId, 'year_from' => $scanYearFrom, 'year_to' => $scanYearTo];
+
+        $state = $_SESSION['build_sets_scan_state'] ?? null;
+        // A stored state from a *different* scope (the user reconfigured
+        // and started a new scan while an old, unfinished one was still
+        // sitting in the session) must not be silently resumed under the
+        // new scope's name — discard it and start over. A reload of the
+        // same in-progress scan sends the same scope every tick, so this
+        // never interrupts a legitimate resume.
+        if (is_array($state) && ($state['scope'] ?? null) !== $requestedScope) {
+            $state = null;
+        }
+        if (!is_array($state)) {
+            $state = initBuildSetsScanState($pdo, $scanThemeId, $scanYearFrom, $scanYearTo);
+        }
+
+        $result = stepBuildSetsScan($pdo, $state);
+        if ($result['done']) {
+            unset($_SESSION['build_sets_scan_state']);
+        } else {
+            $_SESSION['build_sets_scan_state'] = $state;
+        }
+
+        echo json_encode([
+            'processed' => $result['processed'],
+            'total' => $result['total'],
+            'percent' => $result['total'] > 0 ? (int) round(($result['processed'] / $result['total']) * 100) : 100,
+            'done' => $result['done'],
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        unset($_SESSION['build_sets_scan_state']);
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => t('import_error', ['message' => $e->getMessage()])], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 $collectionMessage = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_collection_settings') {
     $newCollectionName = trim($_POST['collection_name'] ?? '');

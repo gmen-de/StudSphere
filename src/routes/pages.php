@@ -2187,6 +2187,189 @@ SCRIPT;
     exit;
 }
 
+// "Baubare Sets" — three states driven by GET params, see src/build_sets.php's
+// own doc comment for the overall design: ?scan=1[&theme=&year_from=&year_to=]
+// shows only the dark progress overlay and kicks off the tick loop;
+// ?configure=1 (or no cache at all yet) shows the theme/year/completeness
+// config form; otherwise the cached results are shown directly, with a
+// staleness banner if the loose stock changed since the last scan.
+if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
+    $buildSetsMeta = getBuildableSetsCacheMeta($pdo);
+    $buildSetsExclusiveOnly = ($_GET['exclusive_only'] ?? '') === '1';
+    $buildSetsExclusiveRareOnly = ($_GET['exclusive_rare_only'] ?? '') === '1';
+    $buildSetsBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_build_sets'), 'url' => null]];
+
+    if (isset($_GET['scan'])) {
+        $scanThemeId = isset($_GET['theme']) && $_GET['theme'] !== '' ? (int) $_GET['theme'] : null;
+        $scanYearFrom = isset($_GET['year_from']) && $_GET['year_from'] !== '' ? (int) $_GET['year_from'] : null;
+        $scanYearTo = isset($_GET['year_to']) && $_GET['year_to'] !== '' ? (int) $_GET['year_to'] : null;
+
+        $content = '<h1>' . htmlspecialchars(t('nav_build_sets')) . '</h1>';
+        $content .= renderBuildSetsScanOverlay($scanThemeId, $scanYearFrom, $scanYearTo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly);
+        renderApp(t('nav_build_sets'), $content, $user, computeAppStats($pdo), $buildSetsBreadcrumbs);
+        exit;
+    }
+
+    if (isset($_GET['configure']) || $buildSetsMeta['computedAt'] === null) {
+        $configThemeId = isset($_GET['theme']) && $_GET['theme'] !== '' ? (int) $_GET['theme'] : null;
+        $configYearFrom = isset($_GET['year_from']) && $_GET['year_from'] !== '' ? (int) $_GET['year_from'] : null;
+        $configYearTo = isset($_GET['year_to']) && $_GET['year_to'] !== '' ? (int) $_GET['year_to'] : null;
+
+        $buildSetsThemeTree = getSetThemeTree($pdo);
+
+        // Always emits every field explicitly (theme='' rather than
+        // omitting the key when cleared) so the config page's own state
+        // never has to fall back to a different source once the user has
+        // started navigating it — every link here is fully self-describing.
+        $configUrl = function (array $overrides) use ($configThemeId, $configYearFrom, $configYearTo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly): string {
+            $params = [
+                'page' => 'build_sets',
+                'configure' => '1',
+                'theme' => $configThemeId !== null ? (string) $configThemeId : '',
+                'year_from' => $configYearFrom !== null ? (string) $configYearFrom : '',
+                'year_to' => $configYearTo !== null ? (string) $configYearTo : '',
+                'exclusive_only' => $buildSetsExclusiveOnly ? '1' : '',
+                'exclusive_rare_only' => $buildSetsExclusiveRareOnly ? '1' : '',
+            ];
+            foreach ($overrides as $key => $value) {
+                $params[$key] = $value !== null ? (string) $value : '';
+            }
+            $query = [];
+            foreach ($params as $key => $value) {
+                if ($value === '') {
+                    continue;
+                }
+                $query[] = urlencode($key) . '=' . urlencode($value);
+            }
+            return '?' . implode('&', $query);
+        };
+
+        $content = '<h1>' . htmlspecialchars(t('nav_build_sets')) . '</h1>';
+        $content .= '<p class="hint">' . htmlspecialchars(t('build_sets_config_intro')) . '</p>';
+
+        $content .= '<section class="card"><h3>' . htmlspecialchars(t('build_sets_filter_theme')) . '</h3>';
+        $themeAncestors = $configThemeId !== null ? getThemeAncestors($buildSetsThemeTree, $configThemeId) : [];
+        $content .= '<p class="filter-theme-breadcrumb">';
+        if (empty($themeAncestors)) {
+            $content .= '<strong>' . htmlspecialchars(t('build_sets_filter_theme_all')) . '</strong>';
+        } else {
+            $crumbParts = ['<a href="' . htmlspecialchars($configUrl(['theme' => null])) . '">' . htmlspecialchars(t('build_sets_filter_theme_all')) . '</a>'];
+            $lastIndex = count($themeAncestors) - 1;
+            foreach ($themeAncestors as $i => $ancestor) {
+                $crumbParts[] = $i === $lastIndex
+                    ? '<strong>' . htmlspecialchars($ancestor['name']) . '</strong>'
+                    : '<a href="' . htmlspecialchars($configUrl(['theme' => $ancestor['theme_id']])) . '">' . htmlspecialchars($ancestor['name']) . '</a>';
+            }
+            $content .= implode(' » ', $crumbParts);
+        }
+        $content .= '</p>';
+        $themeChildren = getSetThemeChildren($buildSetsThemeTree, $configThemeId);
+        if (!empty($themeChildren)) {
+            $content .= '<div class="filter-options">';
+            foreach ($themeChildren as $child) {
+                $content .= '<a class="filter-theme-link" href="' . htmlspecialchars($configUrl(['theme' => $child['theme_id']])) . '">' . htmlspecialchars($child['name']) . ' <span class="filter-count">(' . formatNumber($child['recursive_count']) . ')</span></a>';
+            }
+            $content .= '</div>';
+        }
+        $content .= '</section>';
+
+        $content .= '<section class="card">';
+        $content .= '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '">';
+        $content .= '<input type="hidden" name="page" value="build_sets">';
+        $content .= '<input type="hidden" name="scan" value="1">';
+        $content .= '<input type="hidden" name="theme" value="' . ($configThemeId !== null ? (int) $configThemeId : '') . '">';
+
+        $content .= '<h3>' . htmlspecialchars(t('build_sets_filter_year')) . '</h3>';
+        $content .= '<div class="filter-range-inputs">';
+        $content .= '<input type="number" name="year_from" placeholder="' . htmlspecialchars(t('build_sets_filter_year_from')) . '" value="' . ($configYearFrom !== null ? (int) $configYearFrom : '') . '">';
+        $content .= '<span>&ndash;</span>';
+        $content .= '<input type="number" name="year_to" placeholder="' . htmlspecialchars(t('build_sets_filter_year_to')) . '" value="' . ($configYearTo !== null ? (int) $configYearTo : '') . '">';
+        $content .= '</div>';
+
+        $content .= '<h3>' . htmlspecialchars(t('build_sets_filter_completeness')) . '</h3>';
+        $content .= '<label class="filter-checkbox"><input type="checkbox" name="exclusive_only" value="1"' . ($buildSetsExclusiveOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_exclusive_only')) . '</label>';
+        $content .= '<label class="filter-checkbox"><input type="checkbox" name="exclusive_rare_only" value="1"' . ($buildSetsExclusiveRareOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_exclusive_rare_only')) . '</label>';
+
+        $content .= '<button type="submit" class="filter-apply-button">' . htmlspecialchars(t('build_sets_start_scan_button')) . '</button>';
+        $content .= '</form>';
+        $content .= '</section>';
+
+        renderApp(t('nav_build_sets'), $content, $user, computeAppStats($pdo), $buildSetsBreadcrumbs);
+        exit;
+    }
+
+    $buildSetsResults = getBuildableSetsResults($pdo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly);
+    $scope = $buildSetsMeta['scope'];
+
+    $content = '<h1>' . htmlspecialchars(t('nav_build_sets')) . '</h1>';
+
+    $scopeParts = [];
+    if ($scope !== null) {
+        if ($scope['theme_name'] !== null) {
+            $scopeParts[] = htmlspecialchars($scope['theme_name']);
+        }
+        if ($scope['year_from'] !== null || $scope['year_to'] !== null) {
+            $scopeParts[] = htmlspecialchars(($scope['year_from'] ?? '…') . '–' . ($scope['year_to'] ?? '…'));
+        }
+    }
+    $scopeText = !empty($scopeParts) ? implode(' · ', $scopeParts) : htmlspecialchars(t('build_sets_filter_theme_all'));
+    $content .= '<p class="hint">' . htmlspecialchars(t('build_sets_last_updated', ['date' => formatDate($buildSetsMeta['computedAt'], true)])) . ' — ' . $scopeText . '</p>';
+
+    $scopeQuery = ($scope['theme_id'] ?? null) !== null ? '&theme=' . $scope['theme_id'] : '';
+    $scopeQuery .= ($scope['year_from'] ?? null) !== null ? '&year_from=' . $scope['year_from'] : '';
+    $scopeQuery .= ($scope['year_to'] ?? null) !== null ? '&year_to=' . $scope['year_to'] : '';
+    $filterQuery = ($buildSetsExclusiveOnly ? '&exclusive_only=1' : '') . ($buildSetsExclusiveRareOnly ? '&exclusive_rare_only=1' : '');
+
+    if ($buildSetsMeta['stale']) {
+        $content .= '<section class="card build-sets-stale-banner">';
+        $content .= '<p>' . htmlspecialchars(t('build_sets_stale_banner')) . '</p>';
+        $content .= '<a class="filter-apply-button" href="?page=build_sets&scan=1' . $scopeQuery . $filterQuery . '">' . htmlspecialchars(t('build_sets_refresh_button')) . '</a>';
+        $content .= '</section>';
+    }
+
+    $content .= '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="build-sets-toolbar">';
+    $content .= '<input type="hidden" name="page" value="build_sets">';
+    $content .= '<label class="filter-checkbox"><input type="checkbox" name="exclusive_only" value="1"' . ($buildSetsExclusiveOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_exclusive_only')) . '</label>';
+    $content .= '<label class="filter-checkbox"><input type="checkbox" name="exclusive_rare_only" value="1"' . ($buildSetsExclusiveRareOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_exclusive_rare_only')) . '</label>';
+    $content .= '<button type="submit" class="filter-apply-button">' . htmlspecialchars(t('filter_apply_button')) . '</button>';
+    $content .= '<a href="?page=build_sets&configure=1' . $scopeQuery . $filterQuery . '">' . htmlspecialchars(t('build_sets_change_filter_link')) . '</a>';
+    $content .= '</form>';
+
+    $content .= '<span class="results-summary">' . htmlspecialchars(t('build_sets_results_count', ['count' => formatNumber(count($buildSetsResults))])) . '</span>';
+
+    if (empty($buildSetsResults)) {
+        $content .= '<section class="card"><p>' . htmlspecialchars(t('build_sets_empty')) . '</p></section>';
+    } else {
+        $content .= '<div class="buildable-sets-grid">';
+        foreach ($buildSetsResults as $row) {
+            $content .= '<a class="buildable-set-tile" href="?page=set_detail&id=' . $row['set_id'] . '">';
+            $content .= '<span class="buildable-set-tile-image">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
+            $content .= '<span class="buildable-set-tile-name">' . htmlspecialchars($row['name']) . ' <span class="hint">' . htmlspecialchars($row['rebrickable_set_num']) . '</span></span>';
+
+            $metrics = [
+                ['build_sets_tile_total', $row['total_percent'], $row['total_actual'], $row['total_nominal']],
+                ['build_sets_tile_exclusive', $row['exclusive_percent'], $row['exclusive_actual'], $row['exclusive_nominal']],
+                ['build_sets_tile_rare', $row['rare_percent'], $row['rare_actual'], $row['rare_nominal']],
+                ['build_sets_tile_minifigs', $row['minifig_percent'], $row['minifig_actual'], $row['minifig_nominal']],
+            ];
+            $content .= '<div class="buildable-set-tile-metrics">';
+            foreach ($metrics as [$labelKey, $percent, $actual, $nominal]) {
+                $content .= '<div class="buildable-set-tile-metric">';
+                $content .= '<span class="buildable-set-tile-metric-label">' . htmlspecialchars(t($labelKey)) . '</span>';
+                $content .= '<div class="progress-track buildable-set-tile-bar"><div class="progress-fill" style="width:' . $percent . '%"></div></div>';
+                $content .= '<span class="buildable-set-tile-metric-value">' . formatNumber($percent, 1) . ' % (' . formatNumber($actual) . '/' . formatNumber($nominal) . ')</span>';
+                $content .= '</div>';
+            }
+            $content .= '</div>';
+            $content .= '</a>';
+        }
+        $content .= '</div>';
+    }
+
+    renderApp(t('nav_build_sets'), $content, $user, computeAppStats($pdo), $buildSetsBreadcrumbs);
+    exit;
+}
+
 if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
     $setId = (int) ($_GET['id'] ?? 0);
     $set = getSetById($pdo, $setId);

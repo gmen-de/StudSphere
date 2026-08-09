@@ -434,6 +434,32 @@ function installDatabase(): void
             CONSTRAINT fk_ownedsetminifigpart_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
             CONSTRAINT fk_ownedsetminifigpart_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS buildable_sets_cache (
+            set_id INT NOT NULL PRIMARY KEY,
+            total_nominal INT NOT NULL,
+            total_actual INT NOT NULL,
+            exclusive_nominal INT NOT NULL,
+            exclusive_actual INT NOT NULL,
+            rare_nominal INT NOT NULL,
+            rare_actual INT NOT NULL,
+            minifig_nominal INT NOT NULL,
+            minifig_actual INT NOT NULL,
+            CONSTRAINT fk_buildablesetscache_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS buildable_sets_cache_staging (
+            set_id INT NOT NULL PRIMARY KEY,
+            total_nominal INT NOT NULL,
+            total_actual INT NOT NULL,
+            exclusive_nominal INT NOT NULL,
+            exclusive_actual INT NOT NULL,
+            rare_nominal INT NOT NULL,
+            rare_actual INT NOT NULL,
+            minifig_nominal INT NOT NULL,
+            minifig_actual INT NOT NULL,
+            CONSTRAINT fk_buildablesetscachestaging_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
     ];
 
     foreach ($queries as $query) {
