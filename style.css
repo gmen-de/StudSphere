@@ -1662,6 +1662,39 @@ footer {
   color: #64748b;
 }
 
+.filter-theme-breadcrumb {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin: 0 0 0.6rem;
+  line-height: 1.5;
+}
+
+.filter-theme-breadcrumb a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.filter-theme-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.filter-theme-breadcrumb strong {
+  color: #0f172a;
+}
+
+.filter-theme-link {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #334155;
+  text-decoration: none;
+}
+
+.filter-theme-link:hover {
+  color: #2563eb;
+}
+
 .results-summary {
   display: block;
   color: #64748b;

@@ -299,6 +299,7 @@ return [
     'build_minifigs_col_theme' => 'Theme',
     'build_minifigs_col_buildable' => 'Buildable',
     'build_minifigs_filter_theme' => 'Theme',
+    'build_minifigs_filter_theme_all' => 'All themes',
     'build_minifigs_filter_price' => 'Price',
     'build_minifigs_filter_price_from' => 'from',
     'build_minifigs_filter_price_to' => 'to',

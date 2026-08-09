@@ -1864,43 +1864,52 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
         // than pushing it into that function's own SQL, which already does
         // a non-trivial multi-step computation of its own.
         $buildSearchQuery = trim((string) ($_GET['q'] ?? ''));
-        $selectedThemeIds = array_map('intval', (array) ($_GET['theme'] ?? []));
+        $selectedThemeId = isset($_GET['theme']) && $_GET['theme'] !== '' ? (int) $_GET['theme'] : null;
         $priceFrom = isset($_GET['price_from']) && $_GET['price_from'] !== '' ? (float) $_GET['price_from'] : null;
         $priceTo = isset($_GET['price_to']) && $_GET['price_to'] !== '' ? (float) $_GET['price_to'] : null;
         $selectedYear = isset($_GET['year']) && $_GET['year'] !== '' ? (int) $_GET['year'] : null;
         $pricedOnly = ($_GET['priced_only'] ?? '') === '1';
         $minBuildable = isset($_GET['min_buildable']) && $_GET['min_buildable'] !== '' ? max(0, (int) $_GET['min_buildable']) : null;
 
-        $themeFacetCounts = [];
+        // Theme facet as a real parent/child tree — mirrors sets_search's/
+        // minifigs_search's own theme drill-down (buildThemeTree(),
+        // getSetThemeChildren(), getThemeAncestors(), all src/sets.php):
+        // every catalog theme is loaded (regardless of whether any candidate
+        // is tagged with it, so parent-child edges are always complete),
+        // direct_count is how many *unfiltered* candidates carry that exact
+        // theme_id, and buildThemeTree() rolls that up into recursive_count
+        // per ancestor automatically. Selecting a theme filters to it plus
+        // every descendant (getThemeAndDescendantIds()) — same "browsing a
+        // parent shows its whole subtree" behavior as those other pages —
+        // via a real link to click, not a checkbox, per explicit request.
+        $themeDirectCounts = [];
         $yearFacetCounts = [];
         foreach ($buildableMinifigs as $facetRow) {
             foreach ($facetRow['theme_ids'] as $themeId) {
-                $themeFacetCounts[$themeId] = ($themeFacetCounts[$themeId] ?? 0) + 1;
+                $themeDirectCounts[$themeId] = ($themeDirectCounts[$themeId] ?? 0) + 1;
             }
             if ($facetRow['year'] !== null) {
                 $yearFacetCounts[$facetRow['year']] = ($yearFacetCounts[$facetRow['year']] ?? 0) + 1;
             }
         }
-        $themeFacetNames = [];
-        if (!empty($themeFacetCounts)) {
-            $themeNamePlaceholders = implode(',', array_fill(0, count($themeFacetCounts), '?'));
-            $themeNameStmt = $pdo->prepare("SELECT theme_id, name FROM themes WHERE theme_id IN ($themeNamePlaceholders)");
-            $themeNameStmt->execute(array_keys($themeFacetCounts));
-            foreach ($themeNameStmt->fetchAll() as $themeNameRow) {
-                $themeFacetNames[(int) $themeNameRow['theme_id']] = $themeNameRow['name'];
-            }
-            asort($themeFacetNames, SORT_STRING | SORT_FLAG_CASE);
-        }
         krsort($yearFacetCounts);
 
-        $buildableMinifigs = array_values(array_filter($buildableMinifigs, function (array $row) use ($buildSearchQuery, $selectedThemeIds, $priceFrom, $priceTo, $selectedYear, $pricedOnly, $minBuildable): bool {
+        $allThemeRows = $pdo->query('SELECT theme_id, name, parent_theme_id FROM themes')->fetchAll();
+        foreach ($allThemeRows as &$themeRow) {
+            $themeRow['direct_count'] = $themeDirectCounts[(int) $themeRow['theme_id']] ?? 0;
+        }
+        unset($themeRow);
+        $buildThemeTree = buildThemeTree($allThemeRows);
+        $selectedThemeDescendantIds = $selectedThemeId !== null ? getThemeAndDescendantIds($buildThemeTree, $selectedThemeId) : [];
+
+        $buildableMinifigs = array_values(array_filter($buildableMinifigs, function (array $row) use ($buildSearchQuery, $selectedThemeDescendantIds, $priceFrom, $priceTo, $selectedYear, $pricedOnly, $minBuildable): bool {
             if ($buildSearchQuery !== '') {
                 $haystack = ($row['name'] ?? '') . ' ' . $row['fig_num'];
                 if (stripos($haystack, $buildSearchQuery) === false) {
                     return false;
                 }
             }
-            if (!empty($selectedThemeIds) && empty(array_intersect($selectedThemeIds, $row['theme_ids']))) {
+            if (!empty($selectedThemeDescendantIds) && empty(array_intersect($selectedThemeDescendantIds, $row['theme_ids']))) {
                 return false;
             }
             if ($pricedOnly && $row['bricklink_price_used'] === null) {
@@ -1929,13 +1938,16 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
         // Two separate <form>s (search bar + sidebar), each carrying the
         // other's current state as hidden fields, so submitting either one
         // preserves both — the same pattern bricks_search's own text search
-        // + filter sidebar already use.
+        // + filter sidebar already use. The theme tree isn't part of either
+        // form (it's plain links, not inputs) but still rides along as a
+        // hidden field on both so it survives a search or a "Filter
+        // anwenden" submit.
         $buildFilterParams = ['page' => 'build_minifigs'];
         if ($buildSearchQuery !== '') {
             $buildFilterParams['q'] = $buildSearchQuery;
         }
-        if (!empty($selectedThemeIds)) {
-            $buildFilterParams['theme'] = $selectedThemeIds;
+        if ($selectedThemeId !== null) {
+            $buildFilterParams['theme'] = $selectedThemeId;
         }
         if ($priceFrom !== null) {
             $buildFilterParams['price_from'] = $priceFrom;
@@ -1967,7 +1979,28 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
             return $html;
         };
 
-        $hasActiveFilter = $buildSearchQuery !== '' || !empty($selectedThemeIds) || $priceFrom !== null || $priceTo !== null || $selectedYear !== null || $pricedOnly || $minBuildable !== null;
+        // Builds a full "?..." link for the theme tree's own navigation,
+        // starting from every currently active filter and overriding just
+        // the theme (null removes it) — so clicking a theme (or "Alle
+        // Themen") never drops the other active filters.
+        $buildMinifigsUrl = function (array $overrides) use ($buildFilterParams): string {
+            $params = $overrides + $buildFilterParams;
+            foreach ($overrides as $key => $value) {
+                if ($value === null) {
+                    unset($params[$key]);
+                }
+            }
+            $query = [];
+            foreach ($params as $key => $value) {
+                foreach ((array) $value as $singleValue) {
+                    $name = is_array($value) ? $key . '[]' : $key;
+                    $query[] = urlencode($name) . '=' . urlencode((string) $singleValue);
+                }
+            }
+            return '?' . implode('&', $query);
+        };
+
+        $hasActiveFilter = $buildSearchQuery !== '' || $selectedThemeId !== null || $priceFrom !== null || $priceTo !== null || $selectedYear !== null || $pricedOnly || $minBuildable !== null;
 
         $content .= '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-search-form">';
         $content .= '<input type="hidden" name="page" value="build_minifigs">';
@@ -1978,14 +2011,33 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
 
         $sidebar = '<form method="get" action="' . htmlspecialchars($_SERVER['PHP_SELF']) . '" class="parts-filter-sidebar">';
         $sidebar .= '<input type="hidden" name="page" value="build_minifigs">';
-        $sidebar .= $renderBuildHiddenFields($buildFilterParams, ['page', 'theme', 'price_from', 'price_to', 'year', 'priced_only', 'min_buildable']);
+        $sidebar .= $renderBuildHiddenFields($buildFilterParams, ['page', 'price_from', 'price_to', 'year', 'priced_only', 'min_buildable']);
 
-        $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('build_minifigs_filter_theme')) . '</h3><div class="filter-options">';
-        foreach ($themeFacetNames as $themeId => $themeName) {
-            $checked = in_array($themeId, $selectedThemeIds, true) ? ' checked' : '';
-            $sidebar .= '<label class="filter-checkbox"><input type="checkbox" name="theme[]" value="' . $themeId . '"' . $checked . '> ' . htmlspecialchars($themeName) . ' <span class="filter-count">(' . $themeFacetCounts[$themeId] . ')</span></label>';
+        $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('build_minifigs_filter_theme')) . '</h3>';
+        $themeAncestors = $selectedThemeId !== null ? getThemeAncestors($buildThemeTree, $selectedThemeId) : [];
+        $sidebar .= '<p class="filter-theme-breadcrumb">';
+        if (empty($themeAncestors)) {
+            $sidebar .= '<strong>' . htmlspecialchars(t('build_minifigs_filter_theme_all')) . '</strong>';
+        } else {
+            $crumbParts = ['<a href="' . htmlspecialchars($buildMinifigsUrl(['theme' => null])) . '">' . htmlspecialchars(t('build_minifigs_filter_theme_all')) . '</a>'];
+            $lastIndex = count($themeAncestors) - 1;
+            foreach ($themeAncestors as $i => $ancestor) {
+                $crumbParts[] = $i === $lastIndex
+                    ? '<strong>' . htmlspecialchars($ancestor['name']) . '</strong>'
+                    : '<a href="' . htmlspecialchars($buildMinifigsUrl(['theme' => $ancestor['theme_id']])) . '">' . htmlspecialchars($ancestor['name']) . '</a>';
+            }
+            $sidebar .= implode(' » ', $crumbParts);
         }
-        $sidebar .= '</div></div>';
+        $sidebar .= '</p>';
+        $themeChildren = getSetThemeChildren($buildThemeTree, $selectedThemeId);
+        if (!empty($themeChildren)) {
+            $sidebar .= '<div class="filter-options">';
+            foreach ($themeChildren as $child) {
+                $sidebar .= '<a class="filter-theme-link" href="' . htmlspecialchars($buildMinifigsUrl(['theme' => $child['theme_id']])) . '">' . htmlspecialchars($child['name']) . ' <span class="filter-count">(' . $child['recursive_count'] . ')</span></a>';
+            }
+            $sidebar .= '</div>';
+        }
+        $sidebar .= '</div>';
 
         $sidebar .= '<div class="filter-group"><h3>' . htmlspecialchars(t('build_minifigs_filter_price')) . '</h3><div class="filter-range-inputs">';
         $sidebar .= '<input type="number" step="0.01" min="0" name="price_from" placeholder="' . htmlspecialchars(t('build_minifigs_filter_price_from')) . '" value="' . ($priceFrom !== null ? htmlspecialchars((string) $priceFrom) : '') . '">';

@@ -299,6 +299,7 @@ return [
     'build_minifigs_col_theme' => 'Thema',
     'build_minifigs_col_buildable' => 'Baubar',
     'build_minifigs_filter_theme' => 'Thema',
+    'build_minifigs_filter_theme_all' => 'Alle Themen',
     'build_minifigs_filter_price' => 'Preis',
     'build_minifigs_filter_price_from' => 'von',
     'build_minifigs_filter_price_to' => 'bis',
