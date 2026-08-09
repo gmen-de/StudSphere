@@ -52,12 +52,22 @@ require_once __DIR__ . '/storage.php';
  */
 function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
 {
+    // Excludes owned_set-type locations, same as getPartStock() — those hold
+    // parts already materialized into a built/owned set's inventory, not
+    // loose stock free to consume. Omitting this filter previously let a
+    // part "count" as available stock here while getPartStock() (used by
+    // the actual "Bauen" modal and buildMinifigFromStock()'s own re-check)
+    // correctly excluded it, so a minifig could show missing=0 in this list
+    // while the modal — using the real, consumable stock — still showed a
+    // shortfall.
     $stock = [];
     $stockStmt = $pdo->query(
-        'SELECT part_id, color_id, SUM(quantity) - SUM(damaged_quantity) AS stock
-         FROM storage_items
-         GROUP BY part_id, color_id
-         HAVING stock > 0'
+        "SELECT si.part_id, si.color_id, SUM(si.quantity) - SUM(si.damaged_quantity) AS stock
+         FROM storage_items si
+         INNER JOIN storage_locations sl ON sl.id = si.location_id
+         WHERE sl.location_type IS NULL OR sl.location_type != 'owned_set'
+         GROUP BY si.part_id, si.color_id
+         HAVING stock > 0"
     );
     foreach ($stockStmt->fetchAll() as $row) {
         $stock[$row['part_id'] . ':' . $row['color_id']] = (int) $row['stock'];
@@ -80,8 +90,12 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
          INNER JOIN rebrickable_inventories ri ON ri.inventory_id = ip.inventory_id
          INNER JOIN minifigs m ON m.fig_num = ri.set_num
          LEFT JOIN colors c ON c.color_id = ip.color_id
-         LEFT JOIN (SELECT DISTINCT part_id, color_id FROM storage_items WHERE quantity > 0) si
-                ON si.part_id = ip.part_id AND si.color_id = c.id
+         LEFT JOIN (
+                SELECT DISTINCT si2.part_id, si2.color_id
+                FROM storage_items si2
+                INNER JOIN storage_locations sl2 ON sl2.id = si2.location_id
+                WHERE si2.quantity > 0 AND (sl2.location_type IS NULL OR sl2.location_type != 'owned_set')
+             ) si ON si.part_id = ip.part_id AND si.color_id = c.id
          WHERE ip.is_spare = 0
          GROUP BY ri.set_num, m.id, m.name, m.local_image_path,
                   m.bricklink_price_used, m.bricklink_price_currency, m.bricklink_price_checked_at
