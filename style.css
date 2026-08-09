@@ -3656,6 +3656,26 @@ footer {
   border-color: #dc2626;
 }
 
+/* Catalog set_detail's inventory tab (renderPartCard()'s $stockStatus param,
+   src/parts.php) — loose-stock availability per part+color, independent of
+   any owned instance. 'partial' uses an actual border-image gradient (not
+   just a blended in-between color) per explicit request. */
+.part-card-stock-complete {
+  border-width: 2px;
+  border-color: #16a34a;
+}
+
+.part-card-stock-partial {
+  border-width: 2px;
+  border-style: solid;
+  border-image: linear-gradient(90deg, #16a34a, #dc2626) 1;
+}
+
+.part-card-stock-missing {
+  border-width: 2px;
+  border-color: #dc2626;
+}
+
 /* Minifig-modal component tiles (src/minifig_modal.php) — a loose minifig's
    own per-part defekt/fehlt status, same tile family as
    .owned-set-inventory-tile-* above but layered onto .part-card (needed so

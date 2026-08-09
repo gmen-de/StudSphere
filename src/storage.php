@@ -459,6 +459,37 @@ function setStorageItemSpareQuantity(int $locationId, int $partId, int $colorId,
 }
 
 /**
+ * Whole-catalog loose stock, summed per part+color (surrogate colors.id,
+ * matching storage_items.color_id) — how many of a given part+color are
+ * free to grab for a build right now, ignoring condition_type and location.
+ * Excludes owned-set instance locations (location_type 'owned_set') the same
+ * way getPartStock() below does, since those pieces are "owned" but not
+ * really "available" until the set is taken apart. Shared by every feature
+ * that needs this same stock map: getBuildableMinifigs() (src/build.php),
+ * the "Baubare Sets" scan (initBuildSetsScanState(), src/build_sets.php),
+ * and the catalog set_detail inventory tab's stock-availability borders
+ * (src/routes/pages.php).
+ *
+ * @return array<string, int> keyed by "{part_id}:{color_id}", only pairs with stock > 0 are present
+ */
+function getLooseStockMap(PDO $pdo): array
+{
+    $stock = [];
+    $stmt = $pdo->query(
+        "SELECT si.part_id, si.color_id, SUM(si.quantity) - SUM(si.damaged_quantity) AS stock
+         FROM storage_items si
+         INNER JOIN storage_locations sl ON sl.id = si.location_id
+         WHERE sl.location_type IS NULL OR sl.location_type != 'owned_set'
+         GROUP BY si.part_id, si.color_id
+         HAVING stock > 0"
+    );
+    foreach ($stmt->fetchAll() as $row) {
+        $stock[$row['part_id'] . ':' . $row['color_id']] = (int) $row['stock'];
+    }
+    return $stock;
+}
+
+/**
  * Current LOOSE stock of one part across all storage locations, for the
  * part detail modal's "Teilelager" tab — one row per location/color/
  * condition combo that actually holds stock. Excludes owned-set instance

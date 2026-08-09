@@ -60,18 +60,7 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
     // correctly excluded it, so a minifig could show missing=0 in this list
     // while the modal — using the real, consumable stock — still showed a
     // shortfall.
-    $stock = [];
-    $stockStmt = $pdo->query(
-        "SELECT si.part_id, si.color_id, SUM(si.quantity) - SUM(si.damaged_quantity) AS stock
-         FROM storage_items si
-         INNER JOIN storage_locations sl ON sl.id = si.location_id
-         WHERE sl.location_type IS NULL OR sl.location_type != 'owned_set'
-         GROUP BY si.part_id, si.color_id
-         HAVING stock > 0"
-    );
-    foreach ($stockStmt->fetchAll() as $row) {
-        $stock[$row['part_id'] . ':' . $row['color_id']] = (int) $row['stock'];
-    }
+    $stock = getLooseStockMap($pdo);
     if (empty($stock)) {
         return [];
     }

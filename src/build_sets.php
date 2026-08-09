@@ -336,18 +336,7 @@ function initBuildSetsScanState(PDO $pdo, ?int $themeId, ?int $yearFrom, ?int $y
         $candidateInventoryIds[] = (int) $row['inventory_id'];
     }
 
-    $stock = [];
-    $stockStmt = $pdo->query(
-        "SELECT si.part_id, si.color_id, SUM(si.quantity) - SUM(si.damaged_quantity) AS stock
-         FROM storage_items si
-         INNER JOIN storage_locations sl ON sl.id = si.location_id
-         WHERE sl.location_type IS NULL OR sl.location_type != 'owned_set'
-         GROUP BY si.part_id, si.color_id
-         HAVING stock > 0"
-    );
-    foreach ($stockStmt->fetchAll() as $row) {
-        $stock[$row['part_id'] . ':' . $row['color_id']] = (int) $row['stock'];
-    }
+    $stock = getLooseStockMap($pdo);
 
     $stickerPartIds = array_flip(array_map('intval', array_column(
         $pdo->query(

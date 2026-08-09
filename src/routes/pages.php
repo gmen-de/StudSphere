@@ -2501,9 +2501,16 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
     // scoping getPartSetCounts() by (part_id, color_id) covers both. Only
     // meaningful for the regular inventory tab, not spares — callers pass
     // false there.
-    $renderSetPartsGrid = function (array $items, bool $groupByRarity = false, ?int $inventoryId = null) use ($pdo): string {
+    // $looseStock (getLooseStockMap(), src/storage.php — same "exclude
+    // owned_set locations" stock map "Baubare Minifiguren"/"Baubare Sets"
+    // already use), when given, adds a per-card border marking whether the
+    // needed quantity+color is on hand right now: 'complete' (green, full
+    // amount available), 'partial' (green-to-red gradient, some but not
+    // enough), 'missing' (red, none at all). Null for callers that don't
+    // want this (currently: the spares tab, where it's less meaningful).
+    $renderSetPartsGrid = function (array $items, bool $groupByRarity = false, ?int $inventoryId = null, ?array $looseStock = null) use ($pdo): string {
         $missingCount = 0;
-        $renderCard = function (array $item) use (&$missingCount): string {
+        $renderCard = function (array $item) use (&$missingCount, $looseStock): string {
             $part = [
                 'id' => $item['part_id'],
                 'part_num' => $item['part_num'],
@@ -2522,7 +2529,13 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
             if ($fetchColorId !== null) {
                 $missingCount++;
             }
-            return renderPartCard($part, $meta, $fetchColorId);
+            $stockStatus = null;
+            if ($looseStock !== null) {
+                $need = (int) $item['quantity'];
+                $have = $looseStock[$item['part_id'] . ':' . $item['color_id']] ?? 0;
+                $stockStatus = $have <= 0 ? 'missing' : ($have >= $need ? 'complete' : 'partial');
+            }
+            return renderPartCard($part, $meta, $fetchColorId, $stockStatus);
         };
 
         $cardsHtml = '';
@@ -2599,7 +2612,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
         $items = $targetInventoryId !== null ? getSetPartsList($pdo, $targetInventoryId, false, getLocale()) : [];
         $content .= empty($items)
             ? '<section class="card"><p>' . htmlspecialchars(t('set_detail_inventory_empty')) . '</p></section>'
-            : $renderSetPartsGrid($items, true, $targetInventoryId);
+            : $renderSetPartsGrid($items, true, $targetInventoryId, getLooseStockMap($pdo));
 
         if ($targetInventoryId !== null && ldrawContextualRenderingReady()) {
             $missingLdrawPairs = getMissingLdrawRenderPairs($pdo, $items);

@@ -25,11 +25,19 @@ const PARTS_POPULAR_CATEGORY_LIMIT = 12;
  * list), not the catalog-wide bricks search grid. A single bulk "load
  * missing images" button elsewhere on the page (see
  * renderFetchMissingImagesButton() in part_images.php) scans for these.
+ *
+ * $stockStatus, when given, adds a border class reflecting loose-stock
+ * availability against this card's own quantity — 'complete' (green, full
+ * needed quantity+color on hand), 'partial' (green-to-red gradient border,
+ * some but not enough), or 'missing' (red, none at all). Only the catalog
+ * set_detail inventory tab passes this (src/routes/pages.php); every other
+ * caller leaves it null and gets the plain, unmarked card as before.
  */
-function renderPartCard(array $part, ?string $meta = null, ?int $fetchColorId = null): string
+function renderPartCard(array $part, ?string $meta = null, ?int $fetchColorId = null, ?string $stockStatus = null): string
 {
     $dataColorAttr = $fetchColorId !== null ? ' data-color-id="' . $fetchColorId . '"' : '';
-    $html = '<div class="part-card" data-part-id="' . (int) $part['id'] . '"' . $dataColorAttr . ' role="button" tabindex="0">';
+    $stockClass = $stockStatus !== null ? ' part-card-stock-' . $stockStatus : '';
+    $html = '<div class="part-card' . $stockClass . '" data-part-id="' . (int) $part['id'] . '"' . $dataColorAttr . ' role="button" tabindex="0">';
     $html .= '<span class="part-card-image">' . ($part['thumbnail'] !== null ? '<img src="' . htmlspecialchars($part['thumbnail']) . '" alt="">' : getNavIcon('bricks')) . '</span>';
     $html .= '<span class="part-card-num">' . htmlspecialchars($part['part_num']) . '</span>';
     $html .= '<span class="part-card-name" title="' . htmlspecialchars($part['name']) . '">' . htmlspecialchars($part['name']) . '</span>';
