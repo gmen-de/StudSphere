@@ -22,6 +22,12 @@ body {
   background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.1), transparent 30%),
               radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.08), transparent 28%),
               #f8fafc;
+  /* Compensates for .app-header-fixed switching to position: fixed (see
+     that rule's comment for why) — it's taken out of normal flow entirely,
+     so without this the page content would render underneath it starting
+     at y=0. Falls back to 0px on pages that don't render the header at all
+     (the pre-login screen), where the CSS var is never set. */
+  padding-top: var(--sticky-header-height, 0px);
 }
 
 a {
@@ -92,28 +98,31 @@ header .brand small {
   margin-top: 0.375rem;
 }
 
-/* Keeps the status bar + main nav visible while the page scrolls — sticky
-   (not fixed) so it needs no compensating body padding-top, and the two
+/* Keeps the status bar + main nav visible while the page scrolls — the two
    bars stick together as one unit regardless of the status bar's own
    height (see index.php's renderApp() for why that matters). z-index above
    in-page overlays that use 20-31 (nav/lang dropdowns, tile filters) but
    below modal overlays (100+), so an open modal still covers it as
    expected.
-   transform: translateZ(0) promotes this to its own GPU compositing layer —
-   without it, Chromium sometimes fails to correctly repaint this sticky
-   element's contents while the page underneath scrolls past it, leaving
-   stale content (the header's own previous frame, or the page content that
-   used to be behind it) visible until some other repaint trigger (further
-   scrolling, a resize) forces a correct redraw. Confirmed live via repeated
-   screenshots at fixed scroll offsets: identical scroll position, same
-   content, but the compositor intermittently produced a corrupted frame —
-   a GPU tile-invalidation race, not a layout/timing bug (hence why fixing
-   --sticky-header-height's measurement timing didn't help). */
+   position: fixed, not sticky: sticky was tried first (needs no
+   compensating body padding-top) but turned out to have a real Chromium GPU
+   compositing bug — confirmed live via repeated screenshots at fixed scroll
+   offsets, where the compositor intermittently produced a corrupted frame
+   (stale/ghosted content) at an otherwise identical scroll position, only
+   clearing on some later, unrelated repaint trigger. transform:
+   translateZ(0) (forcing its own compositing layer) did NOT fix it either.
+   Sticky positioning has to re-evaluate "is this still stuck" against its
+   containing block on every scroll frame; fixed positioning is anchored to
+   the viewport unconditionally and doesn't have that class of bug. The
+   trade-off — needing body's padding-top to compensate since this is now
+   out of normal flow — is handled via the same --sticky-header-height
+   variable this already fed for .owned-set-sidebar (app.js). */
 .app-header-fixed {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: 40;
-  transform: translateZ(0);
 }
 
 /* Status bar: catalog stats + user/language. Full-bleed white strip docked
@@ -2268,8 +2277,8 @@ footer {
   gap: 1.5rem;
 }
 
-/* Sticks below the global sticky header (--sticky-header-height, set by
-   app.js) while the page scrolls, capped to whatever vertical space is left
+/* Sticks below the fixed header (--sticky-header-height, set by app.js)
+   while the page scrolls, capped to whatever vertical space is left
    so it never runs off the bottom of the viewport unreachable — internal
    scroll (overflow-y) is the fallback if it's still too tall even
    collapsed. owned_set_detail's own "Mehr anzeigen" toggle (see its own
