@@ -256,6 +256,17 @@
     }
     document.documentElement.style.setProperty('--sticky-header-height', header.offsetHeight + 'px');
   }
+  // A single measurement right at DOMContentLoaded can still land ~50-60px
+  // short — the DOM exists by then, but the browser hasn't necessarily
+  // finished a real layout/paint pass yet (e.g. the status bar's flex-wrap
+  // stats row settling into its final wrapped/unwrapped shape). Re-measuring
+  // inside requestAnimationFrame (after the browser's next layout) and again
+  // on the full "load" event (everything, including any late-settling
+  // content, finished) catches that without guessing a timeout duration.
+  function scheduleUpdateStickyHeaderHeight() {
+    updateStickyHeaderHeight();
+    window.requestAnimationFrame(updateStickyHeaderHeight);
+  }
   // app.js itself loads in <head> without defer (see renderApp()'s own doc
   // comment on that script tag), so it runs before <body> — and
   // .app-header-fixed with it — exists. Calling updateStickyHeaderHeight()
@@ -265,11 +276,12 @@
   // (also sticky, opaque) header instead of sitting below it — exactly the
   // "top of the sidebar disappears behind the header" symptom this fixes.
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', updateStickyHeaderHeight);
+    document.addEventListener('DOMContentLoaded', scheduleUpdateStickyHeaderHeight);
   } else {
     // Already past "loading" (e.g. this script got injected/re-run later)
     // — DOMContentLoaded won't fire again, so call directly.
-    updateStickyHeaderHeight();
+    scheduleUpdateStickyHeaderHeight();
   }
+  window.addEventListener('load', updateStickyHeaderHeight);
   window.addEventListener('resize', updateStickyHeaderHeight);
 })(window);
