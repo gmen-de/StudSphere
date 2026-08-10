@@ -246,9 +246,8 @@
    * itself with `top: var(--sticky-header-height, 0px)` instead of
    * guessing/hardcoding a pixel value that would drift whenever the
    * header's own content wraps (e.g. the status bar's stats row on a
-   * narrower viewport). Runs on every authenticated page load since
-   * app.js itself is loaded everywhere; a no-op if the header isn't
-   * present (shouldn't happen on an authenticated page, but cheap to guard).
+   * narrower viewport). A no-op if the header isn't present (shouldn't
+   * happen on an authenticated page, but cheap to guard).
    */
   function updateStickyHeaderHeight() {
     var header = document.querySelector('.app-header-fixed');
@@ -257,6 +256,20 @@
     }
     document.documentElement.style.setProperty('--sticky-header-height', header.offsetHeight + 'px');
   }
-  updateStickyHeaderHeight();
+  // app.js itself loads in <head> without defer (see renderApp()'s own doc
+  // comment on that script tag), so it runs before <body> — and
+  // .app-header-fixed with it — exists. Calling updateStickyHeaderHeight()
+  // immediately here always found nothing and silently no-opped, leaving
+  // the CSS variable at its 0px fallback forever: the sidebar then stuck
+  // flush with the real viewport top, scrolling out from *behind* the
+  // (also sticky, opaque) header instead of sitting below it — exactly the
+  // "top of the sidebar disappears behind the header" symptom this fixes.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', updateStickyHeaderHeight);
+  } else {
+    // Already past "loading" (e.g. this script got injected/re-run later)
+    // — DOMContentLoaded won't fire again, so call directly.
+    updateStickyHeaderHeight();
+  }
   window.addEventListener('resize', updateStickyHeaderHeight);
 })(window);
