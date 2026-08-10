@@ -637,6 +637,33 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             );
         },
+        37 => function (PDO $pdo): void {
+            // Renames every existing owned-set storage_locations row (the
+            // auto-generated location_type='owned_set' node addOwnedSet()
+            // creates, src/owned_sets.php) from the old "Name (SetNum) #N"
+            // pattern to "SetNum - Name #N", matching the new pattern that
+            // function itself now uses for freshly-added sets. Instance
+            // numbers (#N) are re-derived by ordering each set_id's rows by
+            // owned_sets.id — the original numbers were only ever "how many
+            // rows for this set_id existed at creation time", not a stored,
+            // stable ordinal, so this is the same deterministic rule applied
+            // uniformly rather than trying to recover the exact historical
+            // count.
+            $rows = $pdo->query(
+                'SELECT os.location_id, os.set_id, s.rebrickable_set_num, s.name AS set_name
+                 FROM owned_sets os
+                 INNER JOIN sets s ON s.id = os.set_id
+                 ORDER BY os.set_id, os.id'
+            )->fetchAll();
+            $updateStmt = $pdo->prepare('UPDATE storage_locations SET name = ? WHERE id = ?');
+            $counters = [];
+            foreach ($rows as $row) {
+                $setId = (int) $row['set_id'];
+                $counters[$setId] = ($counters[$setId] ?? 0) + 1;
+                $newName = $row['rebrickable_set_num'] . ' - ' . $row['set_name'] . ' #' . $counters[$setId];
+                $updateStmt->execute([$newName, (int) $row['location_id']]);
+            }
+        },
     ];
 }
 
@@ -717,7 +744,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 36;
+const CURRENT_SCHEMA_VERSION = 37;
 
 function getInstalledSchemaVersion(): int
 {

@@ -161,16 +161,25 @@ function getStorageLocationAncestors(int $id): array
 }
 
 /**
- * Excludes owned-set instance nodes (location_type 'owned_set') — see
- * getChildLocations()'s doc comment for why: they're not real organizational
- * locations, so they don't belong in the general "Lagerort-Übersicht" tree.
+ * Includes owned-set instance nodes (location_type 'owned_set') — a boxed
+ * set's own auto-generated storage node, so it shows up in the "Lagerort-
+ * Übersicht" tree right where it physically sits, clickable just like any
+ * other location (its content loads via the same action=location_content —
+ * getLocationContentRecursive()'s own starting node is never excluded by
+ * type, only its *descendants* are, and an owned_set node never has any).
+ * The client renders these as non-editable, non-expandable leaves (own
+ * icon, no rename/delete/add-child controls — those go through the set's
+ * own removal flow, not the generic location actions) — see buildRow() in
+ * src/routes/pages.php. getChildLocations() (the "add stock"/picker cascade)
+ * still excludes them: they're a place to *view* what's materialized inside
+ * a set, never a destination to file loose stock into.
  *
  * @return array<int, array{id:int, parent_id:?int, name:string, location_type:?string, children: array}>
  */
 function getStorageLocationTree(): array
 {
     $pdo = getPDO();
-    $rows = $pdo->query("SELECT id, parent_id, name, location_type FROM storage_locations WHERE location_type IS NULL OR location_type != 'owned_set'")->fetchAll();
+    $rows = $pdo->query('SELECT id, parent_id, name, location_type FROM storage_locations')->fetchAll();
     // Natural sort ("Fach 2" before "Fach 10"), not SQL's plain lexicographic
     // ORDER BY — confirmed on real data (a shelf cabinet's numbered
     // compartments showed up as Fach 1, Fach 10, Fach 11, ..., Fach 2).

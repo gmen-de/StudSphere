@@ -1187,6 +1187,37 @@ button[type='submit'] {
   flex-shrink: 0;
 }
 
+/* A boxed set's own auto-generated tree node (location_type 'owned_set',
+   see getStorageLocationTree()'s doc comment, src/storage.php) — same row
+   shape as a real location, just visually marked as "this is a set, not a
+   folder" via its own icon and a slightly muted color. */
+.location-tree-name-set {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #475569;
+}
+
+.location-tree-set-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: #94a3b8;
+}
+
+.location-tree-set-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.location-content-readonly-note {
+  background: #eff6ff;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  border-radius: 0.6rem;
+  padding: 0.6rem 0.9rem;
+  margin: 0 0 1rem;
+}
+
 .location-tree-row-actions {
   display: none;
   align-items: center;

@@ -701,6 +701,7 @@ SCRIPT;
         'deleteIcon' => getActionIcon('delete'),
         'brickIcon' => getNavIcon('bricks'),
         'minifigIcon' => getNavIcon('minifigs'),
+        'setIcon' => getNavIcon('sets'),
         'expandLabel' => t('locations_tree_expand_label'),
         'editLabel' => t('location_edit_link'),
         'deleteLabel' => t('location_delete_link'),
@@ -734,6 +735,8 @@ SCRIPT;
         'noChildren' => t('add_stock_no_children'),
         'thumbnailUnverifiedTitle' => t('location_content_thumbnail_unverified'),
         'hereLabel' => t('location_content_here_label'),
+        'setReadOnlyNote' => t('location_content_set_readonly'),
+        'openSetDetailsLink' => t('location_content_open_set_details'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $content .= <<<SCRIPT
@@ -882,6 +885,12 @@ SCRIPT;
   // auswählen" walks this rather than the DOM, since a checkbox alone
   // doesn't carry the descriptor addCardSelectAndActivate() built it from.
   var allSelectableItems = [];
+  // Set by renderContent() from data.readOnly — true while viewing a boxed
+  // set's own auto-generated node (see action=location_content's own doc
+  // comment, src/routes/actions.php): cards render without the
+  // select/click-to-edit affordance, since moving stock out through the
+  // generic actions would desync that set's own completeness tracking.
+  var currentReadOnly = false;
 
   function itemKey(item) {
     return item.kind === 'minifig'
@@ -1025,20 +1034,22 @@ SCRIPT;
     meta.textContent = (item.color_name || '') + ' \\u00b7 ' + condText;
     card.appendChild(meta);
 
-    var descriptor = {
-      kind: 'part',
-      locationId: item.location_id,
-      partId: item.part_id,
-      colorId: item.color_id,
-      conditionType: item.condition_type
-    };
-    addCardSelectAndActivate(card, descriptor, function() {
-      openItemEditModal(descriptor, {
-        title: item.part_num + ' \\u00b7 ' + item.part_name,
-        meta: (item.color_name || '') + ' \\u00b7 ' + condText,
-        quantity: item.quantity
+    if (!currentReadOnly) {
+      var descriptor = {
+        kind: 'part',
+        locationId: item.location_id,
+        partId: item.part_id,
+        colorId: item.color_id,
+        conditionType: item.condition_type
+      };
+      addCardSelectAndActivate(card, descriptor, function() {
+        openItemEditModal(descriptor, {
+          title: item.part_num + ' \\u00b7 ' + item.part_name,
+          meta: (item.color_name || '') + ' \\u00b7 ' + condText,
+          quantity: item.quantity
+        });
       });
-    });
+    }
 
     return card;
   }
@@ -1070,17 +1081,19 @@ SCRIPT;
     meta.textContent = condText;
     card.appendChild(meta);
 
-    var descriptor = {
-      kind: 'minifig',
-      instanceId: fig.instance_id,
-      locationId: fig.location_id
-    };
-    addCardSelectAndActivate(card, descriptor, function() {
-      openItemEditModal(descriptor, {
-        title: figName,
-        meta: condText
+    if (!currentReadOnly) {
+      var descriptor = {
+        kind: 'minifig',
+        instanceId: fig.instance_id,
+        locationId: fig.location_id
+      };
+      addCardSelectAndActivate(card, descriptor, function() {
+        openItemEditModal(descriptor, {
+          title: figName,
+          meta: condText
+        });
       });
-    });
+    }
 
     return card;
   }
@@ -1316,9 +1329,24 @@ SCRIPT;
   function renderContent(id, name, data) {
     contentEl.innerHTML = '';
     allSelectableItems = [];
+    currentReadOnly = !!data.readOnly;
     var heading = document.createElement('h2');
     heading.textContent = name;
     contentEl.appendChild(heading);
+
+    if (currentReadOnly) {
+      var readOnlyNote = document.createElement('p');
+      readOnlyNote.className = 'hint location-content-readonly-note';
+      readOnlyNote.textContent = texts.setReadOnlyNote;
+      if (data.ownedSetId) {
+        var detailLink = document.createElement('a');
+        detailLink.href = '?page=owned_set_detail&id=' + data.ownedSetId;
+        detailLink.textContent = texts.openSetDetailsLink;
+        readOnlyNote.appendChild(document.createTextNode(' '));
+        readOnlyNote.appendChild(detailLink);
+      }
+      contentEl.appendChild(readOnlyNote);
+    }
 
     if (data.ldraw && data.ldraw.missingCount > 0) {
       var status = document.createElement('p');
@@ -1423,21 +1451,40 @@ SCRIPT;
     // for it. Every node — root included — always has at least one child now:
     // the synthetic "(Neu)" row appended below, so the arrow is always live.
     var isRoot = node.id === null;
+    // A boxed set's own auto-generated storage node (see
+    // getStorageLocationTree()'s doc comment, src/storage.php) — shown so
+    // its contents can be viewed exactly like any other location, but it's
+    // never a real organizational location: no rename/delete/add-child (the
+    // set's own removal flow owns that), and it never has children of its
+    // own, so no expand arrow either.
+    var isOwnedSet = node.location_type === 'owned_set';
 
-    var arrow = document.createElement('button');
-    arrow.type = 'button';
-    arrow.className = 'location-tree-arrow';
-    arrow.innerHTML = texts.chevronIcon;
-    arrow.setAttribute('aria-label', texts.expandLabel);
-    row.appendChild(arrow);
+    if (isOwnedSet) {
+      var spacer = document.createElement('span');
+      spacer.className = 'location-tree-arrow location-tree-arrow-empty';
+      row.appendChild(spacer);
+    } else {
+      var arrow = document.createElement('button');
+      arrow.type = 'button';
+      arrow.className = 'location-tree-arrow';
+      arrow.innerHTML = texts.chevronIcon;
+      arrow.setAttribute('aria-label', texts.expandLabel);
+      row.appendChild(arrow);
+    }
 
     var nameBtn = document.createElement('button');
     nameBtn.type = 'button';
-    nameBtn.className = 'location-tree-name' + (isRoot ? ' location-tree-name-root' : '');
-    nameBtn.textContent = node.name;
+    nameBtn.className = 'location-tree-name' + (isRoot ? ' location-tree-name-root' : '') + (isOwnedSet ? ' location-tree-name-set' : '');
+    if (isOwnedSet) {
+      var setIconEl = document.createElement('span');
+      setIconEl.className = 'location-tree-set-icon';
+      setIconEl.innerHTML = texts.setIcon;
+      nameBtn.appendChild(setIconEl);
+    }
+    nameBtn.appendChild(document.createTextNode(node.name));
     row.appendChild(nameBtn);
 
-    if (!isRoot) {
+    if (!isRoot && !isOwnedSet) {
       var actions = document.createElement('span');
       actions.className = 'location-tree-row-actions';
 
@@ -1468,6 +1515,14 @@ SCRIPT;
     }
 
     wrap.appendChild(row);
+
+    if (isOwnedSet) {
+      // No children, no "(Neu)" row — nothing to expand.
+      nameBtn.addEventListener('click', function() {
+        selectLocation(node.id, node.name, row);
+      });
+      return wrap;
+    }
 
     var childrenWrap = document.createElement('div');
     childrenWrap.className = 'location-tree-children';

@@ -815,7 +815,7 @@ function addOwnedSet(
     }
 
     $instanceNumber = getNextOwnedSetInstanceNumber($pdo, $setId);
-    $locationName = $set['name'] . ' (' . $set['rebrickable_set_num'] . ') #' . $instanceNumber;
+    $locationName = $set['rebrickable_set_num'] . ' - ' . $set['name'] . ' #' . $instanceNumber;
     $locationId = createStorageLocation($parentLocationId, $locationName, 'owned_set');
 
     $stmt = $pdo->prepare(

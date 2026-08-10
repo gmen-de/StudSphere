@@ -478,14 +478,33 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_ancestors') {
 
 // The location Explorer's right pane (src/routes/pages.php's ?page=locations,
 // see renderLocationExplorer() there) — everything stored anywhere under the
-// clicked location, recursively, grouped for display.
+// clicked location, recursively, grouped for display. Also doubles as the
+// content view for a boxed set's own auto-generated node (location_type
+// 'owned_set', now shown in the tree too — see getStorageLocationTree()'s
+// doc comment, src/storage.php): getLocationContentRecursive() already
+// resolves such a node's own materialized parts/minifigs correctly (its
+// exclusion of 'owned_set' only ever applies to *descendants*, and one of
+// these never has any) — the one thing this route adds for that case is
+// $readOnly, since editing a set's own tracked inventory through the
+// generic "move/relocate a storage item" actions would silently desync its
+// completeness tracking (see getOwnedSetCompleteness(), src/owned_sets.php)
+// without going through the set's own proper edit flow.
 if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     header('Content-Type: application/json');
     $locationId = (int) ($_GET['location_id'] ?? 0);
-    if (getStorageLocation($locationId) === null) {
+    $location = getStorageLocation($locationId);
+    if ($location === null) {
         http_response_code(404);
         echo json_encode(['error' => t('location_detail_not_found')], JSON_UNESCAPED_UNICODE);
         exit;
+    }
+    $readOnly = $location['location_type'] === 'owned_set';
+    $ownedSetId = null;
+    if ($readOnly) {
+        $ownedSetIdStmt = $pdo->prepare('SELECT id FROM owned_sets WHERE location_id = ?');
+        $ownedSetIdStmt->execute([$locationId]);
+        $ownedSetIdValue = $ownedSetIdStmt->fetchColumn();
+        $ownedSetId = $ownedSetIdValue !== false ? (int) $ownedSetIdValue : null;
     }
 
     $content = getLocationContentRecursive($pdo, $locationId);
@@ -587,6 +606,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
         'categories' => $categories,
         'minifigs' => $minifigs,
         'ldraw' => $ldrawStatus,
+        'readOnly' => $readOnly,
+        'ownedSetId' => $ownedSetId,
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
