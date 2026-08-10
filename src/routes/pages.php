@@ -548,15 +548,46 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     // here right now, in case a different one (e.g. a "+" in the tree)
     // replaces it later.
     if ($isEdit) {
+        $editParentIdValue = $editLocation['parent_id'] !== null ? (int) $editLocation['parent_id'] : '';
         $content .= '<details class="location-add-form-details" open>';
         $content .= '<summary>' . htmlspecialchars(t('location_edit_title')) . '</summary>';
         $content .= '<form method="post" id="location-form">';
         $content .= '<input type="hidden" name="action" value="rename_location">';
         $content .= '<input type="hidden" name="location_id" value="' . (int) $editLocation['id'] . '">';
         $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" value="' . htmlspecialchars($editLocation['name']) . '" required></label>';
+        $content .= '<label>' . htmlspecialchars(t('location_move_parent_label')) . '</label>';
+        $content .= '<div id="location-edit-move-picker" class="location-picker"></div>';
+        $content .= '<input type="hidden" name="parent_id" id="location-edit-move-parent-id" value="' . $editParentIdValue . '">';
         $content .= '<button type="submit">' . htmlspecialchars(t('location_save_button')) . '</button>';
         $content .= ' <a href="?page=locations">' . htmlspecialchars(t('location_cancel_edit')) . '</a>';
         $content .= '</form></details>';
+
+        // Own small script/texts payload rather than reusing the bigger
+        // explorer script further down — that one's built around the tree
+        // JSON and only runs once the explorer's own DOM exists; this picker
+        // needs to work standalone the moment the edit form renders, and
+        // only needs the four generic picker labels.
+        $editMovePickerLabelsJson = json_encode([
+            'levelLabel' => t('location_picker_level_label'),
+            'rootLabel' => t('location_picker_root_label'),
+            'selectPlaceholder' => t('add_stock_select_placeholder'),
+            'noChildren' => t('add_stock_no_children'),
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $content .= <<<SCRIPT
+<script>
+(function(){
+  var texts = {$editMovePickerLabelsJson};
+  var pickerEl = document.getElementById('location-edit-move-picker');
+  var parentIdField = document.getElementById('location-edit-move-parent-id');
+  if (!pickerEl || !parentIdField || !window.createLocationPicker) {
+    return;
+  }
+  window.createLocationPicker(pickerEl, texts, function(value) {
+    parentIdField.value = value === null ? '' : value;
+  }, parentIdField.value || undefined);
+})();
+</script>
+SCRIPT;
     }
 
     // Explorer split view: left pane is a client-built tree (from the JSON
@@ -650,11 +681,16 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $content .= '<button type="submit">' . htmlspecialchars(t('location_bulk_relocate_confirm_button')) . '</button>';
     $content .= '</form></div></div>';
 
-    // Floating bar shown once at least one card is selected — count plus
-    // "Umlagern"/"Auswahl aufheben". Fixed-position, built once here rather
-    // than per-selection to avoid rebuilding it on every checkbox click.
+    // Floating bar shown whenever the loaded location has any selectable
+    // card (not just once something's actually selected — "Alle auswählen"
+    // needs to be reachable before any single item is picked) — count plus
+    // "Alle auswählen"/"Umlagern"/"Auswahl aufheben". Fixed-position, built
+    // once here rather than per-selection to avoid rebuilding it on every
+    // checkbox click; "Umlagern" itself is disabled (not hidden) at 0
+    // selected, since relocating nothing doesn't make sense.
     $content .= '<div class="location-bulk-bar" id="location-bulk-bar" hidden>';
     $content .= '<span id="location-bulk-bar-count"></span>';
+    $content .= '<button type="button" id="location-bulk-bar-select-all">' . htmlspecialchars(t('location_select_all_button')) . '</button>';
     $content .= '<button type="button" id="location-bulk-bar-relocate">' . htmlspecialchars(t('location_bulk_relocate_button')) . '</button>';
     $content .= '<button type="button" id="location-bulk-bar-clear">' . htmlspecialchars(t('location_bulk_clear_selection')) . '</button>';
     $content .= '</div>';
@@ -732,6 +768,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
   var bulkRelocatePicker = document.getElementById('location-bulk-relocate-picker');
   var bulkBar = document.getElementById('location-bulk-bar');
   var bulkBarCount = document.getElementById('location-bulk-bar-count');
+  var bulkBarSelectAllBtn = document.getElementById('location-bulk-bar-select-all');
   var bulkBarRelocateBtn = document.getElementById('location-bulk-bar-relocate');
   var bulkBarClearBtn = document.getElementById('location-bulk-bar-clear');
   if (!contentEl) {
@@ -839,6 +876,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
   // card toggles the same entry regardless of which grid rebuild it came
   // from (categories reload wholesale on every loadContent()).
   var selectedItems = {};
+  // Every currently-rendered selectable card (key/descriptor/checkbox),
+  // rebuilt alongside selectedItems on every renderContent() — "Alle
+  // auswählen" walks this rather than the DOM, since a checkbox alone
+  // doesn't carry the descriptor addCardSelectAndActivate() built it from.
+  var allSelectableItems = [];
 
   function itemKey(item) {
     return item.kind === 'minifig'
@@ -851,9 +893,15 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     if (!bulkBar) {
       return;
     }
-    bulkBar.hidden = count === 0;
+    // Visible whenever there's anything selectable at all — not just once
+    // something's actually picked — so "Alle auswählen" stays reachable
+    // before the first individual selection.
+    bulkBar.hidden = allSelectableItems.length === 0;
     if (bulkBarCount) {
       bulkBarCount.textContent = texts.bulkBarCount.replace('{count}', String(count));
+    }
+    if (bulkBarRelocateBtn) {
+      bulkBarRelocateBtn.disabled = count === 0;
     }
   }
 
@@ -863,6 +911,16 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       cb.checked = false;
     });
     updateBulkBar();
+  }
+
+  if (bulkBarSelectAllBtn) {
+    bulkBarSelectAllBtn.addEventListener('click', function() {
+      allSelectableItems.forEach(function(entry) {
+        selectedItems[entry.key] = entry.descriptor;
+        entry.checkbox.checked = true;
+      });
+      updateBulkBar();
+    });
   }
 
   if (bulkBarClearBtn) {
@@ -898,6 +956,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     checkbox.setAttribute('aria-label', texts.selectLabel);
     var key = itemKey(descriptor);
     checkbox.checked = !!selectedItems[key];
+    allSelectableItems.push({ key: key, descriptor: descriptor, checkbox: checkbox });
     checkbox.addEventListener('click', function(e) {
       e.stopPropagation();
     });
@@ -1142,9 +1201,12 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       bulkRelocateMessage.className = 'add-stock-message';
       bulkRelocatePicker.innerHTML = '';
       var targetLocationId = null;
+      // Pre-selects the currently viewed location — most bulk relocates
+      // consolidate items from elsewhere into (or near) whatever's already
+      // open, so this usually gets there faster than starting at the root.
       window.createLocationPicker(bulkRelocatePicker, texts, function(value) {
         targetLocationId = value;
-      });
+      }, currentLocationId || undefined);
 
       bulkRelocateForm.onsubmit = function(e) {
         e.preventDefault();
@@ -1186,6 +1248,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
 
   function renderContent(id, name, data) {
     contentEl.innerHTML = '';
+    allSelectableItems = [];
     var heading = document.createElement('h2');
     heading.textContent = name;
     contentEl.appendChild(heading);
@@ -1228,6 +1291,8 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
       minifigsBody.textContent = texts.minifigsEmpty;
     }
     contentEl.appendChild(buildGroup(texts.groupMinifigs, minifigsBody));
+
+    updateBulkBar();
   }
 
   var loadToken = 0;

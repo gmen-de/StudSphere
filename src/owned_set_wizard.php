@@ -239,9 +239,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
   var overviewBackTarget = QUESTION_STEP;
 
   // The deepest level the user actually picked becomes the owned-set's
-  // parent location — drilling to an exact leaf isn't required (unlike the
-  // part-detail "add stock" picker; here any node in the tree is a valid
-  // place to put a whole set).
+  // parent location — any node in the tree is a valid place to put a whole
+  // set, no need to drill to an empty leaf.
   var selectedLocationId = null;
   var locationPicker = window.createLocationPicker(
     document.getElementById('owned-set-wizard-location-picker'),

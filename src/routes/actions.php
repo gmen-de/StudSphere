@@ -416,12 +416,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rename_location') {
     $locationId = (int) ($_POST['location_id'] ?? 0);
     $name = trim($_POST['name'] ?? '');
+    // Present whenever the edit form's own move-picker rendered (always, for
+    // this action) — '' means "top level" (no parent), same convention
+    // move_owned_set/the other location pickers use.
+    $newParentIdRaw = trim((string) ($_POST['parent_id'] ?? ''));
+    $newParentId = $newParentIdRaw !== '' ? (int) $newParentIdRaw : null;
 
     if ($name === '') {
         $locationMessage = t('location_name_required');
     } else {
         try {
             renameStorageLocation($locationId, $name);
+            $currentLocation = getStorageLocation($locationId);
+            $currentParentId = $currentLocation !== null && $currentLocation['parent_id'] !== null
+                ? (int) $currentLocation['parent_id']
+                : null;
+            if ($currentLocation !== null && $newParentId !== $currentParentId) {
+                moveStorageLocation($locationId, $newParentId);
+            }
             $locationMessage = t('location_updated_message');
         } catch (Throwable $e) {
             $locationMessage = t('location_save_failed', ['message' => $e->getMessage()]);
@@ -559,9 +571,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         if ($locationId <= 0 || $partId <= 0 || $colorId <= 0 || $quantity < 0) {
             throw new RuntimeException(t('add_stock_invalid_input'));
         }
-        if ($newLocationId !== null && $newLocationId !== $locationId && locationHasNonOwnedSetChildren($newLocationId)) {
-            throw new RuntimeException(t('add_stock_location_not_leaf'));
-        }
 
         updateStorageItem($locationId, $partId, $colorId, $conditionType, $quantity, $newLocationId, (int) $_SESSION['user_id']);
         $stats = refreshAppStatsCache($pdo);
@@ -586,9 +595,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'move_
 
         if ($instanceId <= 0 || $newLocationId <= 0 || getMinifigStorageItemById($pdo, $instanceId) === null) {
             throw new RuntimeException(t('add_stock_invalid_input'));
-        }
-        if (locationHasNonOwnedSetChildren($newLocationId)) {
-            throw new RuntimeException(t('add_stock_location_not_leaf'));
         }
 
         moveMinifigStorageItemInstance($instanceId, $newLocationId);
@@ -637,9 +643,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_
 
         if ($targetLocationId <= 0 || !is_array($items) || empty($items)) {
             throw new RuntimeException(t('add_stock_invalid_input'));
-        }
-        if (locationHasNonOwnedSetChildren($targetLocationId)) {
-            throw new RuntimeException(t('add_stock_location_not_leaf'));
         }
 
         $userId = (int) $_SESSION['user_id'];
@@ -1738,14 +1741,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_s
         if ($partId <= 0 || $colorId <= 0 || $locationId <= 0 || $quantity <= 0) {
             throw new RuntimeException(t('add_stock_invalid_input'));
         }
-        // A room (or any non-leaf level) alone isn't a valid storage spot —
-        // the cascading picker is only meant to bottom out at an actual leaf.
-        // Owned-set instance children don't count here (see
-        // locationHasNonOwnedSetChildren()'s doc comment) — a location that
-        // holds a boxed set can still take loose parts alongside it.
-        if (locationHasNonOwnedSetChildren($locationId)) {
-            throw new RuntimeException(t('add_stock_location_not_leaf'));
-        }
 
         $resultingQuantity = addStorageStock($locationId, $partId, $colorId, $conditionType, $quantity, (int) $_SESSION['user_id']);
         $stats = refreshAppStatsCache($pdo);
@@ -1783,9 +1778,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_m
 
         if ($minifigId <= 0 || $locationId <= 0 || $quantity <= 0) {
             throw new RuntimeException(t('add_stock_invalid_input'));
-        }
-        if (locationHasNonOwnedSetChildren($locationId)) {
-            throw new RuntimeException(t('add_stock_location_not_leaf'));
         }
 
         $newInstanceIds = addMinifigStock($locationId, $minifigId, $conditionType, $quantity);

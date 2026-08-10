@@ -100,26 +100,6 @@ function locationHasChildren(int $id): bool
     return ((int) $stmt->fetchColumn()) > 0;
 }
 
-/**
- * Same as locationHasChildren(), but ignores owned-set instance nodes
- * (location_type 'owned_set', auto-created by addOwnedSet() in
- * src/owned_sets.php whenever a set is added to the collection under this
- * location). Those aren't a real organizational sub-area the user created —
- * a location that happens to have a boxed set sitting in it should still be
- * usable as a genuine spot to add loose parts alongside that box, so the
- * "add stock" flow's leaf check uses this instead of locationHasChildren().
- * locationHasChildren() itself stays as-is for e.g. the "delete location"
- * guard, where an owned set living there absolutely should block deletion.
- */
-function locationHasNonOwnedSetChildren(int $id): bool
-{
-    $pdo = getPDO();
-    $stmt = $pdo->prepare(
-        "SELECT COUNT(*) FROM storage_locations WHERE parent_id = ? AND (location_type IS NULL OR location_type != 'owned_set')"
-    );
-    $stmt->execute([$id]);
-    return ((int) $stmt->fetchColumn()) > 0;
-}
 
 function locationHasStock(int $id): bool
 {

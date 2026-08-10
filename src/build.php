@@ -254,9 +254,6 @@ function buildMinifigFromStock(PDO $pdo, int $minifigId, int $quantity, string $
     if ($detail === null) {
         throw new RuntimeException(t('minifig_not_found'));
     }
-    if (locationHasNonOwnedSetChildren($destinationLocationId)) {
-        throw new RuntimeException(t('add_stock_location_not_leaf'));
-    }
 
     // Full re-check against fresh DB rows (getPartStock() again, not the
     // $detail fetched above) before consuming anything. A null color_id

@@ -888,6 +888,16 @@ button[type='submit'] {
   cursor: pointer;
 }
 
+.location-bulk-bar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.location-bulk-bar #location-bulk-bar-select-all {
+  background: rgba(248, 250, 252, 0.15);
+  color: #f8fafc;
+}
+
 .location-bulk-bar #location-bulk-bar-relocate {
   background: #2563eb;
   color: #ffffff;
