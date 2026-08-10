@@ -733,6 +733,7 @@ SCRIPT;
         'selectPlaceholder' => t('add_stock_select_placeholder'),
         'noChildren' => t('add_stock_no_children'),
         'thumbnailUnverifiedTitle' => t('location_content_thumbnail_unverified'),
+        'hereLabel' => t('location_content_here_label'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $content .= <<<SCRIPT
@@ -984,114 +985,180 @@ SCRIPT;
     });
   }
 
-  function buildPartsGrid(parts) {
-    var grid = document.createElement('div');
-    grid.className = 'location-detail-grid';
-    parts.forEach(function(item) {
-      var card = document.createElement('div');
-      card.className = 'location-detail-card';
+  function buildOnePartCard(item) {
+    var card = document.createElement('div');
+    card.className = 'location-detail-card';
 
-      var qtyBadge = document.createElement('span');
-      qtyBadge.className = 'location-detail-card-qty';
-      qtyBadge.textContent = item.quantity + 'x';
-      card.appendChild(qtyBadge);
+    var qtyBadge = document.createElement('span');
+    qtyBadge.className = 'location-detail-card-qty';
+    qtyBadge.textContent = item.quantity + 'x';
+    card.appendChild(qtyBadge);
 
-      var thumb = document.createElement('span');
-      thumb.className = 'location-detail-card-thumb';
-      if (item.thumbnail_unverified) {
-        thumb.className += ' location-detail-card-thumb-unverified';
-        thumb.title = texts.thumbnailUnverifiedTitle;
-      }
-      thumb.innerHTML = item.thumbnail ? ('<img src="' + item.thumbnail + '" alt="">') : texts.brickIcon;
-      card.appendChild(thumb);
+    var thumb = document.createElement('span');
+    thumb.className = 'location-detail-card-thumb';
+    if (item.thumbnail_unverified) {
+      thumb.className += ' location-detail-card-thumb-unverified';
+      thumb.title = texts.thumbnailUnverifiedTitle;
+    }
+    thumb.innerHTML = item.thumbnail ? ('<img src="' + item.thumbnail + '" alt="">') : texts.brickIcon;
+    card.appendChild(thumb);
 
-      var swatch = document.createElement('span');
-      swatch.className = 'location-detail-card-swatch';
-      swatch.style.backgroundColor = '#' + (item.color_rgb || 'cccccc');
-      card.appendChild(swatch);
+    var swatch = document.createElement('span');
+    swatch.className = 'location-detail-card-swatch';
+    swatch.style.backgroundColor = '#' + (item.color_rgb || 'cccccc');
+    card.appendChild(swatch);
 
-      var num = document.createElement('span');
-      num.className = 'location-detail-card-num';
-      num.textContent = item.part_num;
-      card.appendChild(num);
+    var num = document.createElement('span');
+    num.className = 'location-detail-card-num';
+    num.textContent = item.part_num;
+    card.appendChild(num);
 
-      var name = document.createElement('span');
-      name.className = 'location-detail-card-name';
-      name.title = item.part_name;
-      name.textContent = item.part_name;
-      card.appendChild(name);
+    var name = document.createElement('span');
+    name.className = 'location-detail-card-name';
+    name.title = item.part_name;
+    name.textContent = item.part_name;
+    card.appendChild(name);
 
-      var meta = document.createElement('span');
-      meta.className = 'location-detail-card-meta';
-      var condText = item.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
-      meta.textContent = (item.color_name || '') + ' \\u00b7 ' + condText;
-      card.appendChild(meta);
+    var meta = document.createElement('span');
+    meta.className = 'location-detail-card-meta';
+    var condText = item.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
+    meta.textContent = (item.color_name || '') + ' \\u00b7 ' + condText;
+    card.appendChild(meta);
 
-      var descriptor = {
-        kind: 'part',
-        locationId: item.location_id,
-        partId: item.part_id,
-        colorId: item.color_id,
-        conditionType: item.condition_type
-      };
-      addCardSelectAndActivate(card, descriptor, function() {
-        openItemEditModal(descriptor, {
-          title: item.part_num + ' \\u00b7 ' + item.part_name,
-          meta: (item.color_name || '') + ' \\u00b7 ' + condText,
-          quantity: item.quantity
-        });
+    var descriptor = {
+      kind: 'part',
+      locationId: item.location_id,
+      partId: item.part_id,
+      colorId: item.color_id,
+      conditionType: item.condition_type
+    };
+    addCardSelectAndActivate(card, descriptor, function() {
+      openItemEditModal(descriptor, {
+        title: item.part_num + ' \\u00b7 ' + item.part_name,
+        meta: (item.color_name || '') + ' \\u00b7 ' + condText,
+        quantity: item.quantity
       });
-
-      grid.appendChild(card);
     });
-    return grid;
+
+    return card;
+  }
+
+  function buildOneMinifigCard(fig) {
+    var card = document.createElement('div');
+    card.className = 'location-detail-card';
+
+    var thumb = document.createElement('span');
+    thumb.className = 'location-detail-card-thumb';
+    thumb.innerHTML = fig.thumbnail ? ('<img src="' + fig.thumbnail + '" alt="">') : texts.minifigIcon;
+    card.appendChild(thumb);
+
+    var num = document.createElement('span');
+    num.className = 'location-detail-card-num';
+    num.textContent = fig.fig_num;
+    card.appendChild(num);
+
+    var name = document.createElement('span');
+    name.className = 'location-detail-card-name';
+    var figName = fig.minifig_name || fig.fig_num;
+    name.title = figName;
+    name.textContent = figName;
+    card.appendChild(name);
+
+    var meta = document.createElement('span');
+    meta.className = 'location-detail-card-meta';
+    var condText = fig.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
+    meta.textContent = condText;
+    card.appendChild(meta);
+
+    var descriptor = {
+      kind: 'minifig',
+      instanceId: fig.instance_id,
+      locationId: fig.location_id
+    };
+    addCardSelectAndActivate(card, descriptor, function() {
+      openItemEditModal(descriptor, {
+        title: figName,
+        meta: condText
+      });
+    });
+
+    return card;
+  }
+
+  // Sub-groups a category's (or the minifig list's) items by where they're
+  // actually stored — items[i].location_label is null for "directly at the
+  // location currently being viewed", otherwise the path from there down to
+  // wherever the item really sits (see the location_content action's own
+  // doc comment in src/routes/actions.php). Only useful once a recursive
+  // view (a parent location with sub-locations) actually spans more than
+  // one distinct spot — with everything in one place, the flat grid this
+  // used to always be is still exactly right, so the header row is skipped
+  // entirely in that (most common) case.
+  function groupByLocationLabel(items) {
+    var groups = {};
+    var order = [];
+    items.forEach(function(item) {
+      var key = item.location_label === null || item.location_label === undefined ? '' : item.location_label;
+      if (!groups[key]) {
+        groups[key] = [];
+        order.push(key);
+      }
+      groups[key].push(item);
+    });
+    order.sort(function(a, b) {
+      if (a === b) {
+        return 0;
+      }
+      if (a === '') {
+        return -1;
+      }
+      if (b === '') {
+        return 1;
+      }
+      return a < b ? -1 : 1;
+    });
+    return order.map(function(key) {
+      return { label: key === '' ? texts.hereLabel : key, items: groups[key] };
+    });
+  }
+
+  function buildLocationGroupedGrid(items, buildCard) {
+    var groups = groupByLocationLabel(items);
+    if (groups.length <= 1) {
+      var grid = document.createElement('div');
+      grid.className = 'location-detail-grid';
+      items.forEach(function(item) {
+        grid.appendChild(buildCard(item));
+      });
+      return grid;
+    }
+
+    var wrap = document.createElement('div');
+    wrap.className = 'location-content-subgroups';
+    groups.forEach(function(group) {
+      var section = document.createElement('div');
+      section.className = 'location-content-subgroup';
+      var heading = document.createElement('h4');
+      heading.className = 'location-content-subgroup-heading';
+      heading.textContent = group.label;
+      section.appendChild(heading);
+      var grid = document.createElement('div');
+      grid.className = 'location-detail-grid';
+      group.items.forEach(function(item) {
+        grid.appendChild(buildCard(item));
+      });
+      section.appendChild(grid);
+      wrap.appendChild(section);
+    });
+    return wrap;
+  }
+
+  function buildPartsGrid(parts) {
+    return buildLocationGroupedGrid(parts, buildOnePartCard);
   }
 
   function buildMinifigsGrid(minifigs) {
-    var grid = document.createElement('div');
-    grid.className = 'location-detail-grid';
-    minifigs.forEach(function(fig) {
-      var card = document.createElement('div');
-      card.className = 'location-detail-card';
-
-      var thumb = document.createElement('span');
-      thumb.className = 'location-detail-card-thumb';
-      thumb.innerHTML = fig.thumbnail ? ('<img src="' + fig.thumbnail + '" alt="">') : texts.minifigIcon;
-      card.appendChild(thumb);
-
-      var num = document.createElement('span');
-      num.className = 'location-detail-card-num';
-      num.textContent = fig.fig_num;
-      card.appendChild(num);
-
-      var name = document.createElement('span');
-      name.className = 'location-detail-card-name';
-      var figName = fig.minifig_name || fig.fig_num;
-      name.title = figName;
-      name.textContent = figName;
-      card.appendChild(name);
-
-      var meta = document.createElement('span');
-      meta.className = 'location-detail-card-meta';
-      var condText = fig.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
-      meta.textContent = condText;
-      card.appendChild(meta);
-
-      var descriptor = {
-        kind: 'minifig',
-        instanceId: fig.instance_id,
-        locationId: fig.location_id
-      };
-      addCardSelectAndActivate(card, descriptor, function() {
-        openItemEditModal(descriptor, {
-          title: figName,
-          meta: condText
-        });
-      });
-
-      grid.appendChild(card);
-    });
-    return grid;
+    return buildLocationGroupedGrid(minifigs, buildOneMinifigCard);
   }
 
   // Shared by every submit path openItemEditModal() can trigger (move a

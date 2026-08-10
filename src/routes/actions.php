@@ -526,6 +526,36 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     // marker instead of silently presenting it as equally reliable.
     $genericThumbnails = getPartThumbnails($pdo, $allPartIds);
 
+    // Sub-grouping by where an item actually sits, for the client — only
+    // meaningful once a recursively-viewed location (see
+    // getLocationContentRecursive()'s own doc comment, src/storage.php)
+    // actually spans more than one distinct spot, which the client decides
+    // (it skips the sub-header entirely when everything resolves to the
+    // same label). null means "directly at $locationId itself, not in any
+    // sub-location" — anything else is the path from $locationId down to
+    // wherever the item really is, so a recursive view stays readable
+    // instead of mixing everything from every sub-location into one grid.
+    // Cached per location_id since many rows commonly share one.
+    $locationLabelCache = [];
+    $resolveLocationLabel = function (int $itemLocationId) use ($pdo, $locationId, &$locationLabelCache): ?string {
+        if ($itemLocationId === $locationId) {
+            return null;
+        }
+        if (!array_key_exists($itemLocationId, $locationLabelCache)) {
+            $ancestors = getStorageLocationAncestors($itemLocationId);
+            $rootIndex = null;
+            foreach ($ancestors as $i => $ancestor) {
+                if ($ancestor['id'] === $locationId) {
+                    $rootIndex = $i;
+                    break;
+                }
+            }
+            $relevant = $rootIndex !== null ? array_slice($ancestors, $rootIndex + 1) : $ancestors;
+            $locationLabelCache[$itemLocationId] = implode(' -> ', array_column($relevant, 'name'));
+        }
+        return $locationLabelCache[$itemLocationId];
+    };
+
     $categories = [];
     foreach ($content['partsByCategory'] as $categoryName => $parts) {
         foreach ($parts as &$part) {
@@ -537,6 +567,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
                 $part['thumbnail'] = $genericThumbnails[$part['part_id']] ?? null;
                 $part['thumbnail_unverified'] = $part['thumbnail'] !== null;
             }
+            $part['location_label'] = $resolveLocationLabel($part['location_id']);
             unset($part['ldraw_thumbnail'], $part['rebrickable_color_id']);
         }
         unset($part);
@@ -546,9 +577,15 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
         ];
     }
 
+    $minifigs = $content['minifigs'];
+    foreach ($minifigs as &$minifig) {
+        $minifig['location_label'] = $resolveLocationLabel($minifig['location_id']);
+    }
+    unset($minifig);
+
     echo json_encode([
         'categories' => $categories,
-        'minifigs' => $content['minifigs'],
+        'minifigs' => $minifigs,
         'ldraw' => $ldrawStatus,
     ], JSON_UNESCAPED_UNICODE);
     exit;
