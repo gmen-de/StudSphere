@@ -105,24 +105,30 @@ header .brand small {
    below modal overlays (100+), so an open modal still covers it as
    expected.
    position: fixed, not sticky: sticky was tried first (needs no
-   compensating body padding-top) but turned out to have a real Chromium GPU
-   compositing bug — confirmed live via repeated screenshots at fixed scroll
-   offsets, where the compositor intermittently produced a corrupted frame
-   (stale/ghosted content) at an otherwise identical scroll position, only
-   clearing on some later, unrelated repaint trigger. transform:
-   translateZ(0) (forcing its own compositing layer) did NOT fix it either.
-   Sticky positioning has to re-evaluate "is this still stuck" against its
-   containing block on every scroll frame; fixed positioning is anchored to
-   the viewport unconditionally and doesn't have that class of bug. The
-   trade-off — needing body's padding-top to compensate since this is now
-   out of normal flow — is handled via the same --sticky-header-height
-   variable this already fed for .owned-set-sidebar (app.js). */
+   compensating body padding-top) but has a real Chromium GPU compositing
+   bug during active scrolling. The trade-off — needing body's padding-top
+   to compensate since this is now out of normal flow — is handled via the
+   same --sticky-header-height variable this already fed for
+   .owned-set-sidebar (app.js).
+   will-change: transform is the actual fix for the compositing bug itself
+   (switching to fixed alone didn't resolve it — confirmed via a user-
+   supplied screen recording, frame-by-frame: .main-nav-wrap's content
+   vanished for exactly one composited frame mid-scroll, background and
+   .status-bar-wrap unaffected, gone again one frame later — a transient
+   GPU repaint/layer-promotion glitch, not a layout bug, hence why the
+   numbers — offsetHeight, getBoundingClientRect(), the --sticky-header-
+   height value itself — all measured correct even while this was visibly
+   happening live). will-change hints the browser to keep this element on
+   its own stable compositing layer continuously rather than promoting/
+   demoting it around scroll activity, which is what was dropping a frame
+   of its children's content. */
 .app-header-fixed {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 40;
+  will-change: transform;
 }
 
 /* Status bar: catalog stats + user/language. Full-bleed white strip docked
