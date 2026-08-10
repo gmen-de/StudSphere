@@ -490,6 +490,8 @@ return [
     'owned_set_box_complete' => 'Box complete',
     'owned_set_stickers_applied' => 'Stickers applied',
     'owned_set_notes_label' => 'Notes',
+    'owned_set_table_show_more' => 'Show more',
+    'owned_set_table_show_less' => 'Show less',
     'owned_set_save_button' => 'Save',
     'owned_set_save_failed' => 'Error: {message}',
     'owned_set_updated_message' => 'Saved.',

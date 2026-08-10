@@ -238,4 +238,25 @@
   }
 
   window.applyStatusStats = applyStatusStats;
+
+  /**
+   * Measures the sticky status-bar+nav header's actual rendered height
+   * (see .app-header-fixed, index.php's renderApp()) and exposes it as a
+   * CSS custom property, so any page's own sticky element can offset
+   * itself with `top: var(--sticky-header-height, 0px)` instead of
+   * guessing/hardcoding a pixel value that would drift whenever the
+   * header's own content wraps (e.g. the status bar's stats row on a
+   * narrower viewport). Runs on every authenticated page load since
+   * app.js itself is loaded everywhere; a no-op if the header isn't
+   * present (shouldn't happen on an authenticated page, but cheap to guard).
+   */
+  function updateStickyHeaderHeight() {
+    var header = document.querySelector('.app-header-fixed');
+    if (!header) {
+      return;
+    }
+    document.documentElement.style.setProperty('--sticky-header-height', header.offsetHeight + 'px');
+  }
+  updateStickyHeaderHeight();
+  window.addEventListener('resize', updateStickyHeaderHeight);
 })(window);

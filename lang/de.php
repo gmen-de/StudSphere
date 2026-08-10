@@ -490,6 +490,8 @@ return [
     'owned_set_box_complete' => 'OVP vollständig',
     'owned_set_stickers_applied' => 'Sticker angebracht',
     'owned_set_notes_label' => 'Notizen',
+    'owned_set_table_show_more' => 'Mehr anzeigen',
+    'owned_set_table_show_less' => 'Weniger anzeigen',
     'owned_set_save_button' => 'Speichern',
     'owned_set_save_failed' => 'Fehler: {message}',
     'owned_set_updated_message' => 'Gespeichert.',

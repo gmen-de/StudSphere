@@ -2257,8 +2257,25 @@ footer {
   gap: 1.5rem;
 }
 
+/* Sticks below the global sticky header (--sticky-header-height, set by
+   app.js) while the page scrolls, capped to whatever vertical space is left
+   so it never runs off the bottom of the viewport unreachable — internal
+   scroll (overflow-y) is the fallback if it's still too tall even
+   collapsed. owned_set_detail's own "Mehr anzeigen" toggle (see its own
+   inline script) adds -sticky-disabled while expanded, since an expanded
+   table can be taller than one screen again. */
 .owned-set-sidebar {
   grid-area: sidebar;
+  position: sticky;
+  top: var(--sticky-header-height, 0px);
+  max-height: calc(100vh - var(--sticky-header-height, 0px) - 1rem);
+  overflow-y: auto;
+}
+
+.owned-set-sidebar.owned-set-sidebar-sticky-disabled {
+  position: static;
+  max-height: none;
+  overflow-y: visible;
 }
 
 .owned-set-tabs-row {
@@ -2273,6 +2290,14 @@ footer {
       'image'
       'sidebar'
       'tabs';
+  }
+
+  /* Everything stacks to one column below this width — a sticky sidebar
+     stops making sense once it's not sitting beside the image anymore. */
+  .owned-set-sidebar {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
   }
 }
 
@@ -2342,6 +2367,32 @@ footer {
   font-weight: 600;
 }
 
+/* owned_set_detail / owned_minifig_detail's heading + prev/next merged into
+   one row ("< 1111-1  1112-1  1113-1 >") instead of two stacked ones — the
+   catalog set_detail page keeps its own separate .set-detail-title/
+   .set-detail-setnav stack above, untouched. Font size/color for both the
+   heading and the nav links stay exactly what .set-detail-title/the old
+   .set-detail-setnav already had — only the layout (one row vs. two) and
+   spacing change. */
+.set-detail-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 0 0 0.4rem;
+}
+
+.set-detail-title-row .set-detail-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.set-detail-setnav-link {
+  flex-shrink: 0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .set-detail-table-wrap {
   margin-bottom: 1rem;
   padding: 1rem 1.25rem;
@@ -2376,6 +2427,53 @@ footer {
 .set-detail-table td {
   padding: 0.4rem 0;
   width: 100%;
+}
+
+/* owned_set_detail / owned_minifig_detail's sidebar specifically (not the
+   catalog set_detail page, which keeps the spacing above) — row spacing
+   tightened by 25% so the whole block has a realistic chance of fitting
+   the viewport once it's sticky. */
+.owned-set-sidebar .set-detail-table-wrap {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 1.25rem;
+}
+
+.owned-set-sidebar .set-detail-table th {
+  padding: 0.3rem 0.75rem 0.3rem 0;
+}
+
+.owned-set-sidebar .set-detail-table td {
+  padding: 0.3rem 0;
+}
+
+/* owned_set_detail's "Mehr anzeigen" toggle (Stickerbögen/Bauanleitung/OVP
+   vorhanden/OVP vollständig/Sticker angebracht) — hidden until expanded,
+   see the table's own inline script for the class toggle. */
+.owned-set-collapsible-row {
+  display: none;
+}
+
+.owned-set-table-expanded .owned-set-collapsible-row {
+  display: table-row;
+}
+
+.owned-set-table-toggle-row td {
+  padding: 0.3rem 0;
+  text-align: center;
+}
+
+.owned-set-table-toggle-btn {
+  background: none;
+  border: none;
+  padding: 0.2rem 0;
+  color: #2563eb;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.owned-set-table-toggle-btn:hover {
+  text-decoration: underline;
 }
 
 /* "Top 100 Mini Figuren" (my_minifigs_top100, src/routes/pages.php) — a

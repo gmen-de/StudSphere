@@ -3007,24 +3007,25 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     $content .= '<span class="set-detail-image">' . ($ownedSet['thumbnail'] !== null ? '<img src="' . htmlspecialchars($ownedSet['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
     $content .= '</div>';
 
-    $content .= '<div class="owned-set-sidebar">';
+    $content .= '<div class="owned-set-sidebar" id="owned-set-sidebar">';
+    // Heading + prev/next merged into one row ("< 1111-1  1112-1  1113-1 >")
+    // instead of two stacked ones — same prev/next nav as the catalog
+    // set-detail page, just walking this user's own owned-set instances
+    // (getAdjacentOwnedSets()) instead of the whole catalog, and linking to
+    // owned_set_detail instead of set_detail.
+    $content .= '<div class="set-detail-title-row">';
+    $content .= $adjacentOwnedSets['prev'] !== null
+        ? '<a class="set-detail-setnav-link" href="?page=owned_set_detail&id=' . $adjacentOwnedSets['prev']['id'] . '">&lsaquo; ' . htmlspecialchars($adjacentOwnedSets['prev']['rebrickable_set_num']) . '</a>'
+        : '<span class="set-detail-setnav-link"></span>';
     $content .= '<h1 class="set-detail-title">' . htmlspecialchars($ownedSet['rebrickable_set_num']) . '</h1>';
+    $content .= $adjacentOwnedSets['next'] !== null
+        ? '<a class="set-detail-setnav-link" href="?page=owned_set_detail&id=' . $adjacentOwnedSets['next']['id'] . '">' . htmlspecialchars($adjacentOwnedSets['next']['rebrickable_set_num']) . ' &rsaquo;</a>'
+        : '<span class="set-detail-setnav-link"></span>';
+    $content .= '</div>';
 
     if ($ownedSetDetailMessage !== '') {
         $content .= '<p class="owned-set-message">' . htmlspecialchars($ownedSetDetailMessage) . '</p>';
     }
-
-    // Same prev/next nav as the catalog set-detail page, just walking this
-    // user's own owned-set instances (getAdjacentOwnedSets()) instead of the
-    // whole catalog, and linking to owned_set_detail instead of set_detail.
-    $content .= '<div class="set-detail-setnav">';
-    $content .= $adjacentOwnedSets['prev'] !== null
-        ? '<a href="?page=owned_set_detail&id=' . $adjacentOwnedSets['prev']['id'] . '">&lsaquo; ' . htmlspecialchars($adjacentOwnedSets['prev']['rebrickable_set_num']) . '</a>'
-        : '<span></span>';
-    $content .= $adjacentOwnedSets['next'] !== null
-        ? '<a href="?page=owned_set_detail&id=' . $adjacentOwnedSets['next']['id'] . '">' . htmlspecialchars($adjacentOwnedSets['next']['rebrickable_set_num']) . ' &rsaquo;</a>'
-        : '<span></span>';
-    $content .= '</div>';
 
     // Instance picker — jumps straight to any other owned copy of this same
     // set (getOwnedSetsForSet(), already fetched above as $ownedSetSiblings
@@ -3075,11 +3076,13 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     // that text afterwards without a reload (see
     // renderOwnedSetQuantityModalScript()'s applySummaryUpdate()).
     $ownedInventorySummary = getOwnedSetInventorySummary($pdo, $ownedSet, getLocale());
-    $renderActualNominalRow = function (string $labelKey, string $idKey, array $counts) use (&$content): void {
-        $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td id="owned-set-summary-' . $idKey . '">' . htmlspecialchars(t('owned_set_num_parts_actual', ['actual' => formatNumber($counts['actual']), 'nominal' => formatNumber($counts['nominal'])])) . '</td></tr>';
+    $renderActualNominalRow = function (string $labelKey, string $idKey, array $counts, bool $collapsible = false) use (&$content): void {
+        $rowClass = $collapsible ? ' class="owned-set-collapsible-row"' : '';
+        $content .= '<tr' . $rowClass . '><th>' . htmlspecialchars(t($labelKey)) . '</th><td id="owned-set-summary-' . $idKey . '">' . htmlspecialchars(t('owned_set_num_parts_actual', ['actual' => formatNumber($counts['actual']), 'nominal' => formatNumber($counts['nominal'])])) . '</td></tr>';
     };
-    $renderBoxInfoRow = function (string $labelKey, bool $value, ?string $notesLabelKey, ?string $notes) use (&$content): void {
-        $content .= '<tr><th>' . htmlspecialchars(t($labelKey)) . '</th><td>' . htmlspecialchars($value ? t('owned_set_wizard_yes') : t('owned_set_wizard_no'));
+    $renderBoxInfoRow = function (string $labelKey, bool $value, ?string $notesLabelKey, ?string $notes, bool $collapsible = false) use (&$content): void {
+        $rowClass = $collapsible ? ' class="owned-set-collapsible-row"' : '';
+        $content .= '<tr' . $rowClass . '><th>' . htmlspecialchars(t($labelKey)) . '</th><td>' . htmlspecialchars($value ? t('owned_set_wizard_yes') : t('owned_set_wizard_no'));
         if ($notes !== null && $notes !== '' && $notesLabelKey !== null) {
             $content .= '<br><span class="owned-set-box-info-note">' . htmlspecialchars(t($notesLabelKey)) . ': ' . htmlspecialchars($notes) . '</span>';
         }
@@ -3112,17 +3115,55 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_set_detail') {
     }
     $renderActualNominalRow('set_detail_field_exclusive', 'exclusive', $ownedInventorySummary['exclusive']);
     $renderActualNominalRow('set_detail_field_rare', 'rare', $ownedInventorySummary['rare']);
-    $renderActualNominalRow('set_detail_field_stickers', 'stickers', $ownedInventorySummary['stickers']);
     $renderActualNominalRow('owned_set_tab_minifigs', 'minifigs', $ownedInventorySummary['minifigs']);
-    $renderBoxInfoRow('owned_set_has_instructions', (bool) $ownedSet['has_instructions'], 'owned_set_instructions_notes_label', $ownedSet['instructions_notes']);
-    $renderBoxInfoRow('owned_set_has_box', (bool) $ownedSet['has_box'], 'owned_set_box_notes_label', $ownedSet['box_notes']);
-    $renderBoxInfoRow('owned_set_box_complete', (bool) $ownedSet['box_complete'], 'owned_set_box_complete_notes_label', $ownedSet['box_complete_notes']);
-    $renderBoxInfoRow('owned_set_stickers_applied', (bool) $ownedSet['stickers_applied'], 'owned_set_stickers_notes_label', $ownedSet['stickers_notes']);
+    // Everything from here down starts collapsed (see .owned-set-collapsible-row
+    // in style.css) — grouped contiguously at the end of the table so the
+    // toggle affects one visually connected block, not scattered rows.
+    // Also lets .owned-set-sidebar's own position:sticky (see the same CSS)
+    // actually fit within the viewport without being cut off, on the sets
+    // whose full table would otherwise run taller than the screen.
+    $content .= '<tr class="owned-set-table-toggle-row"><td colspan="2">';
+    $content .= '<button type="button" class="owned-set-table-toggle-btn" id="owned-set-table-toggle" aria-expanded="false">' . htmlspecialchars(t('owned_set_table_show_more')) . '</button>';
+    $content .= '</td></tr>';
+    $renderActualNominalRow('set_detail_field_stickers', 'stickers', $ownedInventorySummary['stickers'], true);
+    $renderBoxInfoRow('owned_set_has_instructions', (bool) $ownedSet['has_instructions'], 'owned_set_instructions_notes_label', $ownedSet['instructions_notes'], true);
+    $renderBoxInfoRow('owned_set_has_box', (bool) $ownedSet['has_box'], 'owned_set_box_notes_label', $ownedSet['box_notes'], true);
+    $renderBoxInfoRow('owned_set_box_complete', (bool) $ownedSet['box_complete'], 'owned_set_box_complete_notes_label', $ownedSet['box_complete_notes'], true);
+    $renderBoxInfoRow('owned_set_stickers_applied', (bool) $ownedSet['stickers_applied'], 'owned_set_stickers_notes_label', $ownedSet['stickers_notes'], true);
     if ($ownedSet['notes'] !== null && $ownedSet['notes'] !== '') {
         $content .= '<tr><th>' . htmlspecialchars(t('owned_set_notes_label')) . '</th><td>' . htmlspecialchars($ownedSet['notes']) . '</td></tr>';
     }
     $content .= '</table>';
     $content .= '</div>';
+
+    $tableToggleLabelsJson = json_encode([
+        'showMore' => t('owned_set_table_show_more'),
+        'showLess' => t('owned_set_table_show_less'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $content .= <<<SCRIPT
+<script>
+(function(){
+  var texts = {$tableToggleLabelsJson};
+  var toggleBtn = document.getElementById("owned-set-table-toggle");
+  var table = toggleBtn ? toggleBtn.closest("table") : null;
+  var sidebar = document.getElementById("owned-set-sidebar");
+  if (!toggleBtn || !table) {
+    return;
+  }
+  toggleBtn.addEventListener("click", function() {
+    var expanded = table.classList.toggle("owned-set-table-expanded");
+    toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+    toggleBtn.textContent = expanded ? texts.showLess : texts.showMore;
+    // Sticky positioning only makes sense while the (now short) collapsed
+    // table actually fits the viewport — expanding it can make the sidebar
+    // taller again, so it drops back into normal flow until collapsed again.
+    if (sidebar) {
+      sidebar.classList.toggle("owned-set-sidebar-sticky-disabled", expanded);
+    }
+  });
+})();
+</script>
+SCRIPT;
 
     $content .= '<div class="set-detail-table-wrap owned-set-actionbar">';
     $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-edit-open" title="' . htmlspecialchars(t('owned_set_edit_heading')) . '" aria-label="' . htmlspecialchars(t('owned_set_edit_heading')) . '">' . getActionIcon('edit') . '</button>';
@@ -3905,22 +3946,22 @@ if (isset($_GET['page']) && $_GET['page'] === 'owned_minifig_detail') {
     $content .= '<span class="set-detail-image">' . ($ownedMinifigInstance['thumbnail'] !== null ? '<img src="' . htmlspecialchars($ownedMinifigInstance['thumbnail']) . '" alt="">' : getNavIcon('minifigs')) . '</span>';
     $content .= '</div>';
 
-    $content .= '<div class="owned-set-sidebar">';
+    $content .= '<div class="owned-set-sidebar" id="owned-set-sidebar">';
+    // Heading + prev/next merged into one row, same as owned_set_detail above.
+    $content .= '<div class="set-detail-title-row">';
+    $content .= $adjacentOwnedMinifigs['prev'] !== null
+        ? '<a class="set-detail-setnav-link" href="?page=owned_minifig_detail&id=' . $adjacentOwnedMinifigs['prev'] . '">&lsaquo; ' . htmlspecialchars(t('owned_set_instance_label', ['n' => (string) ($ownedMinifigInstanceNumber - 1)])) . '</a>'
+        : '<span class="set-detail-setnav-link"></span>';
     $content .= '<h1 class="set-detail-title">' . htmlspecialchars($ownedMinifigName) . '</h1>';
+    $content .= $adjacentOwnedMinifigs['next'] !== null
+        ? '<a class="set-detail-setnav-link" href="?page=owned_minifig_detail&id=' . $adjacentOwnedMinifigs['next'] . '">' . htmlspecialchars(t('owned_set_instance_label', ['n' => (string) ($ownedMinifigInstanceNumber + 1)])) . ' &rsaquo;</a>'
+        : '<span class="set-detail-setnav-link"></span>';
+    $content .= '</div>';
     $content .= '<p class="hint">' . htmlspecialchars($ownedMinifigInstance['fig_num']) . '</p>';
 
     if ($ownedMinifigDetailMessage !== '') {
         $content .= '<p class="owned-set-message">' . htmlspecialchars($ownedMinifigDetailMessage) . '</p>';
     }
-
-    $content .= '<div class="set-detail-setnav">';
-    $content .= $adjacentOwnedMinifigs['prev'] !== null
-        ? '<a href="?page=owned_minifig_detail&id=' . $adjacentOwnedMinifigs['prev'] . '">&lsaquo; ' . htmlspecialchars(t('owned_set_instance_label', ['n' => (string) ($ownedMinifigInstanceNumber - 1)])) . '</a>'
-        : '<span></span>';
-    $content .= $adjacentOwnedMinifigs['next'] !== null
-        ? '<a href="?page=owned_minifig_detail&id=' . $adjacentOwnedMinifigs['next'] . '">' . htmlspecialchars(t('owned_set_instance_label', ['n' => (string) ($ownedMinifigInstanceNumber + 1)])) . ' &rsaquo;</a>'
-        : '<span></span>';
-    $content .= '</div>';
 
     // Instance picker — jumps straight to any other owned copy of this same
     // model (getOwnedMinifigInstancesForModel()), the detail-page counterpart
