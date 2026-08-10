@@ -113,11 +113,35 @@ if (partTranslationsSyncPending()) {
 stepBricklinkPriceSync($pdo);
 stepBricklinkMinifigPriceSync($pdo);
 
+/**
+ * The bits that make StudSphere installable as a desktop/home-screen PWA —
+ * shared by render() (login/setup) and renderApp() (the authenticated app
+ * shell) so installability doesn't depend on which page a browser first
+ * sees. manifest.json/sw.js are static files at the app root, resolved
+ * relative to whatever directory index.php itself lives in (this app makes
+ * no assumption about being deployed at a domain root — see PHP_SELF's own
+ * usage elsewhere). sw.js is registered with the current app version as a
+ * query string so a deploy's version bump alone (no manual sw.js edit)
+ * changes the script's own URL, which is exactly what makes browsers treat
+ * it as updated and refetch/re-cache the app shell — see sw.js's own doc
+ * comment for the cache-naming side of this.
+ */
+function renderPwaHeadTags(): string
+{
+    $html = '<link rel="manifest" href="manifest.json">';
+    $html .= '<link rel="apple-touch-icon" href="apple-touch-icon.png">';
+    $html .= '<meta name="theme-color" content="#2563eb">';
+    $swVersion = htmlspecialchars(getCurrentVersion(), ENT_QUOTES);
+    $html .= '<script>if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js?v=' . $swVersion . '"); }); }</script>';
+    return $html;
+}
+
 function render(string $title, string $content): void
 {
     echo '<!DOCTYPE html><html lang="' . htmlspecialchars(getLocale()) . '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">';
     echo '<title>' . htmlspecialchars($title) . '</title>';
     echo '<link rel="icon" type="image/svg+xml" href="favicon.svg">';
+    echo renderPwaHeadTags();
     echo '<link rel="stylesheet" href="style.css?v=' . htmlspecialchars(getCurrentVersion()) . '">';
     echo '</head><body class="auth-page">';
     echo '<div class="container">';
@@ -309,6 +333,7 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '<!DOCTYPE html><html lang="' . htmlspecialchars($locale) . '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">';
     echo '<title>' . htmlspecialchars($title) . '</title>';
     echo '<link rel="icon" type="image/svg+xml" href="favicon.svg">';
+    echo renderPwaHeadTags();
     echo '<link rel="stylesheet" href="style.css?v=' . htmlspecialchars(getCurrentVersion()) . '">';
     // Not defer: it only defines window.createLocationPicker (touches no DOM
     // at load time), and several inline <script> blocks later in the body
