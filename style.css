@@ -98,11 +98,22 @@ header .brand small {
    height (see index.php's renderApp() for why that matters). z-index above
    in-page overlays that use 20-31 (nav/lang dropdowns, tile filters) but
    below modal overlays (100+), so an open modal still covers it as
-   expected. */
+   expected.
+   transform: translateZ(0) promotes this to its own GPU compositing layer —
+   without it, Chromium sometimes fails to correctly repaint this sticky
+   element's contents while the page underneath scrolls past it, leaving
+   stale content (the header's own previous frame, or the page content that
+   used to be behind it) visible until some other repaint trigger (further
+   scrolling, a resize) forces a correct redraw. Confirmed live via repeated
+   screenshots at fixed scroll offsets: identical scroll position, same
+   content, but the compositor intermittently produced a corrupted frame —
+   a GPU tile-invalidation race, not a layout/timing bug (hence why fixing
+   --sticky-header-height's measurement timing didn't help). */
 .app-header-fixed {
   position: sticky;
   top: 0;
   z-index: 40;
+  transform: translateZ(0);
 }
 
 /* Status bar: catalog stats + user/language. Full-bleed white strip docked
