@@ -134,17 +134,21 @@ function getStorageLocationPath(int $id): string
 }
 
 /**
- * Same walk as getStorageLocationPath(), but returns each ancestor's id
- * alongside its name (root first, the location itself last) — for building
- * clickable breadcrumb links to each ancestor's own location_detail page,
- * where the plain concatenated-string path isn't enough.
+ * Same walk as getStorageLocationPath(), but returns each ancestor's id and
+ * location_type alongside its name (root first, the location itself last) —
+ * for building clickable breadcrumb links to each ancestor's own
+ * location_detail page, where the plain concatenated-string path isn't
+ * enough. location_type lets a caller tell whether the *last* entry (the
+ * location itself) is a boxed set's auto-generated node without a separate
+ * lookup — see action=location_content's per-item read-only resolution,
+ * src/routes/actions.php.
  *
- * @return array<int, array{id:int, name:string}>
+ * @return array<int, array{id:int, name:string, location_type:?string}>
  */
 function getStorageLocationAncestors(int $id): array
 {
     $pdo = getPDO();
-    $stmt = $pdo->prepare('SELECT id, name, parent_id FROM storage_locations WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, name, parent_id, location_type FROM storage_locations WHERE id = ?');
     $ancestors = [];
     $current = $id;
     $guard = 0;
@@ -154,7 +158,7 @@ function getStorageLocationAncestors(int $id): array
         if (!$row) {
             break;
         }
-        array_unshift($ancestors, ['id' => (int) $row['id'], 'name' => $row['name']]);
+        array_unshift($ancestors, ['id' => (int) $row['id'], 'name' => $row['name'], 'location_type' => $row['location_type']]);
         $current = $row['parent_id'] !== null ? (int) $row['parent_id'] : null;
     }
     return $ancestors;
@@ -482,9 +486,10 @@ function getLooseStockMap(PDO $pdo): array
  * Current LOOSE stock of one part across all storage locations, for the
  * part detail modal's "Teilelager" tab — one row per location/color/
  * condition combo that actually holds stock. Excludes owned-set instance
- * locations (location_type 'owned_set') the same way getLocationSubtreeIds()
- * does, so a part materialized into a set's own inventory doesn't show up
- * here as if it were separately-stored loose stock.
+ * locations (location_type 'owned_set') via its own join below, so a part
+ * materialized into a set's own inventory doesn't show up here as if it
+ * were separately-stored loose stock (unlike the location Explorer's own
+ * getLocationSubtreeIds(), which now deliberately includes them).
  *
  * @return array<int, array{location_id:int, location_path:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int, damaged_quantity:int}>
  */
@@ -621,13 +626,20 @@ function getLocationStock(int $locationId): array
 }
 
 /**
- * All descendant location ids of $locationId, including itself — excludes
+ * All descendant location ids of $locationId, including itself — includes
  * owned-set instance locations (location_type 'owned_set', auto-created by
- * addOwnedSet() wherever a set was placed) and anything nested inside them:
- * a set's own spare/damaged parts (materializeOwnedSetStock() et al., src/
- * owned_sets.php) live at that auto-generated node, and the location
- * Explorer is purely for LOOSE stock — a set's own contents (and the set
- * itself) are only ever seen via its own inventory page, never here.
+ * addOwnedSet() wherever a set was placed) since those now show up in the
+ * location Explorer's tree too (see getStorageLocationTree()'s doc
+ * comment): viewing a parent location recursively aggregates a nested set's
+ * own materialized parts right alongside genuinely loose ones, exactly like
+ * any other sub-location's contents, per explicit request — the location
+ * Explorer used to be loose-stock-only and exclude these, but that made a
+ * "Set-Lager" parent location that only contains boxed sets show up empty.
+ * getLocationContentRecursive() below is this function's only caller, and
+ * itself flags each returned item's own read-only-ness (whether its
+ * particular location_id sits inside a set) rather than gating the whole
+ * response, so a recursive view mixing loose and set-owned items can still
+ * let the loose ones be edited/relocated normally.
  *
  * A per-level walk, not a recursive CTE, for the same shared-hosting
  * MariaDB-version reason as getStorageLocationPath().
@@ -642,9 +654,7 @@ function getLocationSubtreeIds(int $locationId): array
     $guard = 0;
     while (!empty($frontier) && $guard++ < 50) {
         $placeholders = implode(',', array_fill(0, count($frontier), '?'));
-        $stmt = $pdo->prepare(
-            "SELECT id FROM storage_locations WHERE parent_id IN ($placeholders) AND (location_type IS NULL OR location_type != 'owned_set')"
-        );
+        $stmt = $pdo->prepare("SELECT id FROM storage_locations WHERE parent_id IN ($placeholders)");
         $stmt->execute($frontier);
         $frontier = array_map('intval', array_column($stmt->fetchAll(), 'id'));
         $ids = array_merge($ids, $frontier);

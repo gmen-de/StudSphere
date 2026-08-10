@@ -853,6 +853,22 @@ button[type='submit'] {
   background: #ffffff;
 }
 
+/* A part/minifig that's inside a nested set within an otherwise-editable
+   recursive view — no select checkbox, no click-to-edit (see
+   buildOnePartCard()/buildOneMinifigCard(), src/routes/pages.php), and
+   visually muted/striped so it doesn't look like a card that's simply
+   missing its checkbox by accident. */
+.location-detail-card-set-owned {
+  background: repeating-linear-gradient(
+    135deg,
+    #f8fafc,
+    #f8fafc 10px,
+    #f1f5f9 10px,
+    #f1f5f9 20px
+  );
+  cursor: default;
+}
+
 /* Only the location Explorer's cards (#location-explorer-content) are
    click-to-edit / multi-selectable — the static location_detail page reuses
    the same .location-detail-card markup purely for display, so the

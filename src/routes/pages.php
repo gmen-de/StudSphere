@@ -997,6 +997,14 @@ SCRIPT;
   function buildOnePartCard(item) {
     var card = document.createElement('div');
     card.className = 'location-detail-card';
+    // Marks a card whose item is inside a nested set (not the whole
+    // response, which currentReadOnly already covers) — a mixed grid can
+    // otherwise show some cards with a select checkbox and others without
+    // for no visually obvious reason.
+    if (!currentReadOnly && item.read_only) {
+      card.className += ' location-detail-card-set-owned';
+      card.title = texts.setReadOnlyNote;
+    }
 
     var qtyBadge = document.createElement('span');
     qtyBadge.className = 'location-detail-card-qty';
@@ -1034,7 +1042,7 @@ SCRIPT;
     meta.textContent = (item.color_name || '') + ' \\u00b7 ' + condText;
     card.appendChild(meta);
 
-    if (!currentReadOnly) {
+    if (!currentReadOnly && !item.read_only) {
       var descriptor = {
         kind: 'part',
         locationId: item.location_id,
@@ -1057,6 +1065,10 @@ SCRIPT;
   function buildOneMinifigCard(fig) {
     var card = document.createElement('div');
     card.className = 'location-detail-card';
+    if (!currentReadOnly && fig.read_only) {
+      card.className += ' location-detail-card-set-owned';
+      card.title = texts.setReadOnlyNote;
+    }
 
     var thumb = document.createElement('span');
     thumb.className = 'location-detail-card-thumb';
@@ -1081,7 +1093,7 @@ SCRIPT;
     meta.textContent = condText;
     card.appendChild(meta);
 
-    if (!currentReadOnly) {
+    if (!currentReadOnly && !fig.read_only) {
       var descriptor = {
         kind: 'minifig',
         instanceId: fig.instance_id,

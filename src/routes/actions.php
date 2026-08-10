@@ -550,17 +550,24 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     // getLocationContentRecursive()'s own doc comment, src/storage.php)
     // actually spans more than one distinct spot, which the client decides
     // (it skips the sub-header entirely when everything resolves to the
-    // same label). null means "directly at $locationId itself, not in any
-    // sub-location" — anything else is the path from $locationId down to
-    // wherever the item really is, so a recursive view stays readable
-    // instead of mixing everything from every sub-location into one grid.
+    // same label). label is null for "directly at $locationId itself, not
+    // in any sub-location" — anything else is the path from $locationId
+    // down to wherever the item really is. readOnly piggybacks on the same
+    // ancestor walk: getLocationSubtreeIds() (src/storage.php) now includes
+    // nested owned_set locations too, so a recursive view can mix genuinely
+    // loose items with ones that are actually inside a tracked set — those
+    // must stay non-interactive per item (not gated on the whole response
+    // like $readOnly above, which only covers *directly* viewing a set's
+    // own node) since editing them through the generic move/relocate
+    // actions would desync that set's own completeness tracking. An item
+    // directly at $locationId itself just inherits the page-level $readOnly.
     // Cached per location_id since many rows commonly share one.
-    $locationLabelCache = [];
-    $resolveLocationLabel = function (int $itemLocationId) use ($pdo, $locationId, &$locationLabelCache): ?string {
+    $locationInfoCache = [];
+    $resolveLocationInfo = function (int $itemLocationId) use ($locationId, $readOnly, &$locationInfoCache): array {
         if ($itemLocationId === $locationId) {
-            return null;
+            return ['label' => null, 'readOnly' => $readOnly];
         }
-        if (!array_key_exists($itemLocationId, $locationLabelCache)) {
+        if (!array_key_exists($itemLocationId, $locationInfoCache)) {
             $ancestors = getStorageLocationAncestors($itemLocationId);
             $rootIndex = null;
             foreach ($ancestors as $i => $ancestor) {
@@ -570,9 +577,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
                 }
             }
             $relevant = $rootIndex !== null ? array_slice($ancestors, $rootIndex + 1) : $ancestors;
-            $locationLabelCache[$itemLocationId] = implode(' -> ', array_column($relevant, 'name'));
+            $ownLocationType = !empty($ancestors) ? end($ancestors)['location_type'] : null;
+            $locationInfoCache[$itemLocationId] = [
+                'label' => implode(' -> ', array_column($relevant, 'name')),
+                'readOnly' => $ownLocationType === 'owned_set',
+            ];
         }
-        return $locationLabelCache[$itemLocationId];
+        return $locationInfoCache[$itemLocationId];
     };
 
     $categories = [];
@@ -586,7 +597,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
                 $part['thumbnail'] = $genericThumbnails[$part['part_id']] ?? null;
                 $part['thumbnail_unverified'] = $part['thumbnail'] !== null;
             }
-            $part['location_label'] = $resolveLocationLabel($part['location_id']);
+            $locationInfo = $resolveLocationInfo($part['location_id']);
+            $part['location_label'] = $locationInfo['label'];
+            $part['read_only'] = $locationInfo['readOnly'];
             unset($part['ldraw_thumbnail'], $part['rebrickable_color_id']);
         }
         unset($part);
@@ -598,7 +611,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
 
     $minifigs = $content['minifigs'];
     foreach ($minifigs as &$minifig) {
-        $minifig['location_label'] = $resolveLocationLabel($minifig['location_id']);
+        $locationInfo = $resolveLocationInfo($minifig['location_id']);
+        $minifig['location_label'] = $locationInfo['label'];
+        $minifig['read_only'] = $locationInfo['readOnly'];
     }
     unset($minifig);
 
