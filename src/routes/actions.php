@@ -503,20 +503,28 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     $allPartIds = array_values(array_unique(array_column($allPartsFlat, 'part_id')));
     $translations = getLocale() !== 'en' ? getPartTranslations($pdo, $allPartIds, getLocale()) : [];
 
+    // Falls back to getPartThumbnails()'s catalog-wide, color-agnostic image
+    // when there's no color-verified one (previously: no image at all here,
+    // on purpose — that helper finds *any* image for the part number
+    // regardless of color, which had shown a plausibly-wrong-colored image
+    // for at least one real part). Per explicit follow-up request, a
+    // possibly-wrong-colored image beats no image — but the client still
+    // needs to know which is which, so $part['thumbnail_unverified'] flags
+    // exactly the rows using this fallback, for a visual "color unconfirmed"
+    // marker instead of silently presenting it as equally reliable.
+    $genericThumbnails = getPartThumbnails($pdo, $allPartIds);
+
     $categories = [];
     foreach ($content['partsByCategory'] as $categoryName => $parts) {
         foreach ($parts as &$part) {
             $part['part_name'] = $translations[$part['part_id']] ?? $part['part_name'];
-            // No getPartThumbnails() fallback here on purpose: that helper
-            // finds *any* image for the part number across the whole
-            // catalog regardless of color (see its own doc comment), which
-            // for a color-specific grid like this one means showing a
-            // plausible-looking but potentially entirely wrong-colored
-            // image — confirmed on real data (part 2420 in Dark Gray, no
-            // cached color image yet, showing up with a blue one instead).
-            // No image at all (client falls back to a generic brick icon)
-            // is honest about not knowing; a wrong color isn't.
-            $part['thumbnail'] = $part['ldraw_thumbnail'];
+            if ($part['ldraw_thumbnail'] !== null) {
+                $part['thumbnail'] = $part['ldraw_thumbnail'];
+                $part['thumbnail_unverified'] = false;
+            } else {
+                $part['thumbnail'] = $genericThumbnails[$part['part_id']] ?? null;
+                $part['thumbnail_unverified'] = $part['thumbnail'] !== null;
+            }
             unset($part['ldraw_thumbnail'], $part['rebrickable_color_id']);
         }
         unset($part);

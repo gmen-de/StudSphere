@@ -246,6 +246,7 @@ return [
     'location_explorer_loading' => 'Wird geladen …',
     'location_content_group_minifigs' => 'Minifiguren',
     'location_content_minifigs_empty' => 'Keine losen Minifiguren an diesem Lagerort.',
+    'location_content_thumbnail_unverified' => 'Kein farbgenaues Bild vorhanden – dieses Bild zeigt das Teil eventuell in einer anderen Farbe.',
     'location_detail_minifig_delete_button' => 'Figur entfernen',
     'location_detail_minifig_delete_confirm' => 'Diese Figur wirklich aus dem Lager entfernen?',
     'location_delete_confirm' => 'Lagerort "{name}" wirklich löschen?',

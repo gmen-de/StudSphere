@@ -918,6 +918,32 @@ button[type='submit'] {
   object-fit: contain;
 }
 
+/* Location explorer (?page=locations) — marks a thumbnail as the
+   catalog-wide, color-agnostic fallback (no color-verified LDraw/Rebrickable
+   render exists for this part+color), so it reads as "an image, but the
+   color may not match" rather than being mistaken for a confirmed one. */
+.location-detail-card-thumb-unverified {
+  position: relative;
+  border: 1px dashed #d97706;
+  border-radius: 0.5rem;
+}
+
+.location-detail-card-thumb-unverified::after {
+  content: '?';
+  position: absolute;
+  top: -0.4rem;
+  right: -0.4rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: #d97706;
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.1rem;
+  text-align: center;
+}
+
 .location-detail-card-swatch {
   display: block;
   width: 1.75rem;

@@ -246,6 +246,7 @@ return [
     'location_explorer_loading' => 'Loading …',
     'location_content_group_minifigs' => 'Minifigures',
     'location_content_minifigs_empty' => 'No loose minifigures at this location.',
+    'location_content_thumbnail_unverified' => 'No color-verified image available – this image may show the part in a different color.',
     'location_detail_minifig_delete_button' => 'Remove figure',
     'location_detail_minifig_delete_confirm' => 'Really remove this figure from storage?',
     'location_delete_confirm' => 'Really delete location "{name}"?',

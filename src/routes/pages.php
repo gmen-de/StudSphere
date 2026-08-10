@@ -696,6 +696,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
         'rootLabel' => t('location_picker_root_label'),
         'selectPlaceholder' => t('add_stock_select_placeholder'),
         'noChildren' => t('add_stock_no_children'),
+        'thumbnailUnverifiedTitle' => t('location_content_thumbnail_unverified'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $content .= <<<SCRIPT
@@ -938,6 +939,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
 
       var thumb = document.createElement('span');
       thumb.className = 'location-detail-card-thumb';
+      if (item.thumbnail_unverified) {
+        thumb.className += ' location-detail-card-thumb-unverified';
+        thumb.title = texts.thumbnailUnverifiedTitle;
+      }
       thumb.innerHTML = item.thumbnail ? ('<img src="' + item.thumbnail + '" alt="">') : texts.brickIcon;
       card.appendChild(thumb);
 
