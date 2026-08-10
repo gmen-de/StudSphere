@@ -2283,23 +2283,38 @@ footer {
   gap: 1.5rem;
 }
 
-/* Sticks below the fixed header (--sticky-header-height, set by app.js)
-   while the page scrolls, capped to whatever vertical space is left
-   so it never runs off the bottom of the viewport unreachable — internal
-   scroll (overflow-y) is the fallback if it's still too tall even
-   collapsed. owned_set_detail's own "Mehr anzeigen" toggle (see its own
-   inline script) adds -sticky-disabled while expanded, since an expanded
-   table can be taller than one screen again. */
+/* Pinned below the fixed header (--sticky-header-height, set by app.js) at
+   a constant screen position — never moves, not even briefly — capped to
+   whatever vertical space is left so it never runs off the bottom of the
+   viewport unreachable, with internal scroll (overflow-y) as the fallback
+   if it's still too tall even collapsed. owned_set_detail's own "Mehr
+   anzeigen" toggle (see its own inline script) adds -sticky-disabled while
+   expanded, since an expanded table can be taller than one screen again.
+   position: fixed, not sticky: sticky visibly scrolls along with the page
+   for the distance between its in-flow position and the point where it
+   "catches" the header, before locking in place — confirmed as the actual
+   complaint (not a rendering bug) via screen recording + live review: any
+   movement at all reads as broken, it's expected to behave exactly like
+   the header itself, pinned from the very first pixel of scroll. Because
+   position: fixed takes this out of the grid (grid-area: sidebar no longer
+   places it), width and right are set explicitly to land it exactly where
+   the grid's 26rem sidebar column would have — reproducing
+   .container/.owned-set-layout's own centering math (page-width, its
+   auto margins, its 1.25rem right padding) since a fixed element can't
+   inherit an ancestor's positioning context. */
 .owned-set-sidebar {
-  grid-area: sidebar;
-  position: sticky;
+  position: fixed;
   top: var(--sticky-header-height, 0px);
+  right: calc((100% - var(--page-width)) / 2 + 1.25rem);
+  width: 26rem;
   max-height: calc(100vh - var(--sticky-header-height, 0px) - 1rem);
   overflow-y: auto;
 }
 
 .owned-set-sidebar.owned-set-sidebar-sticky-disabled {
   position: static;
+  grid-area: sidebar;
+  width: auto;
   max-height: none;
   overflow-y: visible;
 }
@@ -2318,10 +2333,12 @@ footer {
       'tabs';
   }
 
-  /* Everything stacks to one column below this width — a sticky sidebar
+  /* Everything stacks to one column below this width — a fixed sidebar
      stops making sense once it's not sitting beside the image anymore. */
   .owned-set-sidebar {
+    grid-area: sidebar;
     position: static;
+    width: auto;
     max-height: none;
     overflow-y: visible;
   }
