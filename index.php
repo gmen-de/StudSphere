@@ -182,14 +182,7 @@ function getNavMenu(PDO $pdo): array
         ]],
         ['icon' => 'my_sets', 'labelKey' => 'nav_my_sets', 'href' => '?page=my_sets', 'children' => $mySetsChildren],
         ['icon' => 'my_minifigs', 'labelKey' => 'nav_my_minifigs', 'href' => '?page=my_minifigs', 'children' => $myMinifigsChildren],
-        ['icon' => 'my_bricks', 'labelKey' => 'nav_my_bricks', 'href' => '?page=my_bricks', 'children' => [
-            ['labelKey' => 'nav_my_bricks_all', 'href' => '?page=my_bricks_all'],
-            ['labelKey' => 'nav_my_bricks_by_location', 'href' => '?page=my_bricks_by_location'],
-            ['labelKey' => 'nav_my_bricks_by_type', 'href' => '?page=my_bricks_by_type'],
-        ]],
-        ['icon' => 'locations', 'labelKey' => 'locations_title', 'href' => '?page=locations', 'children' => [
-            ['labelKey' => 'nav_locations_tree', 'href' => '?page=locations'],
-        ]],
+        ['icon' => 'locations', 'labelKey' => 'locations_title', 'href' => '?page=locations', 'children' => []],
     ];
 }
 
@@ -343,6 +336,14 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '<script src="app.js?v=' . htmlspecialchars(getCurrentVersion()) . '"></script>';
     echo '</head><body>';
 
+    // Sticks the status bar + main nav together as one unit while scrolling
+    // — position:sticky on this shared wrapper (not on the two bars
+    // individually) sidesteps having to hardcode the status bar's own
+    // height as the nav bar's sticky offset, which would drift out of sync
+    // whenever the status bar's content wraps to a second line (e.g. a
+    // narrow viewport, or the BrickLink value stat only sometimes present).
+    echo '<div class="app-header-fixed">';
+
     echo '<div class="status-bar-wrap"><div class="status-bar">';
     echo '<div class="status-stats">';
     echo '<span class="status-stat" id="status-stat-bricks_total"><strong>' . formatNumber($stats['bricks_total']) . '</strong> ' . htmlspecialchars(t('stat_bricks_total')) . '</span>';
@@ -399,6 +400,8 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '<button type="submit">' . htmlspecialchars(t('search_button')) . '</button>';
     echo '</form>';
     echo '</header></div>';
+
+    echo '</div>';
 
     echo '<div class="container">';
     echo '<main>' . renderBreadcrumbs($breadcrumbs) . $content . '</main>';

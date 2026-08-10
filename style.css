@@ -92,6 +92,19 @@ header .brand small {
   margin-top: 0.375rem;
 }
 
+/* Keeps the status bar + main nav visible while the page scrolls — sticky
+   (not fixed) so it needs no compensating body padding-top, and the two
+   bars stick together as one unit regardless of the status bar's own
+   height (see index.php's renderApp() for why that matters). z-index above
+   in-page overlays that use 20-31 (nav/lang dropdowns, tile filters) but
+   below modal overlays (100+), so an open modal still covers it as
+   expected. */
+.app-header-fixed {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
 /* Status bar: catalog stats + user/language. Full-bleed white strip docked
    to the very top of the browser viewport; its content stays aligned to
    the shared page column via the inner width/margin. */
