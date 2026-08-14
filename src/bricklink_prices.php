@@ -661,13 +661,21 @@ function computeLoosePartsBricklinkValueTotal(PDO $pdo): array
  * minifig_storage_items' one-row-per-instance shape, so no PHP-side grouping
  * is needed here), PHP computes total_value and sorts.
  *
- * @return array<array{part_id:int, color_id:int, condition_type:string, part_num:string, part_name:string, color_name:?string, color_rgb:?string, quantity:int, unit_price:float, currency:?string, total_value:float}>
+ * ldraw_thumbnail/rebrickable_color_id are the same color-correct-image pair
+ * getLocationContentRecursive() (src/storage.php) and getSetPartsList()
+ * (src/sets.php) expose — part_color_images is keyed by Rebrickable's own
+ * color_id, not colors.id, hence the separate column. The caller resolves
+ * the actual display thumbnail (ldraw_thumbnail, falling back to a generic
+ * catalog image) the same way those two callers do, via renderPartCard().
+ *
+ * @return array<array{part_id:int, color_id:int, condition_type:string, part_num:string, part_name:string, color_name:?string, color_rgb:?string, rebrickable_color_id:?int, ldraw_thumbnail:?string, quantity:int, unit_price:float, currency:?string, total_value:float}>
  */
 function getTopValuedOwnedParts(PDO $pdo, int $limit = 100): array
 {
     $stmt = $pdo->query(
         "SELECT si.part_id, si.color_id, si.condition_type,
                 p.part_num, p.name AS part_name, c.name AS color_name, c.rgb AS color_rgb,
+                c.color_id AS rebrickable_color_id, MAX(pci.local_image_path) AS ldraw_thumbnail,
                 SUM(si.quantity - si.damaged_quantity) AS quantity,
                 CASE si.condition_type WHEN 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END AS unit_price,
                 pbp.bricklink_price_currency AS currency
@@ -675,15 +683,17 @@ function getTopValuedOwnedParts(PDO $pdo, int $limit = 100): array
          INNER JOIN parts p ON p.id = si.part_id
          INNER JOIN colors c ON c.id = si.color_id
          INNER JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         LEFT JOIN part_color_images pci ON pci.part_id = si.part_id AND pci.color_id = c.color_id
          WHERE (CASE si.condition_type WHEN 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END) IS NOT NULL
          GROUP BY si.part_id, si.color_id, si.condition_type, p.part_num, p.name, c.name, c.rgb,
-                  pbp.bricklink_price_new, pbp.bricklink_price_used, pbp.bricklink_price_currency
+                  c.color_id, pbp.bricklink_price_new, pbp.bricklink_price_used, pbp.bricklink_price_currency
          HAVING SUM(si.quantity - si.damaged_quantity) > 0"
     );
     $rows = $stmt->fetchAll();
     foreach ($rows as &$row) {
         $row['part_id'] = (int) $row['part_id'];
         $row['color_id'] = (int) $row['color_id'];
+        $row['rebrickable_color_id'] = $row['rebrickable_color_id'] !== null ? (int) $row['rebrickable_color_id'] : null;
         $row['quantity'] = (int) $row['quantity'];
         $row['unit_price'] = (float) $row['unit_price'];
         $row['total_value'] = $row['unit_price'] * $row['quantity'];

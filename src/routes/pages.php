@@ -3854,9 +3854,40 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_bricks_top100') {
     if (empty($topParts)) {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('my_bricks_top100_empty')) . '</p></section>';
     } else {
-        $thumbnails = getPartThumbnails($pdo, array_values(array_unique(array_column($topParts, 'part_id'))));
+        // Same color-correct-image fallback chain as getLocationContentRecursive()/
+        // getSetPartsList()'s callers: the cached LDraw/BrickLink-CDN render if one
+        // exists, otherwise a generic (color-agnostic) catalog thumbnail — never a
+        // separate color swatch box, the image itself is the color indicator.
+        $genericThumbnails = getPartThumbnails($pdo, array_values(array_unique(array_column($topParts, 'part_id'))));
 
-        $content .= '<div class="set-detail-table-wrap">';
+        $missingCount = 0;
+        $rowsHtml = '';
+        foreach ($topParts as $i => $row) {
+            $thumbnail = $row['ldraw_thumbnail'] ?? $genericThumbnails[$row['part_id']] ?? null;
+            $fetchColorId = $row['ldraw_thumbnail'] === null ? $row['rebrickable_color_id'] : null;
+            if ($fetchColorId !== null) {
+                $missingCount++;
+            }
+            $dataAttrs = $fetchColorId !== null ? ' data-part-id="' . $row['part_id'] . '" data-color-id="' . $fetchColorId . '"' : '';
+            $currencySymbol = bricklinkCurrencySymbol($row['currency']);
+            $rowsHtml .= '<tr>';
+            $rowsHtml .= '<td>' . ($i + 1) . '</td>';
+            $rowsHtml .= '<td class="my-minifigs-top100-thumb-cell"' . $dataAttrs . '><span class="part-card-image">' . ($thumbnail !== null ? '<img src="' . htmlspecialchars($thumbnail) . '" alt="">' : getNavIcon('bricks')) . '</span></td>';
+            $rowsHtml .= '<td><span class="part-card my-bricks-top100-part-link" data-part-id="' . $row['part_id'] . '">'
+                . htmlspecialchars($row['part_name']) . ' <span class="hint">' . htmlspecialchars($row['part_num']) . ' · ' . htmlspecialchars($row['color_name'] ?? '') . '</span></span></td>';
+            $rowsHtml .= '<td>' . htmlspecialchars($row['condition_type'] === 'new' ? t('condition_new') : t('condition_used')) . '</td>';
+            $rowsHtml .= '<td>' . formatNumber($row['quantity']) . '</td>';
+            $rowsHtml .= '<td>' . formatNumber($row['unit_price'], 2) . ' ' . htmlspecialchars($currencySymbol) . '</td>';
+            $rowsHtml .= '<td>' . formatNumber($row['total_value'], 2) . ' ' . htmlspecialchars($currencySymbol) . '</td>';
+            $rowsHtml .= '</tr>';
+        }
+        $totalQuantity = array_sum(array_column($topParts, 'quantity'));
+        $totalValue = array_sum(array_column($topParts, 'total_value'));
+        $grandTotalCurrencySymbol = bricklinkCurrencySymbol($topParts[0]['currency']);
+
+        $content .= renderPartDetailModal();
+        $content .= renderFetchMissingImagesButton('my-bricks-top100-table', $missingCount);
+        $content .= '<div class="set-detail-table-wrap" id="my-bricks-top100-table">';
         $content .= '<table class="set-detail-table my-minifigs-top100-table">';
         $content .= '<thead><tr>';
         $content .= '<th>#</th><th></th>';
@@ -3866,23 +3897,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_bricks_top100') {
         $content .= '<th>' . htmlspecialchars(t('my_bricks_top100_price_column')) . '</th>';
         $content .= '<th>' . htmlspecialchars(t('my_bricks_top100_total_column')) . '</th>';
         $content .= '</tr></thead><tbody>';
-        foreach ($topParts as $i => $row) {
-            $thumbnail = $thumbnails[$row['part_id']] ?? null;
-            $currencySymbol = bricklinkCurrencySymbol($row['currency']);
-            $content .= '<tr>';
-            $content .= '<td>' . ($i + 1) . '</td>';
-            $content .= '<td class="my-minifigs-top100-thumb-cell">' . ($thumbnail !== null ? '<img src="' . htmlspecialchars($thumbnail) . '" alt="">' : getNavIcon('bricks')) . '</td>';
-            $content .= '<td><span class="part-card my-bricks-top100-part-link" data-part-id="' . $row['part_id'] . '"><span class="location-detail-card-swatch" style="background-color:#' . htmlspecialchars($row['color_rgb'] ?? 'cccccc') . ';"></span> '
-                . htmlspecialchars($row['part_name']) . ' <span class="hint">' . htmlspecialchars($row['part_num']) . ' · ' . htmlspecialchars($row['color_name'] ?? '') . '</span></span></td>';
-            $content .= '<td>' . htmlspecialchars($row['condition_type'] === 'new' ? t('condition_new') : t('condition_used')) . '</td>';
-            $content .= '<td>' . formatNumber($row['quantity']) . '</td>';
-            $content .= '<td>' . formatNumber($row['unit_price'], 2) . ' ' . htmlspecialchars($currencySymbol) . '</td>';
-            $content .= '<td>' . formatNumber($row['total_value'], 2) . ' ' . htmlspecialchars($currencySymbol) . '</td>';
-            $content .= '</tr>';
-        }
-        $totalQuantity = array_sum(array_column($topParts, 'quantity'));
-        $totalValue = array_sum(array_column($topParts, 'total_value'));
-        $grandTotalCurrencySymbol = bricklinkCurrencySymbol($topParts[0]['currency']);
+        $content .= $rowsHtml;
         $content .= '</tbody>';
         $content .= '<tfoot><tr class="my-minifigs-top100-grand-total">';
         $content .= '<td colspan="4">' . htmlspecialchars(t('my_bricks_top100_grand_total_label')) . '</td>';
@@ -3891,8 +3906,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_bricks_top100') {
         $content .= '<td>' . formatNumber($totalValue, 2) . ' ' . htmlspecialchars($grandTotalCurrencySymbol) . '</td>';
         $content .= '</tr></tfoot>';
         $content .= '</table></div>';
-
-        $content .= renderPartDetailModal();
+        $content .= renderFetchMissingImagesScript();
     }
 
     renderApp(t('nav_my_bricks_top100'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('nav_my_bricks_top100'), 'url' => null]]);
