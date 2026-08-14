@@ -373,6 +373,7 @@ return [
     'my_bricks_top100_price_column' => 'Price',
     'my_bricks_top100_total_column' => 'Total',
     'my_bricks_top100_grand_total_label' => 'Grand total',
+    'my_bricks_top100_coverage' => '{priced} of {total} owned parts priced so far ({missing} still missing)',
     'nav_my_minifigs' => 'My Minifigs',
     'nav_my_minifigs_all' => 'All Minifigs',
     'nav_my_minifigs_themes' => 'My Minifigs',

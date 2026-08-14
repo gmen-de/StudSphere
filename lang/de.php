@@ -373,6 +373,7 @@ return [
     'my_bricks_top100_price_column' => 'Preis',
     'my_bricks_top100_total_column' => 'Gesamt',
     'my_bricks_top100_grand_total_label' => 'Gesamtsumme',
+    'my_bricks_top100_coverage' => '{priced} von {total} besessenen Bauteilen bereits bepreist ({missing} fehlen noch)',
     'nav_my_minifigs' => 'Meine Minifiguren',
     'nav_my_minifigs_all' => 'Alle Minifiguren',
     'nav_my_minifigs_themes' => 'Meine Minifiguren',

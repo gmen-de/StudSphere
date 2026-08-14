@@ -672,6 +672,38 @@ function getPartBricklinkPrices(PDO $pdo, array $partColorPairs): array
 }
 
 /**
+ * How many distinct owned part+color pairs already have a cached BrickLink
+ * price vs. how many are owned in total — same scope (all locations,
+ * quantity > 0, color assigned) as
+ * getNextOwnedPartColorDueForBricklinkPriceSync()'s queue, so this number
+ * directly reflects "how far the sync has gotten through the backlog", for
+ * the ?page=my_bricks_top100 overview.
+ *
+ * @return array{priced: int, total: int}
+ */
+function getBricklinkPartPriceCoverage(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        "SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN pbp.bricklink_price_new IS NOT NULL OR pbp.bricklink_price_used IS NOT NULL THEN 1 ELSE 0 END) AS priced
+         FROM (
+             SELECT si.part_id, si.color_id
+             FROM storage_items si
+             WHERE si.color_id IS NOT NULL
+             GROUP BY si.part_id, si.color_id
+             HAVING SUM(si.quantity) > 0
+         ) owned
+         LEFT JOIN part_bricklink_prices pbp ON pbp.part_id = owned.part_id AND pbp.color_id = owned.color_id"
+    );
+    $row = $stmt->fetch();
+    return [
+        'priced' => $row !== false ? (int) $row['priced'] : 0,
+        'total' => $row !== false ? (int) $row['total'] : 0,
+    ];
+}
+
+/**
  * Sum of loose (non-owned-set-location) stock's BrickLink value, priced per
  * part+color from part_bricklink_prices. Deliberately excludes stock that's
  * currently materialized inside an owned set — that set's own aggregate

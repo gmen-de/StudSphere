@@ -3851,13 +3851,22 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_themes') {
     exit;
 }
 
-// Static nav entry above the theme dropdown (getNavMenu(), index.php) —
-// getTopValuedOwnedMinifigs() (src/owned_minifigs.php) does the ranking,
-// this just renders it as a table.
+// getTopValuedOwnedParts() (src/bricklink_prices.php) does the ranking, this
+// just renders it as a table. Coverage line is independent of whether the
+// list itself is empty — even "nothing priced yet" is worth showing as
+// "0 of N", so it's computed before that branch.
 if (isset($_GET['page']) && $_GET['page'] === 'my_bricks_top100') {
     $topParts = getTopValuedOwnedParts($pdo, 100);
+    $coverage = getBricklinkPartPriceCoverage($pdo);
 
     $content = '<h1>' . htmlspecialchars(t('nav_my_bricks_top100')) . '</h1>';
+    if ($coverage['total'] > 0) {
+        $content .= '<p class="hint">' . htmlspecialchars(t('my_bricks_top100_coverage', [
+            'priced' => (string) $coverage['priced'],
+            'total' => (string) $coverage['total'],
+            'missing' => (string) ($coverage['total'] - $coverage['priced']),
+        ])) . '</p>';
+    }
     if (empty($topParts)) {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('my_bricks_top100_empty')) . '</p></section>';
     } else {
@@ -3920,6 +3929,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_bricks_top100') {
     exit;
 }
 
+// Static nav entry above the theme dropdown (getNavMenu(), index.php) —
+// getTopValuedOwnedMinifigs() (src/owned_minifigs.php) does the ranking,
+// this just renders it as a table.
 if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_top100') {
     $topMinifigs = getTopValuedOwnedMinifigs($pdo, 100);
 
