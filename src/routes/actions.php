@@ -549,6 +549,15 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     // marker instead of silently presenting it as equally reliable.
     $genericThumbnails = getPartThumbnails($pdo, $allPartIds);
 
+    // Cached BrickLink unit price per part+color (see getPartBricklinkPrices()'s
+    // own doc comment) — pure cache read, no fetch triggered here; a part
+    // simply shows no price until stepBricklinkPartPriceSync()/the cronjob
+    // gets to it.
+    $partColorPrices = getPartBricklinkPrices($pdo, array_map(
+        fn (array $p): array => ['part_id' => $p['part_id'], 'color_id' => $p['color_id']],
+        $allPartsFlat
+    ));
+
     // Sub-grouping by where an item actually sits, for the client — only
     // meaningful once a recursively-viewed location (see
     // getLocationContentRecursive()'s own doc comment, src/storage.php)
@@ -604,6 +613,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
             $locationInfo = $resolveLocationInfo($part['location_id']);
             $part['location_label'] = $locationInfo['label'];
             $part['read_only'] = $locationInfo['readOnly'];
+            $priceEntry = $partColorPrices[$part['part_id'] . ':' . $part['color_id']] ?? null;
+            $unitPrice = $priceEntry !== null ? ($part['condition_type'] === 'new' ? $priceEntry['new'] : $priceEntry['used']) : null;
+            $part['bricklink_unit_price'] = $unitPrice !== null
+                ? formatNumber($unitPrice, 2) . ' ' . bricklinkCurrencySymbol($priceEntry['currency'])
+                : null;
             unset($part['ldraw_thumbnail'], $part['rebrickable_color_id']);
         }
         unset($part);

@@ -1051,6 +1051,13 @@ SCRIPT;
     meta.textContent = (item.color_name || '') + ' \\u00b7 ' + condText;
     card.appendChild(meta);
 
+    if (item.bricklink_unit_price) {
+      var price = document.createElement('span');
+      price.className = 'location-detail-card-price';
+      price.textContent = item.bricklink_unit_price;
+      card.appendChild(price);
+    }
+
     if (!currentReadOnly && !item.read_only) {
       var descriptor = {
         kind: 'part',

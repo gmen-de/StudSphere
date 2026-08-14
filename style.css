@@ -1039,6 +1039,12 @@ button[type='submit'] {
   color: #94a3b8;
 }
 
+.location-detail-card-price {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #16a34a;
+}
+
 .location-detail-card-qty {
   position: absolute;
   top: 0.4rem;

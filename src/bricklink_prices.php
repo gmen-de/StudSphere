@@ -622,6 +622,56 @@ function stepBricklinkPartPriceSync(PDO $pdo): void
 }
 
 /**
+ * Batch-reads cached BrickLink prices for a list of owned part+color pairs
+ * — for the "Mein Lager" location explorer, so a card can show its own
+ * price without a per-card round trip. Pure cache read, no lazy compute
+ * (unlike getPartSetCounts()'s shape): a price is a network fetch, not a
+ * cheap SQL aggregate, so a missing entry here just means "not synced yet",
+ * left to stepBricklinkPartPriceSync()/the cronjob rather than fetched
+ * inline. $partColorPairs items need part_id/color_id keys (colors.id, the
+ * same surrogate PK storage_items.color_id uses — this table's own PK, no
+ * Rebrickable-id juggling needed here unlike the image lookup).
+ *
+ * @param array<array{part_id:int, color_id:int}> $partColorPairs
+ * @return array<string, array{new: ?float, used: ?float, currency: ?string}> keyed by "{part_id}:{color_id}"
+ */
+function getPartBricklinkPrices(PDO $pdo, array $partColorPairs): array
+{
+    $uniquePairs = [];
+    foreach ($partColorPairs as $pair) {
+        $uniquePairs[$pair['part_id'] . ':' . $pair['color_id']] = $pair;
+    }
+    if (empty($uniquePairs)) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($uniquePairs), '(?,?)'));
+    $params = [];
+    foreach ($uniquePairs as $pair) {
+        $params[] = $pair['part_id'];
+        $params[] = $pair['color_id'];
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT part_id, color_id, bricklink_price_new, bricklink_price_used, bricklink_price_currency
+         FROM part_bricklink_prices
+         WHERE (part_id, color_id) IN ($placeholders)
+            AND (bricklink_price_new IS NOT NULL OR bricklink_price_used IS NOT NULL)"
+    );
+    $stmt->execute($params);
+
+    $result = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $result[$row['part_id'] . ':' . $row['color_id']] = [
+            'new' => $row['bricklink_price_new'] !== null ? (float) $row['bricklink_price_new'] : null,
+            'used' => $row['bricklink_price_used'] !== null ? (float) $row['bricklink_price_used'] : null,
+            'currency' => $row['bricklink_price_currency'],
+        ];
+    }
+    return $result;
+}
+
+/**
  * Sum of loose (non-owned-set-location) stock's BrickLink value, priced per
  * part+color from part_bricklink_prices. Deliberately excludes stock that's
  * currently materialized inside an owned set — that set's own aggregate
