@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/settings.php';
 require_once __DIR__ . '/owned_sets.php';
+require_once __DIR__ . '/rebrickable.php';
 
 /**
  * BrickLink's price guide (average price of currently-listed items, per
@@ -109,6 +110,27 @@ function resolveBricklinkMinifigCatalogItemId(string $bricklinkId): ?int
 }
 
 /**
+ * Same as resolveBricklinkItemId(), for a part's own BrickLink catalog page
+ * (?P=<bricklink_part_id>) instead of a set's (?S=<setnum>) — no color
+ * parameter: confirmed live that a part's idItem is the same regardless of
+ * color (catalogitem.page?P=3024 and ?P=3024&C=11 both embed idItem: 381),
+ * so this only ever needs to run once per part, cached on
+ * parts.bricklink_item_id, and reused for every color that part comes in.
+ */
+function resolveBricklinkPartItemId(string $bricklinkPartId): ?int
+{
+    $url = 'https://www.bricklink.com/v2/catalog/catalogitem.page?P=' . urlencode($bricklinkPartId);
+    $html = fetchBricklinkPage($url);
+    if ($html === null) {
+        return null;
+    }
+    if (preg_match('/idItem:\s*(\d+)/', $html, $m)) {
+        return (int) $m[1];
+    }
+    return null;
+}
+
+/**
  * One condition's ("New"/"Used") "Current Items for Sale" figures from one
  * pcipgSummaryTable HTML fragment. Null fields mean that line wasn't
  * present (e.g. no active listings at all for that condition).
@@ -146,12 +168,27 @@ function parseBricklinkSummaryTable(string $tableHtml): array
  * userbase. Null if the page couldn't be loaded or didn't have the expected
  * 4-table summary row at all.
  *
+ * $bricklinkColorId is for parts (BrickLink prices are color-specific,
+ * unlike sets/minifigs which pass null here): confirmed live against real
+ * BrickLink responses that idItem alone is NOT enough to get a per-color
+ * price guide for a part — the page instead returns an unfiltered, multi-MB
+ * dump of every listing across every color. Adding &idColor=<id> (not
+ * colorID, not C — both wrong guesses, live-tested) plus gm=1 instead of
+ * gm=0 is the confirmed-working combination; gm's exact meaning isn't known,
+ * only that this is the parameter set BrickLink's own part pages actually
+ * use. Left null (sets/minifigs), the URL and behavior are unchanged.
+ *
  * @return array{currency: ?string, new: array, used: array}|null
  */
-function fetchBricklinkPriceGuide(int $itemId): ?array
+function fetchBricklinkPriceGuide(int $itemId, ?int $bricklinkColorId = null): ?array
 {
     $url = 'https://www.bricklink.com/v2/catalog/catalogitem_pgtab.page'
-        . '?idItem=' . $itemId . '&st=2&gm=0&gc=0&ei=0&prec=2&showflag=0&showbulk=0&currency=2';
+        . '?idItem=' . $itemId;
+    if ($bricklinkColorId !== null) {
+        $url .= '&idColor=' . $bricklinkColorId . '&st=2&gm=1&gc=0&ei=0&prec=2&showflag=0&showbulk=0&currency=2';
+    } else {
+        $url .= '&st=2&gm=0&gc=0&ei=0&prec=2&showflag=0&showbulk=0&currency=2';
+    }
     $html = fetchBricklinkPage($url);
     if ($html === null) {
         return null;
@@ -392,6 +429,270 @@ function stepBricklinkMinifigPriceSync(PDO $pdo): void
     } catch (Throwable $e) {
         // Best-effort background enrichment — swallow everything.
     }
+}
+
+const BRICKLINK_PART_PRICE_SYNC_INTERVAL_MONTHS = 6;
+// Unlike BRICKLINK_SYNC_MIN_INTERVAL_SECONDS's fixed floor, the gap between
+// two part-price fetches is randomized within [MIN,MAX] every single time
+// (see stepBricklinkPartPriceSync()) — deliberately, so this never looks
+// like a fixed-interval bot poll. No separate "6 requests/minute" ceiling is
+// enforced anywhere: since the floor of that random range is 10 seconds, the
+// rate can never exceed 6/minute regardless, so a second, independently
+// tunable cap would just be redundant (and risk drifting out of sync with
+// these two numbers if ever changed separately).
+const BRICKLINK_PART_PRICE_MIN_DELAY_SECONDS = 10;
+const BRICKLINK_PART_PRICE_MAX_DELAY_SECONDS = 300;
+
+/**
+ * Marks one part+color as checked right now without touching its price
+ * fields — the "give up on this one until the next scheduled check" path,
+ * used by refreshBricklinkPriceForPartColor() on every failure branch so a
+ * permanently-unresolvable pair isn't retried on every single tick. Upserts
+ * since (unlike sets/minifigs) a part_bricklink_prices row may not exist yet
+ * the first time this runs for a given pair.
+ */
+function stampPartBricklinkPriceCheckedAt(PDO $pdo, int $partId, int $colorId): void
+{
+    $pdo->prepare(
+        'INSERT INTO part_bricklink_prices (part_id, color_id, bricklink_price_checked_at)
+         VALUES (?, ?, NOW())
+         ON DUPLICATE KEY UPDATE bricklink_price_checked_at = NOW()'
+    )->execute([$partId, $colorId]);
+}
+
+/**
+ * Resolves (if needed) and refreshes one part+color's BrickLink price
+ * fields. Always stamps bricklink_price_checked_at, even on failure, same
+ * reasoning as refreshBricklinkPriceForSet(). Two resolution steps happen
+ * lazily, each cached so it's only ever paid once:
+ * - parts.bricklink_part_id (Rebrickable's own external-id mapping, via
+ *   applyBricklinkPartIdBatch() in src/rebrickable.php — an API call to
+ *   Rebrickable, not BrickLink, so this does not consume the BrickLink
+ *   throttle).
+ * - parts.bricklink_item_id (BrickLink's own internal catalog id, resolved
+ *   via resolveBricklinkPartItemId() — one BrickLink request, shared across
+ *   every color of this part, confirmed live that idItem does not vary by
+ *   color).
+ * $partColor is the row shape getNextOwnedPartColorDueForBricklinkPriceSync()
+ * returns.
+ */
+function refreshBricklinkPriceForPartColor(PDO $pdo, array $partColor): bool
+{
+    $partId = (int) $partColor['part_id'];
+    $colorId = (int) $partColor['color_id'];
+
+    $bricklinkPartId = $partColor['bricklink_part_id'] ?? null;
+    if ($bricklinkPartId === null) {
+        applyBricklinkPartIdBatch($pdo, [$partColor['part_num']]);
+        $stmt = $pdo->prepare('SELECT bricklink_part_id FROM parts WHERE id = ?');
+        $stmt->execute([$partId]);
+        $refetched = $stmt->fetchColumn();
+        $bricklinkPartId = $refetched !== false ? $refetched : null;
+    }
+
+    if ($bricklinkPartId === null || $partColor['bricklink_color_id'] === null) {
+        stampPartBricklinkPriceCheckedAt($pdo, $partId, $colorId);
+        return false;
+    }
+
+    $itemId = $partColor['bricklink_item_id'] ?? null;
+    if ($itemId === null) {
+        $itemId = resolveBricklinkPartItemId((string) $bricklinkPartId);
+        if ($itemId !== null) {
+            $pdo->prepare('UPDATE parts SET bricklink_item_id = ? WHERE id = ?')->execute([$itemId, $partId]);
+        }
+    }
+
+    if ($itemId === null) {
+        stampPartBricklinkPriceCheckedAt($pdo, $partId, $colorId);
+        return false;
+    }
+
+    $guide = fetchBricklinkPriceGuide((int) $itemId, (int) $partColor['bricklink_color_id']);
+    if ($guide === null) {
+        stampPartBricklinkPriceCheckedAt($pdo, $partId, $colorId);
+        return false;
+    }
+
+    $pdo->prepare(
+        'INSERT INTO part_bricklink_prices (part_id, color_id, bricklink_price_new, bricklink_price_used, bricklink_price_currency, bricklink_price_checked_at)
+         VALUES (?, ?, ?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE bricklink_price_new = VALUES(bricklink_price_new), bricklink_price_used = VALUES(bricklink_price_used), bricklink_price_currency = VALUES(bricklink_price_currency), bricklink_price_checked_at = NOW()'
+    )->execute([$partId, $colorId, $guide['new']['avgPrice'], $guide['used']['avgPrice'], $guide['currency']]);
+
+    return true;
+}
+
+/**
+ * One owned part+color pair (any storage location — deliberately broader
+ * than computeLoosePartsBricklinkValueTotal()'s loose-only scope, since
+ * queueing what to price is independent of what counts toward the
+ * collection-value sum) whose BrickLink price hasn't been checked in
+ * BRICKLINK_PART_PRICE_SYNC_INTERVAL_MONTHS months, or null if everything
+ * owned is up to date. Same two-bucket priority as
+ * getNextOwnedSetDueForBricklinkSync(): never-checked-first (most-recently-
+ * stocked first), then oldest-checked-first. storage_items rows with no
+ * color assigned are excluded — there's nothing color-specific to look up
+ * for those.
+ */
+function getNextOwnedPartColorDueForBricklinkPriceSync(PDO $pdo): ?array
+{
+    $stmt = $pdo->prepare(
+        'SELECT si.part_id, si.color_id, p.part_num, p.bricklink_part_id, p.bricklink_item_id,
+                c.bricklink_color_id, pbp.bricklink_price_checked_at
+         FROM storage_items si
+         INNER JOIN parts p ON p.id = si.part_id
+         INNER JOIN colors c ON c.id = si.color_id
+         LEFT JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         WHERE si.color_id IS NOT NULL
+         GROUP BY si.part_id, si.color_id, p.part_num, p.bricklink_part_id, p.bricklink_item_id,
+                  c.bricklink_color_id, pbp.bricklink_price_checked_at
+         HAVING SUM(si.quantity) > 0
+            AND (pbp.bricklink_price_checked_at IS NULL
+                 OR pbp.bricklink_price_checked_at < (NOW() - INTERVAL ' . BRICKLINK_PART_PRICE_SYNC_INTERVAL_MONTHS . ' MONTH))
+         ORDER BY
+            CASE WHEN pbp.bricklink_price_checked_at IS NULL THEN 0 ELSE 1 END,
+            CASE
+                WHEN pbp.bricklink_price_checked_at IS NULL THEN -UNIX_TIMESTAMP(MAX(si.updated_at))
+                ELSE UNIX_TIMESTAMP(pbp.bricklink_price_checked_at)
+            END
+         LIMIT 1'
+    );
+    $stmt->execute();
+    $row = $stmt->fetch();
+    if ($row === false) {
+        return null;
+    }
+    $row['part_id'] = (int) $row['part_id'];
+    $row['color_id'] = (int) $row['color_id'];
+    $row['bricklink_item_id'] = $row['bricklink_item_id'] !== null ? (int) $row['bricklink_item_id'] : null;
+    $row['bricklink_color_id'] = $row['bricklink_color_id'] !== null ? (int) $row['bricklink_color_id'] : null;
+    return $row;
+}
+
+/**
+ * Called opportunistically from index.php on every page load, same idea as
+ * stepBricklinkPriceSync()/stepBricklinkMinifigPriceSync() — plus it's also
+ * invoked by bin/bricklink_part_price_sync.php, a real crontab entry point
+ * for installs that have one. Both share the exact same throttle state
+ * (bricklink_part_sync_next_allowed_at in app_settings) and a MySQL/MariaDB
+ * advisory lock (GET_LOCK, 0-second/non-blocking wait — a process that loses
+ * the race just returns immediately rather than delaying whatever page or
+ * cron run triggered it), so the two invocation paths can never compound
+ * into a faster-than-intended rate even if both are active at once. Unlike
+ * the fixed 600-second floor the set/minifig syncs use (where a race between
+ * two overlapping requests was practically irrelevant), a 10-300 second
+ * window with two independent triggers needs this explicit mutex.
+ *
+ * Gated behind bricklink_part_sync_enabled ('1'/'0' in app_settings) — the
+ * Settings page toggle both this and the CLI cron script read.
+ */
+function stepBricklinkPartPriceSync(PDO $pdo): void
+{
+    try {
+        if (getAppSetting('bricklink_part_sync_enabled', '0') !== '1') {
+            return;
+        }
+
+        $locked = (int) $pdo->query("SELECT GET_LOCK('studsphere_bricklink_part_sync', 0)")->fetchColumn();
+        if ($locked !== 1) {
+            return; // a cron run or another concurrent page load is already ticking
+        }
+        try {
+            $nextAllowed = getAppSetting('bricklink_part_sync_next_allowed_at');
+            if ($nextAllowed !== null && time() < strtotime($nextAllowed)) {
+                return;
+            }
+
+            $due = getNextOwnedPartColorDueForBricklinkPriceSync($pdo);
+            if ($due === null) {
+                return;
+            }
+
+            refreshBricklinkPriceForPartColor($pdo, $due);
+            $delay = random_int(BRICKLINK_PART_PRICE_MIN_DELAY_SECONDS, BRICKLINK_PART_PRICE_MAX_DELAY_SECONDS);
+            setAppSetting('bricklink_part_sync_next_allowed_at', date('Y-m-d H:i:s', time() + $delay));
+        } finally {
+            $pdo->query("SELECT RELEASE_LOCK('studsphere_bricklink_part_sync')");
+        }
+    } catch (Throwable $e) {
+        // Best-effort background enrichment — swallow everything, same as
+        // stepBricklinkPriceSync()/stepBricklinkMinifigPriceSync().
+    }
+}
+
+/**
+ * Sum of loose (non-owned-set-location) stock's BrickLink value, priced per
+ * part+color from part_bricklink_prices. Deliberately excludes stock that's
+ * currently materialized inside an owned set — that set's own aggregate
+ * BrickLink price (computeOwnedSetsBricklinkValueTotal()) already values it
+ * as part of the whole set, so including it here too would double-count it.
+ * Quantity-weighted (unlike the set/minifig totals, which sum one row per
+ * instance) since a storage_items row can hold quantity > 1.
+ *
+ * @return array{total: float, currency: ?string}
+ */
+function computeLoosePartsBricklinkValueTotal(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        "SELECT
+            SUM(CASE WHEN si.condition_type = 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END
+                * (si.quantity - si.damaged_quantity)) AS total,
+            MAX(pbp.bricklink_price_currency) AS currency
+         FROM storage_items si
+         INNER JOIN storage_locations sl ON sl.id = si.location_id
+         INNER JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         WHERE (sl.location_type IS NULL OR sl.location_type != 'owned_set')"
+    );
+    $row = $stmt->fetch();
+    return [
+        'total' => $row !== false && $row['total'] !== null ? (float) $row['total'] : 0.0,
+        'currency' => $row !== false ? $row['currency'] : null,
+    ];
+}
+
+/**
+ * The N owned parts (any storage location — loose and materialized inside
+ * owned sets alike, unlike computeLoosePartsBricklinkValueTotal()'s scope)
+ * with the highest priced BrickLink unit price, for the "100 teuersten
+ * Bauteile" overview (?page=my_bricks_top100). Mirrors
+ * getTopValuedOwnedMinifigs()'s shape: SQL does the per-part/color/condition
+ * aggregation (storage_items already groups that way, unlike
+ * minifig_storage_items' one-row-per-instance shape, so no PHP-side grouping
+ * is needed here), PHP computes total_value and sorts.
+ *
+ * @return array<array{part_id:int, color_id:int, condition_type:string, part_num:string, part_name:string, color_name:?string, color_rgb:?string, quantity:int, unit_price:float, currency:?string, total_value:float}>
+ */
+function getTopValuedOwnedParts(PDO $pdo, int $limit = 100): array
+{
+    $stmt = $pdo->query(
+        "SELECT si.part_id, si.color_id, si.condition_type,
+                p.part_num, p.name AS part_name, c.name AS color_name, c.rgb AS color_rgb,
+                SUM(si.quantity - si.damaged_quantity) AS quantity,
+                CASE si.condition_type WHEN 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END AS unit_price,
+                pbp.bricklink_price_currency AS currency
+         FROM storage_items si
+         INNER JOIN parts p ON p.id = si.part_id
+         INNER JOIN colors c ON c.id = si.color_id
+         INNER JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         WHERE (CASE si.condition_type WHEN 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END) IS NOT NULL
+         GROUP BY si.part_id, si.color_id, si.condition_type, p.part_num, p.name, c.name, c.rgb,
+                  pbp.bricklink_price_new, pbp.bricklink_price_used, pbp.bricklink_price_currency
+         HAVING SUM(si.quantity - si.damaged_quantity) > 0"
+    );
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['part_id'] = (int) $row['part_id'];
+        $row['color_id'] = (int) $row['color_id'];
+        $row['quantity'] = (int) $row['quantity'];
+        $row['unit_price'] = (float) $row['unit_price'];
+        $row['total_value'] = $row['unit_price'] * $row['quantity'];
+    }
+    unset($row);
+
+    usort($rows, fn (array $a, array $b): int => $b['unit_price'] <=> $a['unit_price']);
+
+    return array_slice($rows, 0, $limit);
 }
 
 /**

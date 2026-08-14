@@ -112,6 +112,11 @@ if (partTranslationsSyncPending()) {
 // instead of a cron/worker.
 stepBricklinkPriceSync($pdo);
 stepBricklinkMinifigPriceSync($pdo);
+// Same idea, per part+color instead of per set/minifig — see
+// stepBricklinkPartPriceSync()'s own doc comment for why it also shares its
+// throttle state with bin/bricklink_part_price_sync.php, a real crontab
+// entry point for installs that have one.
+stepBricklinkPartPriceSync($pdo);
 
 /**
  * The bits that make StudSphere installable as a desktop/home-screen PWA —
@@ -181,6 +186,9 @@ function getNavMenu(PDO $pdo): array
             ['labelKey' => 'nav_colors_search', 'href' => '?page=colors_search'],
         ]],
         ['icon' => 'my_sets', 'labelKey' => 'nav_my_sets', 'href' => '?page=my_sets', 'children' => $mySetsChildren],
+        ['icon' => 'my_bricks', 'labelKey' => 'nav_my_bricks', 'href' => '?page=my_bricks_top100', 'children' => [
+            ['labelKey' => 'nav_my_bricks_top100', 'href' => '?page=my_bricks_top100'],
+        ]],
         ['icon' => 'my_minifigs', 'labelKey' => 'nav_my_minifigs', 'href' => '?page=my_minifigs', 'children' => $myMinifigsChildren],
         ['icon' => 'locations', 'labelKey' => 'locations_title', 'href' => '?page=locations', 'children' => []],
     ];
@@ -354,8 +362,13 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     echo '<span class="status-stat" id="status-stat-bricks_missing"><strong>' . formatNumber($stats['bricks_missing']) . '</strong> ' . htmlspecialchars(t('stat_bricks_missing')) . '</span>';
     $bricklinkSetsValue = computeOwnedSetsBricklinkValueTotal(getPDO());
     $bricklinkMinifigsValue = computeMinifigStorageBricklinkValueTotal(getPDO());
-    $bricklinkValueTotal = $bricklinkSetsValue['total'] + $bricklinkMinifigsValue['total'];
-    $bricklinkValueCurrency = $bricklinkSetsValue['currency'] ?? $bricklinkMinifigsValue['currency'];
+    // Loose stock only (see computeLoosePartsBricklinkValueTotal()'s own doc
+    // comment) — a part currently materialized inside an owned set is
+    // already counted via that set's own aggregate price above, so summing
+    // it here too would double it.
+    $bricklinkLoosePartsValue = computeLoosePartsBricklinkValueTotal(getPDO());
+    $bricklinkValueTotal = $bricklinkSetsValue['total'] + $bricklinkMinifigsValue['total'] + $bricklinkLoosePartsValue['total'];
+    $bricklinkValueCurrency = $bricklinkSetsValue['currency'] ?? $bricklinkMinifigsValue['currency'] ?? $bricklinkLoosePartsValue['currency'];
     if ($bricklinkValueTotal > 0) {
         echo '<span class="status-stat" id="status-stat-bricklink_value"><strong>' . formatNumber($bricklinkValueTotal, 2) . ' ' . htmlspecialchars(bricklinkCurrencySymbol($bricklinkValueCurrency)) . '</strong> ' . htmlspecialchars(t('stat_bricklink_value')) . '</span>';
     }

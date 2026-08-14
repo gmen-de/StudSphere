@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS parts (
     part_url VARCHAR(512) DEFAULT NULL,
     ldraw_id VARCHAR(50) DEFAULT NULL,
     bricklink_part_id VARCHAR(20) DEFAULT NULL,
+    bricklink_item_id INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_parts_category (part_category)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -348,6 +349,24 @@ CREATE TABLE IF NOT EXISTS part_set_counts (
     computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (part_id, color_id),
     CONSTRAINT fk_partsetcount_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Per-part+color BrickLink price cache (see parts.bricklink_item_id for the
+-- per-PART BrickLink catalog id these prices are looked up under — idItem
+-- is shared across every color of a part, only the price guide fetch itself
+-- is per-color). color_id references colors(id), the internal PK also used
+-- by storage_items.color_id — NOT colors.color_id (Rebrickable's own numeric
+-- id, the space part_set_counts.color_id uses instead).
+CREATE TABLE IF NOT EXISTS part_bricklink_prices (
+    part_id INT NOT NULL,
+    color_id INT NOT NULL,
+    bricklink_price_new DECIMAL(10,2) DEFAULT NULL,
+    bricklink_price_used DECIMAL(10,2) DEFAULT NULL,
+    bricklink_price_currency VARCHAR(10) DEFAULT NULL,
+    bricklink_price_checked_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (part_id, color_id),
+    CONSTRAINT fk_partbricklinkprice_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_partbricklinkprice_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS set_instructions (

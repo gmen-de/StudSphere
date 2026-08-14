@@ -49,6 +49,7 @@ function installDatabase(): void
             part_url VARCHAR(512) DEFAULT NULL,
             ldraw_id VARCHAR(50) DEFAULT NULL,
             bricklink_part_id VARCHAR(20) DEFAULT NULL,
+            bricklink_item_id INT DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_parts_category (part_category)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
@@ -340,6 +341,18 @@ function installDatabase(): void
             computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (part_id, color_id),
             CONSTRAINT fk_partsetcount_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS part_bricklink_prices (
+            part_id INT NOT NULL,
+            color_id INT NOT NULL,
+            bricklink_price_new DECIMAL(10,2) DEFAULT NULL,
+            bricklink_price_used DECIMAL(10,2) DEFAULT NULL,
+            bricklink_price_currency VARCHAR(10) DEFAULT NULL,
+            bricklink_price_checked_at TIMESTAMP NULL DEFAULT NULL,
+            PRIMARY KEY (part_id, color_id),
+            CONSTRAINT fk_partbricklinkprice_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE,
+            CONSTRAINT fk_partbricklinkprice_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
 
         'CREATE TABLE IF NOT EXISTS set_instructions (

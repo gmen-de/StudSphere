@@ -664,6 +664,30 @@ function getSchemaMigrations(): array
                 $updateStmt->execute([$newName, (int) $row['location_id']]);
             }
         },
+        38 => function (PDO $pdo): void {
+            // BrickLink part-price sync (src/bricklink_prices.php). idItem is
+            // per PART (shared across all its colors, confirmed live against
+            // BrickLink's own catalog pages), so it lives directly on parts —
+            // same shape as sets.bricklink_item_id. part_bricklink_prices is
+            // the per-part+color price cache, keyed on colors(id) (the
+            // internal PK storage_items.color_id also uses — NOT
+            // colors.color_id, the Rebrickable id space part_set_counts uses
+            // instead).
+            addColumnIfMissing($pdo, 'parts', 'bricklink_item_id', 'INT DEFAULT NULL');
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS part_bricklink_prices (
+                    part_id INT NOT NULL,
+                    color_id INT NOT NULL,
+                    bricklink_price_new DECIMAL(10,2) DEFAULT NULL,
+                    bricklink_price_used DECIMAL(10,2) DEFAULT NULL,
+                    bricklink_price_currency VARCHAR(10) DEFAULT NULL,
+                    bricklink_price_checked_at TIMESTAMP NULL DEFAULT NULL,
+                    PRIMARY KEY (part_id, color_id),
+                    CONSTRAINT fk_partbricklinkprice_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_partbricklinkprice_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -744,7 +768,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 37;
+const CURRENT_SCHEMA_VERSION = 38;
 
 function getInstalledSchemaVersion(): int
 {

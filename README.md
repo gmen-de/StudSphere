@@ -29,6 +29,23 @@ StudSphere ist so gebaut, dass es auch auf Hostern ohne Zugriff auf die PHP-Konf
 - Bilder landen in `public/images/{tabelle}/{shard}/dateiname.jpg` (bewusst innerhalb des Webroots, damit sie im Browser angezeigt werden können). Der zweistellige `shard`-Ordner (erste 2 Hex-Zeichen aus dem MD5-Hash des Dateinamens, 256 mögliche Ordner) verhindert, dass ein einzelnes Verzeichnis bei Tabellen wie `inventory_parts` auf zehntausende Dateien anwächst — viele Shared-Hosting-Dateisysteme werden bei so großen Einzelverzeichnissen spürbar langsam oder haben harte Limits.
 - Wurden vor Einführung des Shardings bereits Bilder flach heruntergeladen, sortiert `php src/migrate_image_shards.php` (einmalig, per CLI) sie verschiebend in die Shard-Struktur um und aktualisiert die Datenbankpfade, ohne alles erneut von Rebrickable laden zu müssen. Idempotent — mehrfaches Ausführen ist unbedenklich.
 
+## Cronjob (optional)
+
+Der BrickLink-Teilepreis-Sync (`src/bricklink_prices.php`, `stepBricklinkPartPriceSync()`) läuft
+standardmäßig als Web-Cron: bei jedem Seitenaufruf wird geprüft, ob eine gedrosselte Abfrage
+fällig ist (siehe „Shared Hosting" oben — genau dasselbe Prinzip). Auf einer VPS mit
+Root-/Crontab-Zugriff kann zusätzlich ein echter Cronjob eingerichtet werden, der denselben
+Tick öfter anstößt, damit er nicht auf zufällige Seitenaufrufe angewiesen ist:
+
+```
+* * * * * /usr/bin/php /pfad/zu/studsphere/bin/bricklink_part_price_sync.php >/dev/null 2>&1
+```
+
+Das ist optional — Web-Cron und Cronjob teilen sich denselben Drossel-Zustand (Zeitstempel in
+`app_settings`, plus ein Datenbank-Lock gegen Überlappung), verdoppeln sich also nicht
+gegenseitig, wenn beide aktiv sind. Ein- und ausschaltbar über die Einstellungen-Seite,
+unabhängig davon, ob der Cronjob eingerichtet ist oder nicht.
+
 ## Weiteres
 
 - Der Rebrickable-API-Key wird über den Setup-Assistenten oder die Einstellungen gesetzt und in der Tabelle `app_settings` gespeichert (nicht in `src/config.php`)

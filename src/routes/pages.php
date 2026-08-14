@@ -335,6 +335,15 @@ SCRIPT;
 SCRIPT;
     }
 
+    $bricklinkPartSyncEnabled = getAppSetting('bricklink_part_sync_enabled', '0') === '1';
+    $content .= '<h2>' . htmlspecialchars(t('settings_bricklink_part_sync_title')) . '</h2>';
+    $content .= '<form method="post">';
+    $content .= '<input type="hidden" name="action" value="update_bricklink_part_sync_settings">';
+    $content .= '<label class="checkbox-label"><input type="checkbox" name="bricklink_part_sync_enabled" value="1"' . ($bricklinkPartSyncEnabled ? ' checked' : '') . '> ' . htmlspecialchars(t('settings_bricklink_part_sync_enable_label')) . '</label>';
+    $content .= '<p class="hint">' . htmlspecialchars(t('settings_bricklink_part_sync_enable_help')) . '</p>';
+    $content .= '<button type="submit">' . htmlspecialchars(t('settings_rebrickable_save_button')) . '</button>';
+    $content .= '</form>';
+
     $content .= '<h2>' . htmlspecialchars(t('update_title')) . '</h2>';
     $content .= '<p>' . htmlspecialchars(t('update_current_version', ['version' => getCurrentVersion()])) . '</p>';
     $content .= '<p class="hint">' . htmlspecialchars(t('update_warning')) . '</p>';
@@ -3838,6 +3847,58 @@ if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_themes') {
 // Static nav entry above the theme dropdown (getNavMenu(), index.php) —
 // getTopValuedOwnedMinifigs() (src/owned_minifigs.php) does the ranking,
 // this just renders it as a table.
+if (isset($_GET['page']) && $_GET['page'] === 'my_bricks_top100') {
+    $topParts = getTopValuedOwnedParts($pdo, 100);
+
+    $content = '<h1>' . htmlspecialchars(t('nav_my_bricks_top100')) . '</h1>';
+    if (empty($topParts)) {
+        $content .= '<section class="card"><p>' . htmlspecialchars(t('my_bricks_top100_empty')) . '</p></section>';
+    } else {
+        $thumbnails = getPartThumbnails($pdo, array_values(array_unique(array_column($topParts, 'part_id'))));
+
+        $content .= '<div class="set-detail-table-wrap">';
+        $content .= '<table class="set-detail-table my-minifigs-top100-table">';
+        $content .= '<thead><tr>';
+        $content .= '<th>#</th><th></th>';
+        $content .= '<th>' . htmlspecialchars(t('pdf_report_col_name')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('owned_set_field_condition')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('pdf_report_col_quantity')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('my_bricks_top100_price_column')) . '</th>';
+        $content .= '<th>' . htmlspecialchars(t('my_bricks_top100_total_column')) . '</th>';
+        $content .= '</tr></thead><tbody>';
+        foreach ($topParts as $i => $row) {
+            $thumbnail = $thumbnails[$row['part_id']] ?? null;
+            $currencySymbol = bricklinkCurrencySymbol($row['currency']);
+            $content .= '<tr>';
+            $content .= '<td>' . ($i + 1) . '</td>';
+            $content .= '<td class="my-minifigs-top100-thumb-cell">' . ($thumbnail !== null ? '<img src="' . htmlspecialchars($thumbnail) . '" alt="">' : getNavIcon('bricks')) . '</td>';
+            $content .= '<td><span class="part-card my-bricks-top100-part-link" data-part-id="' . $row['part_id'] . '"><span class="location-detail-card-swatch" style="background-color:#' . htmlspecialchars($row['color_rgb'] ?? 'cccccc') . ';"></span> '
+                . htmlspecialchars($row['part_name']) . ' <span class="hint">' . htmlspecialchars($row['part_num']) . ' · ' . htmlspecialchars($row['color_name'] ?? '') . '</span></span></td>';
+            $content .= '<td>' . htmlspecialchars($row['condition_type'] === 'new' ? t('condition_new') : t('condition_used')) . '</td>';
+            $content .= '<td>' . formatNumber($row['quantity']) . '</td>';
+            $content .= '<td>' . formatNumber($row['unit_price'], 2) . ' ' . htmlspecialchars($currencySymbol) . '</td>';
+            $content .= '<td>' . formatNumber($row['total_value'], 2) . ' ' . htmlspecialchars($currencySymbol) . '</td>';
+            $content .= '</tr>';
+        }
+        $totalQuantity = array_sum(array_column($topParts, 'quantity'));
+        $totalValue = array_sum(array_column($topParts, 'total_value'));
+        $grandTotalCurrencySymbol = bricklinkCurrencySymbol($topParts[0]['currency']);
+        $content .= '</tbody>';
+        $content .= '<tfoot><tr class="my-minifigs-top100-grand-total">';
+        $content .= '<td colspan="4">' . htmlspecialchars(t('my_bricks_top100_grand_total_label')) . '</td>';
+        $content .= '<td>' . formatNumber($totalQuantity) . '</td>';
+        $content .= '<td></td>';
+        $content .= '<td>' . formatNumber($totalValue, 2) . ' ' . htmlspecialchars($grandTotalCurrencySymbol) . '</td>';
+        $content .= '</tr></tfoot>';
+        $content .= '</table></div>';
+
+        $content .= renderPartDetailModal();
+    }
+
+    renderApp(t('nav_my_bricks_top100'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('nav_my_bricks_top100'), 'url' => null]]);
+    exit;
+}
+
 if (isset($_GET['page']) && $_GET['page'] === 'my_minifigs_top100') {
     $topMinifigs = getTopValuedOwnedMinifigs($pdo, 100);
 

@@ -2551,6 +2551,27 @@ footer {
   font-weight: 700;
 }
 
+/* .part-card (style.css ~1505) is a full flex/padded/bordered tile — right
+   for a grid of cards, wrong inside a table cell. This resets it back to
+   inline text (matching the plain <a> link the minifig-top100 table's own
+   name column uses) while keeping the class so
+   renderPartDetailModal()'s document-level ".part-card" click delegation
+   still opens the part modal — see ?page=my_bricks_top100. */
+.my-bricks-top100-part-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.my-bricks-top100-part-link:hover {
+  color: #2563eb;
+}
+
 /* "Baubare Minifiguren" (build_minifigs, src/routes/pages.php) — needs the
    plain .set-detail-table td width:100% default overridden the same way
    the Top-100 table already does, since this is likewise a multi-column

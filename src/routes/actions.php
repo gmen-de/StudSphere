@@ -162,6 +162,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     setAppSetting('ldraw_rendering_enabled', ($_POST['ldraw_enabled'] ?? '') === '1' ? '1' : '0');
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_bricklink_part_sync_settings') {
+    setAppSetting('bricklink_part_sync_enabled', ($_POST['bricklink_part_sync_enabled'] ?? '') === '1' ? '1' : '0');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'image_tick') {
     header('Content-Type: application/json');
     try {
