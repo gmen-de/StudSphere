@@ -319,22 +319,26 @@ function getPrintParent(PDO $pdo, int $partId): ?array
  * getPartDetail()'s own doc comment for why: rebrickable_inventories.set_num
  * is shared between real sets and minifigs' own sub-inventories, and a LEFT
  * JOIN let minifig-only rows leak through here as ghost entries with every
- * sets.* column NULL. sets.theme is included and the sort groups by it
- * first, so the caller can render theme headings over an already-grouped
- * list without a second query or client-side re-sorting.
+ * sets.* column NULL. sets.theme stores Rebrickable's numeric theme id as a
+ * string (e.g. "236"), not a display name — th.name (LEFT JOIN themes, a
+ * set's theme can be missing from the themes import even when set) resolves
+ * the actual readable name. The sort groups by that name first, so the
+ * caller can render theme headings over an already-grouped list without a
+ * second query or client-side re-sorting.
  *
  * @return array<int, array{set_num:string, name:?string, year:?int, theme:?string, quantity:int, thumbnail:?string}>
  */
 function getPartSets(PDO $pdo, int $partId): array
 {
     $stmt = $pdo->prepare(
-        'SELECT ri.set_num, s.name, s.year, s.theme, s.local_image_path AS thumbnail, SUM(ip.quantity) AS quantity
+        'SELECT ri.set_num, s.name, s.year, th.name AS theme, s.local_image_path AS thumbnail, SUM(ip.quantity) AS quantity
          FROM inventory_parts ip
          INNER JOIN rebrickable_inventories ri ON ri.inventory_id = ip.inventory_id
          INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num
+         LEFT JOIN themes th ON th.theme_id = s.theme
          WHERE ip.part_id = ? AND ip.is_spare = 0
-         GROUP BY ri.set_num, s.name, s.year, s.theme, s.local_image_path
-         ORDER BY s.theme IS NULL, s.theme ASC, s.year DESC, s.name ASC'
+         GROUP BY ri.set_num, s.name, s.year, th.name, s.local_image_path
+         ORDER BY th.name IS NULL, th.name ASC, s.year DESC, s.name ASC'
     );
     $stmt->execute([$partId]);
     $sets = $stmt->fetchAll();
