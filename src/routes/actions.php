@@ -615,9 +615,19 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
             $part['read_only'] = $locationInfo['readOnly'];
             $priceEntry = $partColorPrices[$part['part_id'] . ':' . $part['color_id']] ?? null;
             $unitPrice = $priceEntry !== null ? ($part['condition_type'] === 'new' ? $priceEntry['new'] : $priceEntry['used']) : null;
-            $part['bricklink_unit_price'] = $unitPrice !== null
-                ? formatNumber($unitPrice, 2) . ' ' . bricklinkCurrencySymbol($priceEntry['currency'])
-                : null;
+            if ($unitPrice !== null) {
+                $currencySymbol = bricklinkCurrencySymbol($priceEntry['currency']);
+                $priceText = formatNumber($unitPrice, 2) . ' ' . $currencySymbol;
+                // Only worth showing a total alongside the unit price once
+                // quantity makes them actually differ — at 1x they're the
+                // same number twice.
+                if ((int) $part['quantity'] > 1) {
+                    $priceText .= ' (' . formatNumber($unitPrice * (int) $part['quantity'], 2) . ' ' . $currencySymbol . ')';
+                }
+                $part['bricklink_unit_price'] = $priceText;
+            } else {
+                $part['bricklink_unit_price'] = null;
+            }
             unset($part['ldraw_thumbnail'], $part['rebrickable_color_id']);
         }
         unset($part);
