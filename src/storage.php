@@ -400,18 +400,120 @@ function moveStorageItem(int $fromLocationId, int $toLocationId, int $partId, in
 }
 
 /**
- * Single entry point for the location Explorer's "edit" card: applies a
- * quantity correction (if changed) at the item's current location, then —
- * only if a different location was actually chosen — moves the (now
- * corrected) row there in one coherent step, rather than treating quantity
- * and location as two separately-reasoned edits.
+ * Same shape as moveStorageItem() (whole-row transfer, merges into whatever
+ * already exists at the destination, linked move_out/move_in pair in
+ * storage_movements), but along the condition axis instead of the location
+ * axis — the part_modal.php "Bestand bearbeiten" tab's condition select
+ * needs this, since nothing previously moved a row between 'new' and 'used'
+ * at a fixed location. A no-op if the source row doesn't exist or the
+ * condition isn't actually changing.
  */
-function updateStorageItem(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $newLocationId, ?int $userId): void
+function updateStorageItemCondition(int $locationId, int $partId, int $colorId, string $fromConditionType, string $toConditionType, ?int $userId): void
 {
-    setStorageItemQuantity($locationId, $partId, $colorId, $conditionType, $newQuantity, $userId);
+    if ($fromConditionType === $toConditionType) {
+        return;
+    }
+    $pdo = getPDO();
+    $pdo->beginTransaction();
+    try {
+        $sourceStmt = $pdo->prepare(
+            'SELECT quantity, damaged_quantity, spare_quantity, spare_damaged_quantity
+             FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        );
+        $sourceStmt->execute([$locationId, $partId, $colorId, $fromConditionType]);
+        $source = $sourceStmt->fetch();
+        if ($source === false) {
+            $pdo->rollBack();
+            return;
+        }
+
+        $pdo->prepare(
+            'DELETE FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        )->execute([$locationId, $partId, $colorId, $fromConditionType]);
+
+        $upsertStmt = $pdo->prepare(
+            'INSERT INTO storage_items (location_id, part_id, color_id, condition_type, quantity, damaged_quantity, spare_quantity, spare_damaged_quantity)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                quantity = quantity + VALUES(quantity),
+                damaged_quantity = damaged_quantity + VALUES(damaged_quantity),
+                spare_quantity = spare_quantity + VALUES(spare_quantity),
+                spare_damaged_quantity = spare_damaged_quantity + VALUES(spare_damaged_quantity)'
+        );
+        $upsertStmt->execute([
+            $locationId, $partId, $colorId, $toConditionType,
+            $source['quantity'], $source['damaged_quantity'], $source['spare_quantity'], $source['spare_damaged_quantity'],
+        ]);
+
+        $resultStmt = $pdo->prepare(
+            'SELECT quantity FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+        );
+        $resultStmt->execute([$locationId, $partId, $colorId, $toConditionType]);
+        $resultingQuantity = (int) $resultStmt->fetchColumn();
+
+        $outStmt = $pdo->prepare(
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity)
+             VALUES (?, ?, ?, ?, ?, \'move_out\', ?, 0)'
+        );
+        $outStmt->execute([$userId, $locationId, $partId, $colorId, $fromConditionType, -(int) $source['quantity']]);
+        $outId = (int) $pdo->lastInsertId();
+
+        $inStmt = $pdo->prepare(
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity, related_movement_id)
+             VALUES (?, ?, ?, ?, ?, \'move_in\', ?, ?, ?)'
+        );
+        $inStmt->execute([$userId, $locationId, $partId, $colorId, $toConditionType, (int) $source['quantity'], $resultingQuantity, $outId]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/**
+ * Single entry point for the location Explorer's "edit" card: applies a
+ * quantity (and, if given, damaged-quantity) correction at the item's
+ * current location, then — only if actually changed — moves the (now
+ * corrected) row to a different location and/or a different condition type,
+ * one coherent step per dimension rather than treating them as unrelated
+ * edits. $newLocationId stays supported for the old location-explorer edit
+ * card, but the part_modal.php "Bestand bearbeiten" tab deliberately never
+ * sends it (no location field there — see that tab's own doc comment).
+ */
+function updateStorageItem(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $newLocationId, ?int $userId, ?int $newDamagedQuantity = null, ?string $newConditionType = null): void
+{
+    setStorageItemQuantity($locationId, $partId, $colorId, $conditionType, $newQuantity, $userId, $newDamagedQuantity);
     if ($newLocationId !== null && $newLocationId !== $locationId) {
         moveStorageItem($locationId, $newLocationId, $partId, $colorId, $conditionType, $userId);
+        $locationId = $newLocationId;
     }
+    if ($newConditionType !== null && $newConditionType !== $conditionType) {
+        updateStorageItemCondition($locationId, $partId, $colorId, $conditionType, $newConditionType, $userId);
+    }
+}
+
+/**
+ * The one storage_items row a specific location+part+color+condition
+ * resolves to, for part_modal.php's "Bestand bearbeiten" tab when it's
+ * opened with full context (from the location Explorer, where all four are
+ * already known from the clicked card). Null if that exact combination
+ * doesn't currently hold any stock.
+ *
+ * @return array{quantity:int, damaged_quantity:int}|null
+ */
+function getStorageItemRow(int $locationId, int $partId, int $colorId, string $conditionType): ?array
+{
+    $pdo = getPDO();
+    $stmt = $pdo->prepare(
+        'SELECT quantity, damaged_quantity FROM storage_items WHERE location_id = ? AND part_id = ? AND color_id = ? AND condition_type = ?'
+    );
+    $stmt->execute([$locationId, $partId, $colorId, $conditionType]);
+    $row = $stmt->fetch();
+    if ($row === false) {
+        return null;
+    }
+    return ['quantity' => (int) $row['quantity'], 'damaged_quantity' => (int) $row['damaged_quantity']];
 }
 
 /**
@@ -483,100 +585,35 @@ function getLooseStockMap(PDO $pdo): array
 }
 
 /**
- * Current LOOSE stock of one part across all storage locations, for the
- * part detail modal's "Teilelager" tab — one row per location/color/
- * condition combo that actually holds stock. Excludes owned-set instance
- * locations (location_type 'owned_set') via its own join below, so a part
- * materialized into a set's own inventory doesn't show up here as if it
- * were separately-stored loose stock (unlike the location Explorer's own
- * getLocationSubtreeIds(), which now deliberately includes them).
+ * Current LOOSE stock of one part across all storage locations — one row per
+ * location/color/condition combo that actually holds stock. Excludes
+ * owned-set instance locations (location_type 'owned_set') via its own join
+ * below, so a part materialized into a set's own inventory doesn't show up
+ * here as if it were separately-stored loose stock (unlike the location
+ * Explorer's own getLocationSubtreeIds(), which now deliberately includes
+ * them) — this also happens to be exactly the right scope for
+ * part_modal.php's "Bestand bearbeiten" fallback (§5b, no-single-row-context
+ * case), since owned-set-materialized rows are edited through their set's
+ * own flow, not this generic one. $colorId narrows to one color (used by
+ * that same fallback once a color is already known but a location isn't);
+ * left null, every color is returned.
  *
  * @return array<int, array{location_id:int, location_path:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int, damaged_quantity:int}>
  */
-function getPartStock(int $partId): array
+function getPartStock(int $partId, ?int $colorId = null): array
 {
     $pdo = getPDO();
-    $stmt = $pdo->prepare(
-        "SELECT si.location_id, si.condition_type, si.quantity, si.damaged_quantity,
+    $sql = "SELECT si.location_id, si.condition_type, si.quantity, si.damaged_quantity,
                 c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb
          FROM storage_items si
          INNER JOIN storage_locations sl ON sl.id = si.location_id
          LEFT JOIN colors c ON c.id = si.color_id
          WHERE si.part_id = ? AND si.quantity > 0
-           AND (sl.location_type IS NULL OR sl.location_type != 'owned_set')
-         ORDER BY si.location_id"
-    );
-    $stmt->execute([$partId]);
-    $rows = $stmt->fetchAll();
-    foreach ($rows as &$row) {
-        $row['location_id'] = (int) $row['location_id'];
-        $row['location_path'] = getStorageLocationPath($row['location_id']);
-        $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
-        $row['quantity'] = (int) $row['quantity'];
-        $row['damaged_quantity'] = (int) $row['damaged_quantity'];
-    }
-    unset($row);
-    return $rows;
-}
-
-/**
- * Per-color totals of one part's stock across BOTH loose locations and
- * owned sets' materialized inventories, for the part detail modal's
- * "Set- und Teilelager" tab overview — one summary card per color, with the
- * per-location/per-set breakdown left to getPartStockDetail() once a card
- * is clicked.
- *
- * @return array<int, array{color_id:?int, color_name:?string, color_rgb:?string, quantity:int}>
- */
-function getPartStockSummary(int $partId): array
-{
-    $pdo = getPDO();
-    $stmt = $pdo->prepare(
-        'SELECT c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb, SUM(si.quantity) AS quantity
-         FROM storage_items si
-         LEFT JOIN colors c ON c.id = si.color_id
-         WHERE si.part_id = ? AND si.quantity > 0
-         GROUP BY c.id, c.name, c.rgb
-         ORDER BY c.name IS NULL, c.name'
-    );
-    $stmt->execute([$partId]);
-    $rows = $stmt->fetchAll();
-    foreach ($rows as &$row) {
-        $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
-        $row['quantity'] = (int) $row['quantity'];
-    }
-    unset($row);
-    return $rows;
-}
-
-/**
- * Same shape as getPartStock(), but without the loose-only filter, and with
- * owned-set instance rows carrying the owned_sets row they belong to
- * (ownedSetId/setName/setNum) so the "Set- und Teilelager" tab's drill-down
- * can link straight to the set's own detail page instead of location_detail
- * (which owned-set locations were never meant to be reached through — see
- * addOwnedSet()'s doc comment in owned_sets.php). Optionally scoped to one
- * color, for the drill-down from a single summary card.
- *
- * @return array<int, array{location_id:int, location_path:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int, ownedSetId:?int, setName:?string, setNum:?string}>
- */
-function getPartStockDetail(int $partId, ?int $colorId): array
-{
-    $pdo = getPDO();
-    $sql = 'SELECT si.location_id, si.condition_type, si.quantity,
-                   c.id AS color_id, c.name AS color_name, c.rgb AS color_rgb,
-                   os.id AS owned_set_id, s.name AS set_name, s.rebrickable_set_num AS set_num
-            FROM storage_items si
-            LEFT JOIN colors c ON c.id = si.color_id
-            LEFT JOIN owned_sets os ON os.location_id = si.location_id
-            LEFT JOIN sets s ON s.id = os.set_id
-            WHERE si.part_id = ? AND si.quantity > 0';
+           AND (sl.location_type IS NULL OR sl.location_type != 'owned_set')";
     $params = [$partId];
     if ($colorId !== null) {
         $sql .= ' AND si.color_id = ?';
         $params[] = $colorId;
-    } else {
-        $sql .= ' AND si.color_id IS NULL';
     }
     $sql .= ' ORDER BY si.location_id';
     $stmt = $pdo->prepare($sql);
@@ -587,7 +624,7 @@ function getPartStockDetail(int $partId, ?int $colorId): array
         $row['location_path'] = getStorageLocationPath($row['location_id']);
         $row['color_id'] = $row['color_id'] !== null ? (int) $row['color_id'] : null;
         $row['quantity'] = (int) $row['quantity'];
-        $row['owned_set_id'] = $row['owned_set_id'] !== null ? (int) $row['owned_set_id'] : null;
+        $row['damaged_quantity'] = (int) $row['damaged_quantity'];
     }
     unset($row);
     return $rows;

@@ -1067,11 +1067,7 @@ SCRIPT;
         conditionType: item.condition_type
       };
       addCardSelectAndActivate(card, descriptor, function() {
-        openItemEditModal(descriptor, {
-          title: item.part_num + ' \\u00b7 ' + item.part_name,
-          meta: (item.color_name || '') + ' \\u00b7 ' + condText,
-          quantity: item.quantity
-        });
+        window.openPartModal(item.part_id, item.color_id, item.location_id, item.condition_type);
       });
     }
 
@@ -1644,6 +1640,12 @@ SCRIPT;
 })();
 </script>
 SCRIPT;
+
+    // Part cards here call window.openPartModal() directly (see
+    // buildOnePartCard() above) rather than relying on the generic
+    // .part-card document-click delegate, but the modal's own markup/script
+    // still needs to be present on the page for that to exist at all.
+    $content .= renderPartDetailModal();
 
     renderApp(t('locations_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('locations_title'), 'url' => null]]);
     exit;

@@ -688,6 +688,15 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        39 => function (PDO $pdo): void {
+            // BrickOwl has no Rebrickable-mediated external-id mapping the
+            // way BrickLink does (external_ids.BrickLink, see migration 25)
+            // — there is no auto-resolution mechanism for this at all, so
+            // it's purely a manual-entry/edit field on the part-detail
+            // modal's "Informationen" tab (action=update_part_external_ids,
+            // src/routes/actions.php).
+            addColumnIfMissing($pdo, 'parts', 'brickowl_id', 'VARCHAR(20) DEFAULT NULL');
+        },
     ];
 }
 
@@ -768,7 +777,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 38;
+const CURRENT_SCHEMA_VERSION = 39;
 
 function getInstalledSchemaVersion(): int
 {

@@ -448,7 +448,7 @@ function renderMinifigDetailModal(): string
       }
 
       var priceLine = document.createElement('p');
-      priceLine.className = 'minifig-modal-price-line';
+      priceLine.className = 'bricklink-price-line';
       var priceTextEl = document.createElement('span');
       priceLine.appendChild(priceTextEl);
       var priceRefreshBtn = document.createElement('button');

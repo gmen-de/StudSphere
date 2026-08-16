@@ -645,9 +645,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     exit;
 }
 
-// The location Explorer's per-card "edit" modal (quantity + optional new
-// location, see updateStorageItem() in src/storage.php) — reachable by
-// clicking any part card in ?page=locations.
+// The location Explorer's per-card "edit" modal AND part_modal.php's
+// "Bestand bearbeiten" tab (quantity, damaged quantity, optional new
+// location, optional new condition type — see updateStorageItem() in
+// src/storage.php). new_location_id stays supported for the location
+// Explorer's own edit card; "Bestand bearbeiten" deliberately never sends
+// it (no move-to-location field there, moving stays reachable via the
+// Explorer's own "Umlagern" bulk action instead).
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_storage_item') {
     header('Content-Type: application/json');
     try {
@@ -658,12 +662,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         $quantity = (int) ($_POST['quantity'] ?? -1);
         $newLocationId = isset($_POST['new_location_id']) && $_POST['new_location_id'] !== ''
             ? (int) $_POST['new_location_id'] : null;
+        $damagedQuantity = isset($_POST['damaged_quantity']) && $_POST['damaged_quantity'] !== ''
+            ? (int) $_POST['damaged_quantity'] : null;
+        $newConditionTypeParam = $_POST['new_condition_type'] ?? '';
+        $newConditionType = ($newConditionTypeParam === 'new' || $newConditionTypeParam === 'used') ? $newConditionTypeParam : null;
 
         if ($locationId <= 0 || $partId <= 0 || $colorId <= 0 || $quantity < 0) {
             throw new RuntimeException(t('add_stock_invalid_input'));
         }
+        if ($damagedQuantity !== null && ($damagedQuantity < 0 || $damagedQuantity > $quantity)) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
 
-        updateStorageItem($locationId, $partId, $colorId, $conditionType, $quantity, $newLocationId, (int) $_SESSION['user_id']);
+        updateStorageItem($locationId, $partId, $colorId, $conditionType, $quantity, $newLocationId, (int) $_SESSION['user_id'], $damagedQuantity, $newConditionType);
         $stats = refreshAppStatsCache($pdo);
 
         echo json_encode(['success' => true, 'stats' => $stats], JSON_UNESCAPED_UNICODE);
@@ -773,18 +784,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_
 if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
     header('Content-Type: application/json');
     $partId = (int) ($_GET['part_id'] ?? 0);
-    $part = getPartDetail($pdo, $partId);
+    $colorId = isset($_GET['color_id']) && $_GET['color_id'] !== '' ? (int) $_GET['color_id'] : null;
+    $locationId = isset($_GET['location_id']) && $_GET['location_id'] !== '' ? (int) $_GET['location_id'] : null;
+    $conditionTypeParam = $_GET['condition_type'] ?? '';
+    $conditionType = $conditionTypeParam === 'new' ? 'new' : ($conditionTypeParam === 'used' ? 'used' : null);
+    $part = getPartDetail($pdo, $partId, $colorId, $locationId, $conditionType);
     if ($part === null) {
         http_response_code(404);
         echo json_encode(['error' => t('part_not_found')], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    // Best-effort catalog search links built from part_num — we don't import
-    // BrickLink/BrickOwl's own external-id mappings (that needs their APIs),
-    // so a direct catalog-item link isn't reliably constructible, especially
-    // for printed variants whose numbering differs across sites.
-    $part['bricklink_url'] = 'https://www.bricklink.com/v2/search.page?q=' . urlencode($part['part_num']);
-    $part['brickowl_url'] = 'https://www.brickowl.com/search/catalog?query=' . urlencode($part['part_num']);
+    // A real catalog-item link once the id is known (editable via
+    // action=update_part_external_ids, part_modal.php's "Informationen"
+    // tab), otherwise a best-effort catalog search link built from
+    // part_num — direct catalog links aren't reliably constructible from
+    // part_num alone, especially for printed variants whose numbering
+    // differs across sites.
+    $part['bricklink_url'] = $part['bricklink_part_id'] !== null
+        ? 'https://www.bricklink.com/v2/catalog/catalogitem.page?P=' . urlencode($part['bricklink_part_id'])
+        : 'https://www.bricklink.com/v2/search.page?q=' . urlencode($part['part_num']);
+    $part['brickowl_url'] = $part['brickowl_id'] !== null
+        ? 'https://www.brickowl.com/catalog/' . urlencode($part['brickowl_id'])
+        : 'https://www.brickowl.com/search/catalog?query=' . urlencode($part['part_num']);
     $locale = getLocale();
     $part['translated_name'] = $locale !== 'en' ? getPartTranslation($pdo, $partId, $locale) : null;
     $part['translation_locale'] = $locale;
@@ -795,6 +816,115 @@ if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
         'otherColors' => $colors['other'],
         'printParent' => getPrintParent($pdo, $partId),
     ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// The part-detail modal's manual BrickLink price refresh button
+// ("Informationen" tab) — mirrors action=refresh_minifig_bricklink_price
+// (AJAX overlay, returns formatted text instead of reloading), but must
+// additionally play by stepBricklinkPartPriceSync()'s own throttle rules
+// (src/bricklink_prices.php): unlike the set/minifig syncs (a fixed
+// 600-second floor made a manual click bypassing it inconsequential), the
+// part sync's 10-300s window is shared via an explicit DB mutex + a
+// next-allowed-at marker specifically so cron and web-cron can't compound —
+// a manual refresh that skipped updating that marker would let repeated
+// clicks bypass the whole rate limit. Acquiring the lock and bumping the
+// marker here mirrors that function's body exactly.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'refresh_part_bricklink_price') {
+    header('Content-Type: application/json');
+    try {
+        $refreshPartId = (int) ($_POST['part_id'] ?? 0);
+        $refreshColorId = (int) ($_POST['color_id'] ?? 0);
+        $partColorForRefresh = ($refreshPartId > 0 && $refreshColorId > 0)
+            ? getPartColorForBricklinkRefresh($pdo, $refreshPartId, $refreshColorId)
+            : null;
+        if ($partColorForRefresh === null) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        $locked = (int) $pdo->query("SELECT GET_LOCK('studsphere_bricklink_part_sync', 0)")->fetchColumn();
+        if ($locked !== 1) {
+            throw new RuntimeException(t('part_bricklink_price_refresh_busy'));
+        }
+        try {
+            refreshBricklinkPriceForPartColor($pdo, $partColorForRefresh);
+            $delay = random_int(BRICKLINK_PART_PRICE_MIN_DELAY_SECONDS, BRICKLINK_PART_PRICE_MAX_DELAY_SECONDS);
+            setAppSetting('bricklink_part_sync_next_allowed_at', date('Y-m-d H:i:s', time() + $delay));
+        } finally {
+            $pdo->query("SELECT RELEASE_LOCK('studsphere_bricklink_part_sync')");
+        }
+
+        $priceStmt = $pdo->prepare(
+            'SELECT bricklink_price_new, bricklink_price_used, bricklink_price_currency, bricklink_price_checked_at
+             FROM part_bricklink_prices WHERE part_id = ? AND color_id = ?'
+        );
+        $priceStmt->execute([$refreshPartId, $refreshColorId]);
+        $refreshedPrice = $priceStmt->fetch() ?: [
+            'bricklink_price_new' => null, 'bricklink_price_used' => null,
+            'bricklink_price_currency' => null, 'bricklink_price_checked_at' => null,
+        ];
+        $newSummary = formatBricklinkPriceSummary(
+            $refreshedPrice['bricklink_price_new'] !== null ? (float) $refreshedPrice['bricklink_price_new'] : null,
+            $refreshedPrice['bricklink_price_used'] !== null ? (float) $refreshedPrice['bricklink_price_used'] : null,
+            $refreshedPrice['bricklink_price_currency'], $refreshedPrice['bricklink_price_checked_at'], 'new'
+        );
+        $usedSummary = formatBricklinkPriceSummary(
+            $refreshedPrice['bricklink_price_new'] !== null ? (float) $refreshedPrice['bricklink_price_new'] : null,
+            $refreshedPrice['bricklink_price_used'] !== null ? (float) $refreshedPrice['bricklink_price_used'] : null,
+            $refreshedPrice['bricklink_price_currency'], $refreshedPrice['bricklink_price_checked_at'], 'used'
+        );
+
+        echo json_encode([
+            'success' => true,
+            'newPriceText' => $newSummary['text'],
+            'usedPriceText' => $usedSummary['text'],
+            'priceTitle' => $newSummary['title'],
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// The part-detail modal's editable BrickLink/BrickOwl id fields
+// ("Informationen" tab). If bricklink_part_id actually changes, the cached
+// bricklink_item_id and any already-fetched part_bricklink_prices row are
+// cleared too — otherwise a corrected id would silently keep showing a
+// price fetched under the old, wrong catalog item until the next 6-month
+// sync cycle.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_part_external_ids') {
+    header('Content-Type: application/json');
+    try {
+        $externalIdsPartId = (int) ($_POST['part_id'] ?? 0);
+        $newBricklinkPartId = trim((string) ($_POST['bricklink_part_id'] ?? ''));
+        $newBrickowlId = trim((string) ($_POST['brickowl_id'] ?? ''));
+        if ($externalIdsPartId <= 0) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        $currentStmt = $pdo->prepare('SELECT bricklink_part_id FROM parts WHERE id = ?');
+        $currentStmt->execute([$externalIdsPartId]);
+        $currentBricklinkPartId = $currentStmt->fetchColumn();
+        $bricklinkPartIdChanged = ((string) $currentBricklinkPartId) !== $newBricklinkPartId;
+
+        $pdo->prepare('UPDATE parts SET bricklink_part_id = ?, brickowl_id = ? WHERE id = ?')
+            ->execute([$newBricklinkPartId !== '' ? $newBricklinkPartId : null, $newBrickowlId !== '' ? $newBrickowlId : null, $externalIdsPartId]);
+
+        if ($bricklinkPartIdChanged) {
+            $pdo->prepare('UPDATE parts SET bricklink_item_id = NULL WHERE id = ?')->execute([$externalIdsPartId]);
+            $pdo->prepare('DELETE FROM part_bricklink_prices WHERE part_id = ?')->execute([$externalIdsPartId]);
+        }
+
+        echo json_encode([
+            'success' => true,
+            'bricklinkPartId' => $newBricklinkPartId !== '' ? $newBricklinkPartId : null,
+            'brickowlId' => $newBrickowlId !== '' ? $newBrickowlId : null,
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
     exit;
 }
 
@@ -1802,21 +1932,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'part_stock') {
     header('Content-Type: application/json');
     $partId = (int) ($_GET['part_id'] ?? 0);
     echo json_encode(['stock' => getPartStock($partId)], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-if (isset($_GET['action']) && $_GET['action'] === 'part_stock_summary') {
-    header('Content-Type: application/json');
-    $partId = (int) ($_GET['part_id'] ?? 0);
-    echo json_encode(['summary' => getPartStockSummary($partId)], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-if (isset($_GET['action']) && $_GET['action'] === 'part_stock_detail') {
-    header('Content-Type: application/json');
-    $partId = (int) ($_GET['part_id'] ?? 0);
-    $colorId = isset($_GET['color_id']) && $_GET['color_id'] !== '' ? (int) $_GET['color_id'] : null;
-    echo json_encode(['detail' => getPartStockDetail($partId, $colorId)], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

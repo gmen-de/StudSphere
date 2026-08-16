@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/icons.php';
 require_once __DIR__ . '/i18n.php';
+require_once __DIR__ . '/part_images.php';
+require_once __DIR__ . '/bricklink_prices.php';
+require_once __DIR__ . '/storage.php';
 
 // Infinite-scroll batch size: first batch loaded on page render, then one
 // more batch of the same size per scroll-triggered continuation request.
@@ -125,29 +128,45 @@ function getPartCategoryName(PDO $pdo, string $categoryId): ?string
 }
 
 /**
- * Everything the part-detail overlay needs in one call: catalog fields, a
- * thumbnail, and set-appearance stats (count, total quantity, year range).
- * Rebrickable's own popup additionally shows BrickLink/BrickOwl/LDraw ids and
- * MOC counts — we don't import those external-id mappings or any MOC data,
- * so they're left out rather than faked (BrickLink/BrickOwl instead get a
- * best-effort catalog *search* link built from part_num, added by the
- * caller — see index.php's part_detail action).
+ * Everything the part-detail modal needs in one call: catalog fields
+ * (including bricklink_part_id/brickowl_id/ldraw_id/part_url, all editable
+ * or just linkable from the "Informationen" tab), a thumbnail, and
+ * set-appearance stats (count, total quantity, year range).
  *
  * Set-appearance stats are computed from inventory_parts joined to
  * rebrickable_inventories (which carries set_num), not the separate
  * `set_parts` table — set_parts isn't populated by the main Rebrickable
  * sync, while inventory_parts is the table that actually has real data.
  * Spares are excluded to match Rebrickable's own "appears in" counts,
- * which count what's actually built into the model.
+ * which count what's actually built into the model. INNER JOIN sets (not
+ * LEFT): rebrickable_inventories.set_num is shared between real sets and
+ * minifigs' own sub-inventories (same column, different meaning), so a LEFT
+ * JOIN let minifig-only rows leak into these counts with every sets.*
+ * column NULL — inflating sets_count/total_appearances. sets carries the
+ * full Rebrickable catalog (not just owned sets), so INNER JOIN drops no
+ * genuine set appearance.
  *
  * The year range comes from `sets.year` via set_num, not
  * rebrickable_inventories.year — the real inventories.csv has no year
  * column at all, so that field is always NULL; year is a sets.csv field.
+ *
+ * $colorId/$locationId/$conditionType are all optional, and used together
+ * for part_modal.php's color-aware rendering:
+ * - $colorId (colors.id, the surrogate PK — NOT Rebrickable's own numbering)
+ *   resolves a color-correct thumbnail (getCachedPartColorImage(), falling
+ *   back to the generic one) and, if that color has a cached BrickLink
+ *   price, both its New and Used formatted summaries.
+ * - If all three are given (the location Explorer always has all three for
+ *   the card that was clicked), `stockRow` is the exact storage_items row
+ *   being edited. Otherwise `stockCandidates` is every loose row for this
+ *   part (scoped to $colorId if that alone is known) — part_modal.php's
+ *   "Bestand bearbeiten" tab picks a specific row from that list itself.
  */
-function getPartDetail(PDO $pdo, int $partId): ?array
+function getPartDetail(PDO $pdo, int $partId, ?int $colorId = null, ?int $locationId = null, ?string $conditionType = null): ?array
 {
     $stmt = $pdo->prepare(
-        'SELECT p.id, p.part_num, p.name, p.part_category, pc.name AS category_name
+        'SELECT p.id, p.part_num, p.name, p.part_category, p.bricklink_part_id, p.brickowl_id, p.ldraw_id, p.part_url,
+                pc.name AS category_name
          FROM parts p
          LEFT JOIN part_categories pc ON pc.part_cat_id = p.part_category
          WHERE p.id = ?'
@@ -160,6 +179,48 @@ function getPartDetail(PDO $pdo, int $partId): ?array
 
     $thumbnails = getPartThumbnails($pdo, [$partId]);
     $part['thumbnail'] = $thumbnails[$partId] ?? null;
+    $part['bricklinkPriceNewText'] = null;
+    $part['bricklinkPriceUsedText'] = null;
+    $part['bricklinkPriceTitle'] = null;
+
+    if ($colorId !== null) {
+        $rebrickableColorIdStmt = $pdo->prepare('SELECT color_id FROM colors WHERE id = ?');
+        $rebrickableColorIdStmt->execute([$colorId]);
+        $rebrickableColorId = $rebrickableColorIdStmt->fetchColumn();
+        if ($rebrickableColorId !== false) {
+            $part['thumbnail'] = getCachedPartColorImage($pdo, $partId, (int) $rebrickableColorId) ?? $part['thumbnail'];
+        }
+
+        $priceStmt = $pdo->prepare(
+            'SELECT bricklink_price_new, bricklink_price_used, bricklink_price_currency, bricklink_price_checked_at
+             FROM part_bricklink_prices WHERE part_id = ? AND color_id = ?'
+        );
+        $priceStmt->execute([$partId, $colorId]);
+        $priceRow = $priceStmt->fetch();
+        if ($priceRow !== false) {
+            $newSummary = formatBricklinkPriceSummary(
+                $priceRow['bricklink_price_new'] !== null ? (float) $priceRow['bricklink_price_new'] : null,
+                $priceRow['bricklink_price_used'] !== null ? (float) $priceRow['bricklink_price_used'] : null,
+                $priceRow['bricklink_price_currency'], $priceRow['bricklink_price_checked_at'], 'new'
+            );
+            $usedSummary = formatBricklinkPriceSummary(
+                $priceRow['bricklink_price_new'] !== null ? (float) $priceRow['bricklink_price_new'] : null,
+                $priceRow['bricklink_price_used'] !== null ? (float) $priceRow['bricklink_price_used'] : null,
+                $priceRow['bricklink_price_currency'], $priceRow['bricklink_price_checked_at'], 'used'
+            );
+            $part['bricklinkPriceNewText'] = $newSummary['text'];
+            $part['bricklinkPriceUsedText'] = $usedSummary['text'];
+            $part['bricklinkPriceTitle'] = $newSummary['title'];
+        }
+    }
+
+    $part['stockRow'] = null;
+    $part['stockCandidates'] = null;
+    if ($locationId !== null && $colorId !== null && $conditionType !== null) {
+        $part['stockRow'] = getStorageItemRow($locationId, $partId, $colorId, $conditionType);
+    } else {
+        $part['stockCandidates'] = getPartStock($partId, $colorId);
+    }
 
     $setsStmt = $pdo->prepare(
         'SELECT COUNT(DISTINCT ri.set_num) AS set_count,
@@ -168,7 +229,7 @@ function getPartDetail(PDO $pdo, int $partId): ?array
                 MAX(s.year) AS max_year
          FROM inventory_parts ip
          INNER JOIN rebrickable_inventories ri ON ri.inventory_id = ip.inventory_id
-         LEFT JOIN sets s ON s.rebrickable_set_num = ri.set_num
+         INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num
          WHERE ip.part_id = ? AND ip.is_spare = 0'
     );
     $setsStmt->execute([$partId]);
@@ -254,20 +315,26 @@ function getPrintParent(PDO $pdo, int $partId): ?array
  * The actual sets a part appears in — backs the "N Sets" link in the
  * part-detail overlay. Same inventory_parts/rebrickable_inventories/sets
  * join as the summary stats in getPartDetail(), just returned as rows
- * instead of aggregated down to counts.
+ * instead of aggregated down to counts. INNER JOIN sets (not LEFT), see
+ * getPartDetail()'s own doc comment for why: rebrickable_inventories.set_num
+ * is shared between real sets and minifigs' own sub-inventories, and a LEFT
+ * JOIN let minifig-only rows leak through here as ghost entries with every
+ * sets.* column NULL. sets.theme is included and the sort groups by it
+ * first, so the caller can render theme headings over an already-grouped
+ * list without a second query or client-side re-sorting.
  *
- * @return array<int, array{set_num:string, name:?string, year:?int, quantity:int, thumbnail:?string}>
+ * @return array<int, array{set_num:string, name:?string, year:?int, theme:?string, quantity:int, thumbnail:?string}>
  */
 function getPartSets(PDO $pdo, int $partId): array
 {
     $stmt = $pdo->prepare(
-        'SELECT ri.set_num, s.name, s.year, s.local_image_path AS thumbnail, SUM(ip.quantity) AS quantity
+        'SELECT ri.set_num, s.name, s.year, s.theme, s.local_image_path AS thumbnail, SUM(ip.quantity) AS quantity
          FROM inventory_parts ip
          INNER JOIN rebrickable_inventories ri ON ri.inventory_id = ip.inventory_id
-         LEFT JOIN sets s ON s.rebrickable_set_num = ri.set_num
+         INNER JOIN sets s ON s.rebrickable_set_num = ri.set_num
          WHERE ip.part_id = ? AND ip.is_spare = 0
-         GROUP BY ri.set_num, s.name, s.year, s.local_image_path
-         ORDER BY s.year DESC, s.name ASC'
+         GROUP BY ri.set_num, s.name, s.year, s.theme, s.local_image_path
+         ORDER BY s.theme IS NULL, s.theme ASC, s.year DESC, s.name ASC'
     );
     $stmt->execute([$partId]);
     $sets = $stmt->fetchAll();

@@ -3,14 +3,18 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/i18n.php';
+require_once __DIR__ . '/icons.php';
 
 /**
- * The part-detail overlay (image, links, sets/appearances, translation
- * add/edit, and its own "Zum Lager hinzufuegen / Lager / Einkauf" tabs) is
- * opened by clicking any ".part-card[data-part-id]" element anywhere on the
- * page -- click/keydown delegation is on document, not a specific grid, so
- * this same markup+script works unchanged on bricks_search and on any other
- * page that renders part cards (e.g. a set's inventory tab).
+ * The part-detail overlay — image (color-correct when a color is known),
+ * name/translation, catalog links, BrickLink/BrickOwl ids, appears-in-sets
+ * (grouped by theme), and its own "Bestand bearbeiten / Zum Lager
+ * hinzufuegen / Informationen" tabs — is opened by clicking any
+ * ".part-card[data-part-id]" element anywhere on the page (click/keydown
+ * delegation is on document, not a specific grid) OR by the location
+ * Explorer's own part cards calling window.openPartModal() directly with
+ * full context (color/location/condition), which is what makes "Bestand
+ * bearbeiten" show that exact stock row instead of a generic add-form.
  */
 function renderPartDetailModal(): string
 {
@@ -24,8 +28,6 @@ function renderPartDetailModal(): string
             'notFound' => t('part_not_found'),
             'appearsInSets' => t('part_appears_in_sets'),
             'appearsInNoSets' => t('part_appears_in_no_sets'),
-            'bricklinkLink' => t('bricklink_link'),
-            'brickowlLink' => t('brickowl_link'),
             'addToInventoryTitle' => t('add_to_inventory_title'),
             'colorLabel' => t('filter_color_title'),
             'knownColorsTitle' => t('add_stock_known_colors_title'),
@@ -49,18 +51,28 @@ function renderPartDetailModal(): string
             'translationPlaceholder' => t('translation_placeholder'),
             'addButton' => t('add_stock_button'),
             'errorRetry' => t('import_error_retry'),
-            'tabStorage' => t('part_tab_storage'),
-            'tabCombinedStorage' => t('part_tab_combined_storage'),
-            'tabPurchase' => t('part_tab_purchase'),
-            'stockEmpty' => t('part_stock_empty'),
-            'stockLocationLabel' => t('part_stock_location_label'),
-            'stockColorLabel' => t('part_stock_color_label'),
-            'stockConditionLabel' => t('part_stock_condition_label'),
-            'stockQuantityLabel' => t('part_stock_quantity_label'),
-            'stockInSetLabel' => t('part_stock_in_set_label'),
-            'backToSummary' => t('part_stock_back_to_summary'),
-            'purchasePlaceholder' => t('part_purchase_placeholder'),
-            'locationOpenNewTab' => t('location_detail_open_new_tab'),
+            'tabEditStock' => t('part_tab_edit_stock'),
+            'tabInfo' => t('part_tab_info'),
+            'editStockDamagedQuantityLabel' => t('part_edit_stock_damaged_quantity_label'),
+            'editStockSaveButton' => t('location_save_button'),
+            'editStockSaveSuccess' => t('part_edit_stock_save_success'),
+            'editStockSaveFailed' => t('part_edit_stock_save_failed'),
+            'editStockEmptyHint' => t('part_edit_stock_empty_hint'),
+            'editStockPickRowHint' => t('part_edit_stock_pick_row_hint'),
+            'bricklinkIdLabel' => t('part_bricklink_id_label'),
+            'brickowlIdLabel' => t('part_brickowl_id_label'),
+            'externalIdsSaveButton' => t('translation_save_button'),
+            'externalIdsSaveSuccess' => t('part_external_ids_save_success'),
+            'externalIdsSaveFailed' => t('part_external_ids_save_failed'),
+            'bricklinkPriceLine' => t('part_bricklink_price_line'),
+            'bricklinkPriceNeverLabel' => t('owned_set_bricklink_price_never'),
+            'bricklinkRefreshLabel' => t('owned_set_bricklink_price_refresh_label'),
+            'bricklinkRefreshFailed' => t('owned_set_bricklink_price_refresh_failed'),
+            'refreshIcon' => getActionIcon('refresh'),
+            'editIcon' => getActionIcon('edit'),
+            'ldrawIdLabel' => t('part_ldraw_id_label'),
+            'rebrickableLinkLabel' => t('rebrickable_link'),
+            'setsNoThemeLabel' => t('part_sets_no_theme_label'),
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
         $main .= <<<SCRIPT
@@ -87,7 +99,14 @@ function renderPartDetailModal(): string
 
   closeBtn.addEventListener('click', closeModal);
 
-  function openPartModal(partId) {
+  // Set once per openPartModal() call, read by renderPartModal() to decide
+  // the default active tab and to know what "the clicked row" actually was
+  // (colors.id — the surrogate PK — not Rebrickable's own numbering, see
+  // that distinction's own note further down at the .part-card delegate).
+  var openContext = { colorId: null, locationId: null, conditionType: null };
+
+  function openPartModal(partId, colorId, locationId, conditionType) {
+    openContext = { colorId: colorId || null, locationId: locationId || null, conditionType: conditionType || null };
     content.innerHTML = '';
     // Moved to the end of <body> on every open: .modal-overlay elements all
     // share the same z-index, so among overlapping fixed-position siblings
@@ -98,7 +117,14 @@ function renderPartDetailModal(): string
     document.body.appendChild(modal);
     modal.style.display = 'flex';
 
-    fetch('?action=part_detail&part_id=' + encodeURIComponent(partId), { credentials: 'same-origin' })
+    var params = new URLSearchParams();
+    params.set('action', 'part_detail');
+    params.set('part_id', partId);
+    if (openContext.colorId) { params.set('color_id', openContext.colorId); }
+    if (openContext.locationId) { params.set('location_id', openContext.locationId); }
+    if (openContext.conditionType) { params.set('condition_type', openContext.conditionType); }
+
+    fetch('?' + params.toString(), { credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.error) {
@@ -111,135 +137,493 @@ function renderPartDetailModal(): string
         content.innerHTML = '<p>' + texts.errorRetry + '</p>';
       });
   }
+  window.openPartModal = openPartModal;
 
-  function openPartSetsList(part) {
-    content.innerHTML = '';
-
-    var backLink = document.createElement('a');
-    backLink.href = '#';
-    backLink.className = 'part-sets-back';
-    backLink.textContent = texts.backToPart;
-    backLink.addEventListener('click', function(e) {
-      e.preventDefault();
-      openPartModal(part.id);
-    });
-    content.appendChild(backLink);
-
-    var title = document.createElement('h3');
-    title.textContent = texts.partSetsTitle;
-    content.appendChild(title);
-
-    var list = document.createElement('div');
-    list.className = 'part-sets-list';
-    content.appendChild(list);
-
-    fetch('?action=part_sets&part_id=' + encodeURIComponent(part.id), { credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        (data.sets || []).forEach(function(set) {
-          var row = document.createElement('div');
-          row.className = 'part-sets-row';
-
-          var thumb = document.createElement('span');
-          thumb.className = 'part-sets-thumb';
-          thumb.innerHTML = set.thumbnail
-            ? '<img src="' + set.thumbnail + '" alt="">'
-            : content.dataset.fallbackIcon || '';
-          row.appendChild(thumb);
-
-          var setInfo = document.createElement('span');
-          setInfo.className = 'part-sets-info';
-          var setName = document.createElement('span');
-          setName.className = 'part-sets-name';
-          setName.textContent = (set.name || set.set_num) + (set.year ? ' (' + set.year + ')' : '');
-          var setMeta = document.createElement('span');
-          setMeta.className = 'part-sets-meta';
-          setMeta.textContent = set.set_num + ' · ' + set.quantity + 'x';
-          setInfo.appendChild(setName);
-          setInfo.appendChild(setMeta);
-          row.appendChild(setInfo);
-
-          list.appendChild(row);
-        });
-      })
-      .catch(function() {
-        list.textContent = texts.errorRetry;
-      });
+  function colorSwatchStyle(rgb) {
+    return rgb ? '#' + String(rgb).replace('#', '') : '#cccccc';
   }
 
   function renderPartModal(data) {
     var part = data.part;
+    var context = openContext;
     content.innerHTML = '';
 
-    var header = document.createElement('div');
-    header.className = 'part-modal-header';
+    var tabBar = document.createElement('div');
+    tabBar.className = 'part-modal-tabs';
+    var tabPanels = document.createElement('div');
+    tabPanels.className = 'part-modal-tab-panels';
+
+    var panelEditStock = document.createElement('div');
+    panelEditStock.className = 'part-modal-tab-panel';
+    var panelAddStock = document.createElement('div');
+    panelAddStock.className = 'part-modal-tab-panel';
+    var panelInfo = document.createElement('div');
+    panelInfo.className = 'part-modal-tab-panel';
+
+    var tabs = [
+      { label: texts.tabEditStock, panel: panelEditStock },
+      { label: texts.addToInventoryTitle, panel: panelAddStock },
+      { label: texts.tabInfo, panel: panelInfo }
+    ];
+    var tabButtons = [];
+
+    function activateTab(index) {
+      tabs.forEach(function(tab, i) {
+        tab.panel.classList.toggle('active', i === index);
+        tabButtons[i].classList.toggle('active', i === index);
+      });
+    }
+
+    tabs.forEach(function(tab, i) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'part-modal-tab-btn';
+      btn.textContent = tab.label;
+      btn.addEventListener('click', function() { activateTab(i); });
+      tabBar.appendChild(btn);
+      tabButtons.push(btn);
+      tabPanels.appendChild(tab.panel);
+    });
+
+    buildEditStockPanel(panelEditStock, part, context);
+    buildAddStockPanel(panelAddStock, part, data, context);
+    buildInfoPanel(panelInfo, part, data);
+
+    // Opened with full context (from the location Explorer, where there's a
+    // specific existing row to look at) -> "Bestand bearbeiten" first.
+    // Opened without it (bricks_search, a set's inventory tab, etc. — every
+    // call site before this modal supported color/location context at all)
+    // -> "Zum Lager hinzufügen" first, matching that unchanged behavior.
+    var defaultTab = (context.colorId && context.locationId && context.conditionType) ? 0 : 1;
+    activateTab(defaultTab);
+
+    content.appendChild(tabBar);
+    content.appendChild(tabPanels);
+  }
+
+  // ---- "Bestand bearbeiten" -------------------------------------------
+
+  function buildEditStockPanel(panel, part, context) {
+    panel.innerHTML = '';
+
+    if (part.stockRow) {
+      renderEditStockForm(panel, part, context.locationId, context.colorId, context.conditionType, part.stockRow);
+      return;
+    }
+
+    var candidates = part.stockCandidates || [];
+    if (candidates.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = texts.editStockEmptyHint;
+      panel.appendChild(empty);
+      return;
+    }
+    if (candidates.length === 1) {
+      var only = candidates[0];
+      renderEditStockForm(panel, part, only.location_id, only.color_id, only.condition_type, { quantity: only.quantity, damaged_quantity: only.damaged_quantity });
+      return;
+    }
+
+    var pickHint = document.createElement('p');
+    pickHint.className = 'hint';
+    pickHint.textContent = texts.editStockPickRowHint;
+    panel.appendChild(pickHint);
+
+    var list = document.createElement('div');
+    list.className = 'part-edit-stock-picker-list';
+    candidates.forEach(function(row) {
+      var rowEl = document.createElement('button');
+      rowEl.type = 'button';
+      rowEl.className = 'part-edit-stock-picker-row';
+      var swatch = document.createElement('span');
+      swatch.className = 'location-detail-card-swatch';
+      swatch.style.backgroundColor = colorSwatchStyle(row.color_rgb);
+      rowEl.appendChild(swatch);
+      var condText = row.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
+      var label = document.createElement('span');
+      label.textContent = (row.color_name || '') + ' \\u00b7 ' + condText + ' \\u00b7 ' + row.location_path + ' \\u00b7 ' + row.quantity + 'x';
+      rowEl.appendChild(label);
+      rowEl.addEventListener('click', function() {
+        panel.innerHTML = '';
+        renderEditStockForm(panel, part, row.location_id, row.color_id, row.condition_type, { quantity: row.quantity, damaged_quantity: row.damaged_quantity });
+      });
+      list.appendChild(rowEl);
+    });
+    panel.appendChild(list);
+  }
+
+  function renderEditStockForm(panel, part, locationId, colorId, conditionType, stockRow) {
+    var wrap = document.createElement('div');
+    wrap.className = 'part-modal-edit-stock';
 
     var img = document.createElement('div');
     img.className = 'part-modal-image';
-    img.innerHTML = part.thumbnail
-      ? '<img src="' + part.thumbnail + '" alt="">'
-      : content.dataset.fallbackIcon || '';
-    header.appendChild(img);
+    img.innerHTML = part.thumbnail ? '<img src="' + part.thumbnail + '" alt="">' : (content.dataset.fallbackIcon || '');
+    wrap.appendChild(img);
+
+    var formWrap = document.createElement('div');
+    formWrap.className = 'part-modal-edit-stock-form-wrap';
+
+    var msgBox = document.createElement('div');
+    msgBox.className = 'add-stock-message';
+    formWrap.appendChild(msgBox);
+
+    var form = document.createElement('form');
+
+    var qtyLabel = document.createElement('label');
+    qtyLabel.textContent = texts.quantityLabel;
+    var qtyInput = document.createElement('input');
+    qtyInput.type = 'number';
+    qtyInput.min = '0';
+    qtyInput.value = String(stockRow.quantity);
+    qtyLabel.appendChild(qtyInput);
+    form.appendChild(qtyLabel);
+
+    var damagedLabel = document.createElement('label');
+    damagedLabel.textContent = texts.editStockDamagedQuantityLabel;
+    var damagedInput = document.createElement('input');
+    damagedInput.type = 'number';
+    damagedInput.min = '0';
+    damagedInput.value = String(stockRow.damaged_quantity || 0);
+    damagedLabel.appendChild(damagedInput);
+    form.appendChild(damagedLabel);
+
+    var condLabel = document.createElement('label');
+    condLabel.textContent = texts.conditionLabel;
+    var condSelect = document.createElement('select');
+    var optUsed = document.createElement('option');
+    optUsed.value = 'used';
+    optUsed.textContent = texts.conditionUsed;
+    var optNew = document.createElement('option');
+    optNew.value = 'new';
+    optNew.textContent = texts.conditionNew;
+    condSelect.appendChild(optUsed);
+    condSelect.appendChild(optNew);
+    condSelect.value = conditionType;
+    condLabel.appendChild(condSelect);
+    form.appendChild(condLabel);
+
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'submit';
+    submitBtn.textContent = texts.editStockSaveButton;
+    form.appendChild(submitBtn);
+
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      msgBox.textContent = '';
+      msgBox.className = 'add-stock-message';
+      submitBtn.disabled = true;
+
+      var formData = new FormData();
+      formData.set('action', 'update_storage_item');
+      formData.set('location_id', locationId);
+      formData.set('part_id', part.id);
+      formData.set('color_id', colorId);
+      formData.set('condition_type', conditionType);
+      formData.set('quantity', qtyInput.value);
+      formData.set('damaged_quantity', damagedInput.value);
+      if (condSelect.value !== conditionType) {
+        formData.set('new_condition_type', condSelect.value);
+      }
+
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          submitBtn.disabled = false;
+          msgBox.textContent = res.success ? texts.editStockSaveSuccess : (texts.editStockSaveFailed + ' ' + (res.message || ''));
+          msgBox.className = 'add-stock-message ' + (res.success ? 'success' : 'error');
+          if (res.success) {
+            window.applyStatusStats(res.stats);
+          }
+        })
+        .catch(function() {
+          submitBtn.disabled = false;
+          msgBox.textContent = texts.errorRetry;
+          msgBox.className = 'add-stock-message error';
+        });
+    });
+
+    formWrap.appendChild(form);
+    wrap.appendChild(formWrap);
+    panel.appendChild(wrap);
+  }
+
+  // ---- "Zum Lager hinzufügen" (pixel-identical to before, only the
+  // location picker's starting point changes when opened with context) ----
+
+  function buildAddStockPanel(panel, part, data, context) {
+    panel.innerHTML = '';
+
+    var msgBox = document.createElement('div');
+    msgBox.className = 'add-stock-message';
+    panel.appendChild(msgBox);
+
+    var form = document.createElement('form');
+    form.className = 'add-stock-form';
+
+    var knownColors = data.knownColors || [];
+    var otherColors = data.otherColors || [];
+    var allPickerColors = knownColors.concat(otherColors);
+
+    var colorHiddenInput = document.createElement('input');
+    colorHiddenInput.type = 'hidden';
+    colorHiddenInput.name = 'color_id';
+
+    var colorLabel = document.createElement('label');
+    colorLabel.textContent = texts.colorLabel;
+
+    var combo = document.createElement('div');
+    combo.className = 'color-combo';
+
+    var comboToggle = document.createElement('button');
+    comboToggle.type = 'button';
+    comboToggle.className = 'color-combo-toggle';
+    var comboToggleSwatch = document.createElement('span');
+    comboToggleSwatch.className = 'color-combo-toggle-swatch';
+    var comboToggleName = document.createElement('span');
+    comboToggleName.className = 'color-combo-toggle-name';
+    comboToggle.appendChild(comboToggleSwatch);
+    comboToggle.appendChild(comboToggleName);
+
+    var comboPanel = document.createElement('div');
+    comboPanel.className = 'color-combo-panel';
+    comboPanel.style.display = 'none';
+
+    var swatchGrid = null;
+
+    function updateActiveSwatch() {
+      if (!swatchGrid) {
+        return;
+      }
+      Array.prototype.forEach.call(swatchGrid.children, function(btn) {
+        btn.classList.toggle('active', btn.dataset.colorId === colorHiddenInput.value);
+      });
+    }
+
+    function updateComboOptionActive() {
+      Array.prototype.forEach.call(comboPanel.querySelectorAll('.color-combo-option'), function(btn) {
+        btn.classList.toggle('active', btn.dataset.colorId === colorHiddenInput.value);
+      });
+    }
+
+    function setColorValue(c) {
+      colorHiddenInput.value = String(c.id);
+      comboToggleSwatch.style.backgroundColor = colorSwatchStyle(c.rgb);
+      comboToggleName.textContent = c.name;
+      updateActiveSwatch();
+      updateComboOptionActive();
+    }
+
+    function closeCombo() {
+      comboPanel.style.display = 'none';
+    }
+
+    function buildComboOption(c) {
+      var opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'color-combo-option';
+      opt.dataset.colorId = String(c.id);
+      var optName = document.createElement('span');
+      optName.className = 'color-combo-option-name';
+      optName.textContent = c.name;
+      var optSwatch = document.createElement('span');
+      optSwatch.className = 'color-combo-option-swatch';
+      optSwatch.style.backgroundColor = colorSwatchStyle(c.rgb);
+      opt.appendChild(optName);
+      opt.appendChild(optSwatch);
+      opt.addEventListener('click', function() {
+        setColorValue(c);
+        closeCombo();
+      });
+      return opt;
+    }
+
+    knownColors.forEach(function(c) {
+      comboPanel.appendChild(buildComboOption(c));
+    });
+    if (otherColors.length > 0) {
+      var groupLabel = document.createElement('div');
+      groupLabel.className = 'color-combo-group-label';
+      groupLabel.textContent = texts.colorOtherGroupLabel;
+      comboPanel.appendChild(groupLabel);
+      otherColors.forEach(function(c) {
+        comboPanel.appendChild(buildComboOption(c));
+      });
+    }
+
+    comboToggle.addEventListener('click', function() {
+      comboPanel.style.display = comboPanel.style.display === 'none' ? 'block' : 'none';
+    });
+    document.addEventListener('click', function(e) {
+      if (!combo.contains(e.target)) {
+        closeCombo();
+      }
+    });
+
+    combo.appendChild(comboToggle);
+    combo.appendChild(comboPanel);
+    colorLabel.appendChild(combo);
+    colorLabel.appendChild(colorHiddenInput);
+    form.appendChild(colorLabel);
+
+    if (knownColors.length > 0) {
+      var swatchSection = document.createElement('div');
+      swatchSection.className = 'color-swatch-section';
+      var swatchTitle = document.createElement('p');
+      swatchTitle.className = 'color-swatch-title';
+      swatchTitle.textContent = texts.knownColorsTitle;
+      swatchGrid = document.createElement('div');
+      swatchGrid.className = 'color-swatch-grid';
+      knownColors.forEach(function(c) {
+        var swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.className = 'color-swatch-btn';
+        swatch.title = c.name;
+        swatch.style.backgroundColor = colorSwatchStyle(c.rgb);
+        swatch.dataset.colorId = String(c.id);
+        swatch.addEventListener('click', function() {
+          setColorValue(c);
+        });
+        swatchGrid.appendChild(swatch);
+      });
+      swatchSection.appendChild(swatchTitle);
+      swatchSection.appendChild(swatchGrid);
+      form.appendChild(swatchSection);
+    }
+
+    var initialColor = allPickerColors[0];
+    if (context.colorId) {
+      var matchingColor = allPickerColors.filter(function(c) { return String(c.id) === String(context.colorId); })[0];
+      if (matchingColor) {
+        initialColor = matchingColor;
+      }
+    }
+    if (initialColor) {
+      setColorValue(initialColor);
+    }
+
+    var qtyLabel = document.createElement('label');
+    qtyLabel.textContent = texts.quantityLabel;
+    var qtyInput = document.createElement('input');
+    qtyInput.type = 'number';
+    qtyInput.name = 'quantity';
+    qtyInput.min = '1';
+    qtyInput.value = '1';
+    qtyLabel.appendChild(qtyInput);
+    form.appendChild(qtyLabel);
+
+    var condLabel = document.createElement('label');
+    condLabel.textContent = texts.conditionLabel;
+    var condSelect = document.createElement('select');
+    condSelect.name = 'condition_type';
+    var optUsed = document.createElement('option');
+    optUsed.value = 'used';
+    optUsed.textContent = texts.conditionUsed;
+    optUsed.selected = true;
+    var optNew = document.createElement('option');
+    optNew.value = 'new';
+    optNew.textContent = texts.conditionNew;
+    condSelect.appendChild(optUsed);
+    condSelect.appendChild(optNew);
+    if (context.conditionType) {
+      condSelect.value = context.conditionType;
+    }
+    condLabel.appendChild(condSelect);
+    form.appendChild(condLabel);
+
+    var locationContainer = document.createElement('div');
+    locationContainer.className = 'location-picker';
+    form.appendChild(locationContainer);
+    var selectedLocationId = null;
+    var lastAddLocationId = null;
+    try {
+      lastAddLocationId = window.localStorage.getItem(LAST_ADD_LOCATION_STORAGE_KEY);
+    } catch (e) {
+      // Private browsing / storage disabled — picker just starts empty.
+    }
+    window.createLocationPicker(locationContainer, texts, function(value) {
+      selectedLocationId = value;
+    }, context.locationId || lastAddLocationId);
+
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'submit';
+    submitBtn.textContent = texts.addButton;
+    form.appendChild(submitBtn);
+
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      msgBox.textContent = '';
+      msgBox.className = 'add-stock-message';
+      submitBtn.disabled = true;
+
+      var formData = new FormData();
+      formData.set('action', 'add_stock');
+      formData.set('part_id', part.id);
+      formData.set('color_id', colorHiddenInput.value);
+      formData.set('quantity', qtyInput.value);
+      formData.set('condition_type', condSelect.value);
+      formData.set('location_id', selectedLocationId || '');
+
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          submitBtn.disabled = false;
+          msgBox.textContent = res.message;
+          msgBox.className = 'add-stock-message ' + (res.success ? 'success' : 'error');
+          if (res.success) {
+            window.applyStatusStats(res.stats);
+            try {
+              window.localStorage.setItem(LAST_ADD_LOCATION_STORAGE_KEY, selectedLocationId);
+            } catch (ex) {
+              // ignore
+            }
+          }
+        })
+        .catch(function() {
+          submitBtn.disabled = false;
+          msgBox.textContent = texts.errorRetry;
+          msgBox.className = 'add-stock-message error';
+        });
+    });
+
+    panel.appendChild(form);
+  }
+
+  // ---- "Informationen" --------------------------------------------------
+
+  function buildInfoPanel(panel, part, data) {
+    panel.innerHTML = '';
+
+    var headerRow = document.createElement('div');
+    headerRow.className = 'part-modal-header';
+
+    var img = document.createElement('div');
+    img.className = 'part-modal-image';
+    img.innerHTML = part.thumbnail ? '<img src="' + part.thumbnail + '" alt="">' : (content.dataset.fallbackIcon || '');
+    headerRow.appendChild(img);
 
     var info = document.createElement('div');
     info.className = 'part-modal-info';
+    headerRow.appendChild(info);
+    panel.appendChild(headerRow);
+
     var title = document.createElement('h2');
     title.textContent = part.translated_name || part.name;
+    info.appendChild(title);
 
     var originalName = null;
     if (part.translated_name) {
       originalName = document.createElement('p');
       originalName.className = 'part-modal-original-name';
       originalName.textContent = texts.translationOriginalLabel + ': ' + part.name;
+      info.appendChild(originalName);
     }
 
     var meta = document.createElement('p');
     meta.className = 'part-modal-meta';
-    meta.textContent = part.part_num + (part.category_name ? ' · ' + part.category_name : '');
-
-    var links = document.createElement('p');
-    links.className = 'part-modal-links';
-    var blLink = document.createElement('a');
-    blLink.href = part.bricklink_url;
-    blLink.target = '_blank';
-    blLink.rel = 'noopener';
-    blLink.textContent = texts.bricklinkLink;
-    var boLink = document.createElement('a');
-    boLink.href = part.brickowl_url;
-    boLink.target = '_blank';
-    boLink.rel = 'noopener';
-    boLink.textContent = texts.brickowlLink;
-    links.appendChild(blLink);
-    links.appendChild(document.createTextNode(' · '));
-    links.appendChild(boLink);
-
-    var sets = document.createElement('p');
-    sets.className = 'part-modal-sets';
-    var setsText = texts.appearsInSets
-      .replace('{total}', part.total_appearances)
-      .replace('{count}', part.sets_count)
-      .replace('{minYear}', part.min_year)
-      .replace('{maxYear}', part.max_year);
-    if (part.sets_count > 0) {
-      var setsLink = document.createElement('a');
-      setsLink.href = '#';
-      setsLink.textContent = setsText;
-      setsLink.addEventListener('click', function(e) {
-        e.preventDefault();
-        openPartSetsList(part);
-      });
-      sets.appendChild(setsLink);
-    } else {
-      sets.textContent = texts.appearsInNoSets;
-    }
-
-    info.appendChild(title);
-    if (originalName) {
-      info.appendChild(originalName);
-    }
+    meta.textContent = part.part_num + (part.category_name ? ' \\u00b7 ' + part.category_name : '');
     info.appendChild(meta);
-    info.appendChild(links);
-    info.appendChild(sets);
 
     if (part.translation_locale !== 'en') {
       var translationSection = document.createElement('div');
@@ -320,6 +704,189 @@ function renderPartDetailModal(): string
       info.appendChild(translationSection);
     }
 
+    // BrickLink price — only when a specific color is in context; a
+    // catalog-level part has no single price otherwise (price is per
+    // part+color, see part_bricklink_prices).
+    if (openContext.colorId) {
+      var priceLine = document.createElement('p');
+      priceLine.className = 'bricklink-price-line';
+      var priceTextEl = document.createElement('span');
+      var newText = part.bricklinkPriceNewText || texts.bricklinkPriceNeverLabel;
+      var usedText = part.bricklinkPriceUsedText || texts.bricklinkPriceNeverLabel;
+      priceTextEl.textContent = texts.bricklinkPriceLine.replace('{newText}', newText).replace('{usedText}', usedText);
+      priceLine.title = part.bricklinkPriceTitle || '';
+      priceLine.appendChild(priceTextEl);
+
+      var priceRefreshBtn = document.createElement('button');
+      priceRefreshBtn.type = 'button';
+      priceRefreshBtn.className = 'owned-set-bricklink-refresh-btn';
+      priceRefreshBtn.setAttribute('aria-label', texts.bricklinkRefreshLabel);
+      priceRefreshBtn.title = texts.bricklinkRefreshLabel;
+      priceRefreshBtn.innerHTML = texts.refreshIcon;
+      priceRefreshBtn.addEventListener('click', function() {
+        priceRefreshBtn.disabled = true;
+        priceRefreshBtn.classList.add('owned-set-bricklink-refresh-spinning');
+        var priceFormData = new FormData();
+        priceFormData.set('action', 'refresh_part_bricklink_price');
+        priceFormData.set('part_id', part.id);
+        priceFormData.set('color_id', openContext.colorId);
+        fetch('?', { method: 'POST', body: priceFormData, credentials: 'same-origin' })
+          .then(function(r) { return r.json(); })
+          .then(function(res) {
+            priceRefreshBtn.disabled = false;
+            priceRefreshBtn.classList.remove('owned-set-bricklink-refresh-spinning');
+            if (res.success) {
+              part.bricklinkPriceNewText = res.newPriceText;
+              part.bricklinkPriceUsedText = res.usedPriceText;
+              part.bricklinkPriceTitle = res.priceTitle;
+              priceTextEl.textContent = texts.bricklinkPriceLine.replace('{newText}', res.newPriceText).replace('{usedText}', res.usedPriceText);
+              priceLine.title = res.priceTitle || '';
+            } else {
+              window.alert(texts.bricklinkRefreshFailed + ' ' + (res.message || ''));
+            }
+          })
+          .catch(function() {
+            priceRefreshBtn.disabled = false;
+            priceRefreshBtn.classList.remove('owned-set-bricklink-refresh-spinning');
+            window.alert(texts.bricklinkRefreshFailed);
+          });
+      });
+      priceLine.appendChild(priceRefreshBtn);
+      panel.appendChild(priceLine);
+    }
+
+    // BrickLink id / BrickOwl id — editable, same toggle-to-edit pattern as
+    // the translation field above.
+    [
+      { key: 'bricklink_part_id', label: texts.bricklinkIdLabel, field: 'bricklink_part_id' },
+      { key: 'brickowl_id', label: texts.brickowlIdLabel, field: 'brickowl_id' }
+    ].forEach(function(idField) {
+      var row = document.createElement('div');
+      row.className = 'part-modal-id-row';
+
+      // Initial href comes from the server (action=part_detail already
+      // built the real-catalog-link-if-known-else-search-link URL). After a
+      // manual id edit there's no fresh payload without another round trip,
+      // so this rebuilds the same URL pattern client-side just for that
+      // case.
+      function externalUrl() {
+        var id = part[idField.key];
+        if (idField.field === 'bricklink_part_id') {
+          return id
+            ? 'https://www.bricklink.com/v2/catalog/catalogitem.page?P=' + encodeURIComponent(id)
+            : 'https://www.bricklink.com/v2/search.page?q=' + encodeURIComponent(part.part_num);
+        }
+        return id
+          ? 'https://www.brickowl.com/catalog/' + encodeURIComponent(id)
+          : 'https://www.brickowl.com/search/catalog?query=' + encodeURIComponent(part.part_num);
+      }
+
+      var idText = document.createElement('a');
+      idText.target = '_blank';
+      idText.rel = 'noopener';
+      idText.href = idField.field === 'bricklink_part_id' ? part.bricklink_url : part.brickowl_url;
+      idText.textContent = idField.label + ': ' + (part[idField.key] || '\\u2013');
+      row.appendChild(idText);
+
+      var editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'part-modal-id-edit-btn';
+      editBtn.innerHTML = texts.editIcon;
+      row.appendChild(editBtn);
+
+      var idForm = document.createElement('form');
+      idForm.className = 'part-modal-id-form';
+      idForm.style.display = 'none';
+      var idInput = document.createElement('input');
+      idInput.type = 'text';
+      idInput.value = part[idField.key] || '';
+      idForm.appendChild(idInput);
+      var idSaveBtn = document.createElement('button');
+      idSaveBtn.type = 'submit';
+      idSaveBtn.textContent = texts.externalIdsSaveButton;
+      idForm.appendChild(idSaveBtn);
+      var idMsg = document.createElement('span');
+      idForm.appendChild(idMsg);
+      row.appendChild(idForm);
+
+      editBtn.addEventListener('click', function() {
+        idText.style.display = 'none';
+        editBtn.style.display = 'none';
+        idForm.style.display = 'flex';
+        idInput.focus();
+      });
+
+      idForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        idMsg.textContent = '';
+        var idFormData = new FormData();
+        idFormData.set('action', 'update_part_external_ids');
+        idFormData.set('part_id', part.id);
+        idFormData.set('bricklink_part_id', idField.field === 'bricklink_part_id' ? idInput.value : (part.bricklink_part_id || ''));
+        idFormData.set('brickowl_id', idField.field === 'brickowl_id' ? idInput.value : (part.brickowl_id || ''));
+        fetch('?', { method: 'POST', body: idFormData, credentials: 'same-origin' })
+          .then(function(r) { return r.json(); })
+          .then(function(res) {
+            if (res.success) {
+              part.bricklink_part_id = res.bricklinkPartId;
+              part.brickowl_id = res.brickowlId;
+              idText.href = externalUrl();
+              idText.textContent = idField.label + ': ' + (part[idField.key] || '\\u2013');
+              idText.style.display = '';
+              editBtn.style.display = '';
+              idForm.style.display = 'none';
+            } else {
+              idMsg.textContent = texts.externalIdsSaveFailed + ' ' + (res.message || '');
+            }
+          })
+          .catch(function() {
+            idMsg.textContent = texts.errorRetry;
+          });
+      });
+
+      panel.appendChild(row);
+    });
+
+    // "Erscheint in N Sets" — grouped by theme once expanded.
+    var sets = document.createElement('p');
+    sets.className = 'part-modal-sets';
+    var setsText = texts.appearsInSets
+      .replace('{total}', part.total_appearances)
+      .replace('{count}', part.sets_count)
+      .replace('{minYear}', part.min_year)
+      .replace('{maxYear}', part.max_year);
+    if (part.sets_count > 0) {
+      var setsLink = document.createElement('a');
+      setsLink.href = '#';
+      setsLink.textContent = setsText;
+      setsLink.addEventListener('click', function(e) {
+        e.preventDefault();
+        openPartSetsList(panel, part, data);
+      });
+      sets.appendChild(setsLink);
+    } else {
+      sets.textContent = texts.appearsInNoSets;
+    }
+    panel.appendChild(sets);
+
+    if (part.ldraw_id) {
+      var ldrawLine = document.createElement('p');
+      ldrawLine.className = 'hint';
+      ldrawLine.textContent = texts.ldrawIdLabel + ': ' + part.ldraw_id;
+      panel.appendChild(ldrawLine);
+    }
+
+    if (part.part_url) {
+      var rebrickableLine = document.createElement('p');
+      var rebrickableLink = document.createElement('a');
+      rebrickableLink.href = part.part_url;
+      rebrickableLink.target = '_blank';
+      rebrickableLink.rel = 'noopener';
+      rebrickableLink.textContent = texts.rebrickableLinkLabel;
+      rebrickableLine.appendChild(rebrickableLink);
+      panel.appendChild(rebrickableLine);
+    }
+
     if (data.printParent) {
       var printOf = document.createElement('p');
       printOf.className = 'part-modal-print-of';
@@ -328,486 +895,92 @@ function renderPartDetailModal(): string
       printLink.textContent = texts.printOfLabel + ': ' + data.printParent.name + ' (' + data.printParent.part_num + ')';
       printLink.addEventListener('click', function(e) {
         e.preventDefault();
-        openPartModal(data.printParent.id);
+        openPartModal(data.printParent.id, null, null, null);
       });
       printOf.appendChild(printLink);
-      info.appendChild(printOf);
+      panel.appendChild(printOf);
     }
+  }
 
-    header.appendChild(info);
-    content.appendChild(header);
+  function openPartSetsList(panel, part, data) {
+    panel.innerHTML = '';
 
-    var tabBar = document.createElement('div');
-    tabBar.className = 'part-modal-tabs';
-    var tabPanels = document.createElement('div');
-    tabPanels.className = 'part-modal-tab-panels';
-
-    var panelAddStock = document.createElement('div');
-    panelAddStock.className = 'part-modal-tab-panel';
-    var panelStorage = document.createElement('div');
-    panelStorage.className = 'part-modal-tab-panel';
-    var panelCombinedStorage = document.createElement('div');
-    panelCombinedStorage.className = 'part-modal-tab-panel';
-    var panelPurchase = document.createElement('div');
-    panelPurchase.className = 'part-modal-tab-panel';
-
-    var tabs = [
-      { label: texts.addToInventoryTitle, panel: panelAddStock },
-      { label: texts.tabStorage, panel: panelStorage },
-      { label: texts.tabCombinedStorage, panel: panelCombinedStorage },
-      { label: texts.tabPurchase, panel: panelPurchase }
-    ];
-    var tabButtons = [];
-    var stockLoadedForPart = null;
-    var combinedStockLoadedForPart = null;
-
-    function buildStockCard(row, onActivate) {
-      var card = document.createElement('div');
-      card.className = 'part-stock-card';
-      card.tabIndex = 0;
-      card.setAttribute('role', onActivate.isLink ? 'link' : 'button');
-      card.addEventListener('click', onActivate);
-      card.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onActivate();
-        }
-      });
-
-      var swatch = document.createElement('span');
-      swatch.className = 'part-stock-card-swatch';
-      swatch.style.backgroundColor = row.color_rgb ? '#' + row.color_rgb.replace('#', '') : '#cccccc';
-      card.appendChild(swatch);
-
-      var qty = document.createElement('span');
-      qty.className = 'part-stock-card-qty';
-      qty.textContent = row.quantity + 'x';
-      card.appendChild(qty);
-
-      return card;
-    }
-
-    function loadPartStockSummary() {
-      panelCombinedStorage.innerHTML = '';
-      var grid = document.createElement('div');
-      grid.className = 'part-stock-grid';
-      panelCombinedStorage.appendChild(grid);
-      fetch('?action=part_stock_summary&part_id=' + encodeURIComponent(part.id), { credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var rows = data.summary || [];
-          if (rows.length === 0) {
-            grid.textContent = texts.stockEmpty;
-            return;
-          }
-          rows.forEach(function(row) {
-            var card = buildStockCard(row, function() {
-              openPartStockDetail(row);
-            });
-
-            var meta = document.createElement('span');
-            meta.className = 'part-stock-card-meta';
-            meta.textContent = row.color_name || '';
-            card.appendChild(meta);
-
-            grid.appendChild(card);
-          });
-        })
-        .catch(function() {
-          grid.textContent = texts.errorRetry;
-        });
-    }
-
-    function openPartStockDetail(colorRow) {
-      panelCombinedStorage.innerHTML = '';
-
-      var backLink = document.createElement('a');
-      backLink.href = '#';
-      backLink.className = 'part-sets-back';
-      backLink.textContent = texts.backToSummary;
-      backLink.addEventListener('click', function(e) {
-        e.preventDefault();
-        loadPartStockSummary();
-      });
-      panelCombinedStorage.appendChild(backLink);
-
-      var grid = document.createElement('div');
-      grid.className = 'part-stock-grid';
-      panelCombinedStorage.appendChild(grid);
-
-      var params = new URLSearchParams();
-      params.set('action', 'part_stock_detail');
-      params.set('part_id', part.id);
-      if (colorRow.color_id !== null && colorRow.color_id !== undefined) {
-        params.set('color_id', colorRow.color_id);
-      }
-      fetch('?' + params.toString(), { credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var rows = data.detail || [];
-          if (rows.length === 0) {
-            grid.textContent = texts.stockEmpty;
-            return;
-          }
-          rows.forEach(function(row) {
-            var isSet = row.owned_set_id !== null && row.owned_set_id !== undefined;
-            var url = isSet
-              ? '?page=owned_set_detail&id=' + encodeURIComponent(row.owned_set_id)
-              : '?page=location_detail&id=' + encodeURIComponent(row.location_id);
-
-            var activate = function() { window.location.href = url; };
-            activate.isLink = true;
-            var card = buildStockCard(row, activate);
-
-            var newTabLink = document.createElement('a');
-            newTabLink.className = 'part-stock-card-newtab';
-            newTabLink.href = url;
-            newTabLink.target = '_blank';
-            newTabLink.rel = 'noopener';
-            newTabLink.title = texts.locationOpenNewTab;
-            newTabLink.setAttribute('aria-label', texts.locationOpenNewTab);
-            newTabLink.addEventListener('click', function(e) {
-              e.stopPropagation();
-            });
-            newTabLink.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>';
-            card.appendChild(newTabLink);
-
-            var meta = document.createElement('span');
-            meta.className = 'part-stock-card-meta';
-            var condText = row.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
-            var placeText = isSet
-              ? texts.stockInSetLabel + ': ' + row.set_name + ' (' + row.set_num + ')'
-              : row.location_path;
-            meta.textContent = condText + ' · ' + placeText;
-            card.appendChild(meta);
-
-            grid.appendChild(card);
-          });
-        })
-        .catch(function() {
-          grid.textContent = texts.errorRetry;
-        });
-    }
-
-    function loadPartStock() {
-      panelStorage.innerHTML = '';
-      var grid = document.createElement('div');
-      grid.className = 'part-stock-grid';
-      panelStorage.appendChild(grid);
-      fetch('?action=part_stock&part_id=' + encodeURIComponent(part.id), { credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var rows = data.stock || [];
-          if (rows.length === 0) {
-            grid.textContent = texts.stockEmpty;
-            return;
-          }
-          rows.forEach(function(row) {
-            var url = '?page=location_detail&id=' + encodeURIComponent(row.location_id);
-
-            var activate = function() { window.location.href = url; };
-            activate.isLink = true;
-            var card = buildStockCard(row, activate);
-
-            var newTabLink = document.createElement('a');
-            newTabLink.className = 'part-stock-card-newtab';
-            newTabLink.href = url;
-            newTabLink.target = '_blank';
-            newTabLink.rel = 'noopener';
-            newTabLink.title = texts.locationOpenNewTab;
-            newTabLink.setAttribute('aria-label', texts.locationOpenNewTab);
-            newTabLink.addEventListener('click', function(e) {
-              e.stopPropagation();
-            });
-            newTabLink.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>';
-            card.appendChild(newTabLink);
-
-            var meta = document.createElement('span');
-            meta.className = 'part-stock-card-meta';
-            var condText = row.condition_type === 'new' ? texts.conditionNew : texts.conditionUsed;
-            meta.textContent = (row.color_name || '') + ' · ' + condText + ' · ' + row.location_path;
-            card.appendChild(meta);
-
-            grid.appendChild(card);
-          });
-        })
-        .catch(function() {
-          grid.textContent = texts.errorRetry;
-        });
-    }
-
-    function activateTab(index) {
-      tabs.forEach(function(tab, i) {
-        tab.panel.classList.toggle('active', i === index);
-        tabButtons[i].classList.toggle('active', i === index);
-      });
-      if (tabs[index].panel === panelStorage && stockLoadedForPart !== part.id) {
-        stockLoadedForPart = part.id;
-        loadPartStock();
-      }
-      if (tabs[index].panel === panelCombinedStorage && combinedStockLoadedForPart !== part.id) {
-        combinedStockLoadedForPart = part.id;
-        loadPartStockSummary();
-      }
-    }
-
-    tabs.forEach(function(tab, i) {
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'part-modal-tab-btn';
-      btn.textContent = tab.label;
-      btn.addEventListener('click', function() { activateTab(i); });
-      tabBar.appendChild(btn);
-      tabButtons.push(btn);
-      tabPanels.appendChild(tab.panel);
-    });
-
-    var purchaseText = document.createElement('p');
-    purchaseText.className = 'part-purchase-placeholder';
-    purchaseText.textContent = texts.purchasePlaceholder;
-    panelPurchase.appendChild(purchaseText);
-
-    activateTab(0);
-    content.appendChild(tabBar);
-    content.appendChild(tabPanels);
-
-    var msgBox = document.createElement('div');
-    msgBox.className = 'add-stock-message';
-    panelAddStock.appendChild(msgBox);
-
-    var form = document.createElement('form');
-    form.className = 'add-stock-form';
-
-    var knownColors = data.knownColors || [];
-    var otherColors = data.otherColors || [];
-    var allPickerColors = knownColors.concat(otherColors);
-
-    function colorSwatchStyle(c) {
-      return c.rgb ? '#' + c.rgb.replace('#', '') : '#cccccc';
-    }
-
-    // Native <select>/<option> elements can't reliably show a swatch per row
-    // (no HTML inside an <option> — support for even a CSS background on one
-    // is inconsistent across browsers, several ignore it outright). A small
-    // custom combobox gives full control over each row's layout instead.
-    var colorHiddenInput = document.createElement('input');
-    colorHiddenInput.type = 'hidden';
-    colorHiddenInput.name = 'color_id';
-
-    var colorLabel = document.createElement('label');
-    colorLabel.textContent = texts.colorLabel;
-
-    var combo = document.createElement('div');
-    combo.className = 'color-combo';
-
-    var comboToggle = document.createElement('button');
-    comboToggle.type = 'button';
-    comboToggle.className = 'color-combo-toggle';
-    var comboToggleSwatch = document.createElement('span');
-    comboToggleSwatch.className = 'color-combo-toggle-swatch';
-    var comboToggleName = document.createElement('span');
-    comboToggleName.className = 'color-combo-toggle-name';
-    comboToggle.appendChild(comboToggleSwatch);
-    comboToggle.appendChild(comboToggleName);
-
-    var comboPanel = document.createElement('div');
-    comboPanel.className = 'color-combo-panel';
-    comboPanel.style.display = 'none';
-
-    function updateActiveSwatch() {
-      if (!swatchGrid) {
-        return;
-      }
-      Array.prototype.forEach.call(swatchGrid.children, function(btn) {
-        btn.classList.toggle('active', btn.dataset.colorId === colorHiddenInput.value);
-      });
-    }
-
-    function updateComboOptionActive() {
-      Array.prototype.forEach.call(comboPanel.querySelectorAll('.color-combo-option'), function(btn) {
-        btn.classList.toggle('active', btn.dataset.colorId === colorHiddenInput.value);
-      });
-    }
-
-    function setColorValue(c) {
-      colorHiddenInput.value = String(c.id);
-      comboToggleSwatch.style.backgroundColor = colorSwatchStyle(c);
-      comboToggleName.textContent = c.name;
-      updateActiveSwatch();
-      updateComboOptionActive();
-    }
-
-    function closeCombo() {
-      comboPanel.style.display = 'none';
-    }
-
-    function buildComboOption(c) {
-      var opt = document.createElement('button');
-      opt.type = 'button';
-      opt.className = 'color-combo-option';
-      opt.dataset.colorId = String(c.id);
-      var optName = document.createElement('span');
-      optName.className = 'color-combo-option-name';
-      optName.textContent = c.name;
-      var optSwatch = document.createElement('span');
-      optSwatch.className = 'color-combo-option-swatch';
-      optSwatch.style.backgroundColor = colorSwatchStyle(c);
-      opt.appendChild(optName);
-      opt.appendChild(optSwatch);
-      opt.addEventListener('click', function() {
-        setColorValue(c);
-        closeCombo();
-      });
-      return opt;
-    }
-
-    knownColors.forEach(function(c) {
-      comboPanel.appendChild(buildComboOption(c));
-    });
-    if (otherColors.length > 0) {
-      var groupLabel = document.createElement('div');
-      groupLabel.className = 'color-combo-group-label';
-      groupLabel.textContent = texts.colorOtherGroupLabel;
-      comboPanel.appendChild(groupLabel);
-      otherColors.forEach(function(c) {
-        comboPanel.appendChild(buildComboOption(c));
-      });
-    }
-
-    comboToggle.addEventListener('click', function() {
-      comboPanel.style.display = comboPanel.style.display === 'none' ? 'block' : 'none';
-    });
-    document.addEventListener('click', function(e) {
-      if (!combo.contains(e.target)) {
-        closeCombo();
-      }
-    });
-
-    combo.appendChild(comboToggle);
-    combo.appendChild(comboPanel);
-    colorLabel.appendChild(combo);
-    colorLabel.appendChild(colorHiddenInput);
-    form.appendChild(colorLabel);
-
-    var swatchGrid = null;
-    if (knownColors.length > 0) {
-      var swatchSection = document.createElement('div');
-      swatchSection.className = 'color-swatch-section';
-      var swatchTitle = document.createElement('p');
-      swatchTitle.className = 'color-swatch-title';
-      swatchTitle.textContent = texts.knownColorsTitle;
-      swatchGrid = document.createElement('div');
-      swatchGrid.className = 'color-swatch-grid';
-      knownColors.forEach(function(c) {
-        var swatch = document.createElement('button');
-        swatch.type = 'button';
-        swatch.className = 'color-swatch-btn';
-        swatch.title = c.name;
-        swatch.style.backgroundColor = colorSwatchStyle(c);
-        swatch.dataset.colorId = String(c.id);
-        swatch.addEventListener('click', function() {
-          setColorValue(c);
-        });
-        swatchGrid.appendChild(swatch);
-      });
-      swatchSection.appendChild(swatchTitle);
-      swatchSection.appendChild(swatchGrid);
-      form.appendChild(swatchSection);
-    }
-
-    if (allPickerColors.length > 0) {
-      setColorValue(allPickerColors[0]);
-    }
-
-    var qtyLabel = document.createElement('label');
-    qtyLabel.textContent = texts.quantityLabel;
-    var qtyInput = document.createElement('input');
-    qtyInput.type = 'number';
-    qtyInput.name = 'quantity';
-    qtyInput.min = '1';
-    qtyInput.value = '1';
-    qtyLabel.appendChild(qtyInput);
-    form.appendChild(qtyLabel);
-
-    var condLabel = document.createElement('label');
-    condLabel.textContent = texts.conditionLabel;
-    var condSelect = document.createElement('select');
-    condSelect.name = 'condition_type';
-    var optUsed = document.createElement('option');
-    optUsed.value = 'used';
-    optUsed.textContent = texts.conditionUsed;
-    optUsed.selected = true;
-    var optNew = document.createElement('option');
-    optNew.value = 'new';
-    optNew.textContent = texts.conditionNew;
-    condSelect.appendChild(optUsed);
-    condSelect.appendChild(optNew);
-    condLabel.appendChild(condSelect);
-    form.appendChild(condLabel);
-
-    var locationContainer = document.createElement('div');
-    locationContainer.className = 'location-picker';
-    form.appendChild(locationContainer);
-    var selectedLocationId = null;
-    var lastAddLocationId = null;
-    try {
-      lastAddLocationId = window.localStorage.getItem(LAST_ADD_LOCATION_STORAGE_KEY);
-    } catch (e) {
-      // Private browsing / storage disabled — picker just starts empty.
-    }
-    window.createLocationPicker(locationContainer, texts, function(value) {
-      selectedLocationId = value;
-    }, lastAddLocationId);
-
-    var submitBtn = document.createElement('button');
-    submitBtn.type = 'submit';
-    submitBtn.textContent = texts.addButton;
-    form.appendChild(submitBtn);
-
-    form.addEventListener('submit', function(e) {
+    var backLink = document.createElement('a');
+    backLink.href = '#';
+    backLink.className = 'part-sets-back';
+    backLink.textContent = texts.backToPart;
+    backLink.addEventListener('click', function(e) {
       e.preventDefault();
-      msgBox.textContent = '';
-      msgBox.className = 'add-stock-message';
-      submitBtn.disabled = true;
-
-      var formData = new FormData();
-      formData.set('action', 'add_stock');
-      formData.set('part_id', part.id);
-      formData.set('color_id', colorHiddenInput.value);
-      formData.set('quantity', qtyInput.value);
-      formData.set('condition_type', condSelect.value);
-      formData.set('location_id', selectedLocationId || '');
-
-      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-          submitBtn.disabled = false;
-          msgBox.textContent = res.message;
-          msgBox.className = 'add-stock-message ' + (res.success ? 'success' : 'error');
-          if (res.success) {
-            stockLoadedForPart = null;
-            window.applyStatusStats(res.stats);
-            try {
-              window.localStorage.setItem(LAST_ADD_LOCATION_STORAGE_KEY, selectedLocationId);
-            } catch (ex) {
-              // ignore
-            }
-          }
-        })
-        .catch(function() {
-          submitBtn.disabled = false;
-          msgBox.textContent = texts.errorRetry;
-          msgBox.className = 'add-stock-message error';
-        });
+      buildInfoPanel(panel, part, data);
     });
+    panel.appendChild(backLink);
 
-    panelAddStock.appendChild(form);
+    var title = document.createElement('h3');
+    title.textContent = texts.partSetsTitle;
+    panel.appendChild(title);
+
+    var list = document.createElement('div');
+    list.className = 'part-sets-list';
+    panel.appendChild(list);
+
+    fetch('?action=part_sets&part_id=' + encodeURIComponent(part.id), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data2) {
+        var lastTheme;
+        var first = true;
+        (data2.sets || []).forEach(function(set) {
+          if (first || set.theme !== lastTheme) {
+            var heading = document.createElement('div');
+            heading.className = 'part-sets-theme-heading';
+            heading.textContent = set.theme || texts.setsNoThemeLabel;
+            list.appendChild(heading);
+            lastTheme = set.theme;
+            first = false;
+          }
+
+          var row = document.createElement('div');
+          row.className = 'part-sets-row';
+
+          var thumb = document.createElement('span');
+          thumb.className = 'part-sets-thumb';
+          thumb.innerHTML = set.thumbnail
+            ? '<img src="' + set.thumbnail + '" alt="">'
+            : content.dataset.fallbackIcon || '';
+          row.appendChild(thumb);
+
+          var setInfo = document.createElement('span');
+          setInfo.className = 'part-sets-info';
+          var setName = document.createElement('span');
+          setName.className = 'part-sets-name';
+          setName.textContent = (set.name || set.set_num) + (set.year ? ' (' + set.year + ')' : '');
+          var setMeta = document.createElement('span');
+          setMeta.className = 'part-sets-meta';
+          setMeta.textContent = set.set_num + ' \\u00b7 ' + set.quantity + 'x';
+          setInfo.appendChild(setName);
+          setInfo.appendChild(setMeta);
+          row.appendChild(setInfo);
+
+          list.appendChild(row);
+        });
+      })
+      .catch(function() {
+        list.textContent = texts.errorRetry;
+      });
   }
 
   document.addEventListener('click', function(e) {
     var card = e.target.closest('.part-card');
     if (card) {
-      openPartModal(card.dataset.partId);
+      // data-color-id (if present) is Rebrickable's own numbering, used
+      // exclusively by the "fetch missing images" bulk scanner
+      // (src/part_images.php) — NOT colors.id, the surrogate PK this modal
+      // (and storage_items/part_bricklink_prices) needs. Reusing it here
+      // would silently look up the wrong color, so this reads distinctly-
+      // named attributes instead, only ever set by callers that genuinely
+      // have colors.id/location/condition context (currently just the
+      // location Explorer, which calls window.openPartModal() directly
+      // rather than relying on this generic delegate at all).
+      openPartModal(card.dataset.partId, card.dataset.modalColorId || null, card.dataset.locationId || null, card.dataset.conditionType || null);
     }
   });
   document.addEventListener('keydown', function(e) {
@@ -817,7 +990,7 @@ function renderPartDetailModal(): string
     var card = e.target.closest('.part-card');
     if (card) {
       e.preventDefault();
-      openPartModal(card.dataset.partId);
+      openPartModal(card.dataset.partId, card.dataset.modalColorId || null, card.dataset.locationId || null, card.dataset.conditionType || null);
     }
   });
 })();

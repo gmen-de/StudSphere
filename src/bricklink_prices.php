@@ -461,6 +461,34 @@ function stampPartBricklinkPriceCheckedAt(PDO $pdo, int $partId, int $colorId): 
 }
 
 /**
+ * The row shape refreshBricklinkPriceForPartColor() expects, resolved
+ * directly by id rather than via the sync queue — for the part-detail
+ * modal's manual "refresh now" button (action=refresh_part_bricklink_price),
+ * where the part+color is already known instead of being the next due item.
+ * Null if the part or color id doesn't exist.
+ */
+function getPartColorForBricklinkRefresh(PDO $pdo, int $partId, int $colorId): ?array
+{
+    $stmt = $pdo->prepare(
+        'SELECT p.id AS part_id, p.part_num, p.bricklink_part_id, p.bricklink_item_id,
+                c.id AS color_id, c.bricklink_color_id
+         FROM parts p
+         INNER JOIN colors c ON c.id = ?
+         WHERE p.id = ?'
+    );
+    $stmt->execute([$colorId, $partId]);
+    $row = $stmt->fetch();
+    if ($row === false) {
+        return null;
+    }
+    $row['part_id'] = (int) $row['part_id'];
+    $row['color_id'] = (int) $row['color_id'];
+    $row['bricklink_item_id'] = $row['bricklink_item_id'] !== null ? (int) $row['bricklink_item_id'] : null;
+    $row['bricklink_color_id'] = $row['bricklink_color_id'] !== null ? (int) $row['bricklink_color_id'] : null;
+    return $row;
+}
+
+/**
  * Resolves (if needed) and refreshes one part+color's BrickLink price
  * fields. Always stamps bricklink_price_checked_at, even on failure, same
  * reasoning as refreshBricklinkPriceForSet(). Two resolution steps happen
