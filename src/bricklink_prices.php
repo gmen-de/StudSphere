@@ -524,12 +524,16 @@ function refreshBricklinkPriceForPartColor(PDO $pdo, array $partColor): bool
 }
 
 /**
- * One owned part+color pair (any storage location — deliberately broader
- * than computeLoosePartsBricklinkValueTotal()'s loose-only scope, since
- * queueing what to price is independent of what counts toward the
- * collection-value sum) whose BrickLink price hasn't been checked in
+ * One owned part+color pair — loose stock only (same scope
+ * computeLoosePartsBricklinkValueTotal() uses: locations where
+ * location_type IS NULL or isn't 'owned_set'). Explicit follow-up request:
+ * this feature is about loose parts specifically, not whatever's sitting
+ * built into an owned set — a part's set already covers it via that set's
+ * own aggregate BrickLink price, so there's nothing this would add for a
+ * set-only part beyond spending part of the rate-limited fetch budget on it.
+ * Whose BrickLink price hasn't been checked in
  * BRICKLINK_PART_PRICE_SYNC_INTERVAL_MONTHS months, or null if everything
- * owned is up to date. Same two-bucket priority as
+ * loose is up to date. Same two-bucket priority as
  * getNextOwnedSetDueForBricklinkSync(): never-checked-first (most-recently-
  * stocked first), then oldest-checked-first. storage_items rows with no
  * color assigned are excluded — there's nothing color-specific to look up
@@ -543,8 +547,9 @@ function getNextOwnedPartColorDueForBricklinkPriceSync(PDO $pdo): ?array
          FROM storage_items si
          INNER JOIN parts p ON p.id = si.part_id
          INNER JOIN colors c ON c.id = si.color_id
+         INNER JOIN storage_locations sl ON sl.id = si.location_id
          LEFT JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
-         WHERE si.color_id IS NOT NULL
+         WHERE si.color_id IS NOT NULL AND (sl.location_type IS NULL OR sl.location_type != \'owned_set\')
          GROUP BY si.part_id, si.color_id, p.part_num, p.bricklink_part_id, p.bricklink_item_id,
                   c.bricklink_color_id, pbp.bricklink_price_checked_at
          HAVING SUM(si.quantity) > 0
@@ -673,8 +678,7 @@ function getPartBricklinkPrices(PDO $pdo, array $partColorPairs): array
 
 /**
  * How many distinct owned part+color pairs already have a cached BrickLink
- * price vs. how many are owned in total — same scope (all locations,
- * quantity > 0, color assigned) as
+ * price vs. how many are owned in total — loose stock only, same scope as
  * getNextOwnedPartColorDueForBricklinkPriceSync()'s queue, so this number
  * directly reflects "how far the sync has gotten through the backlog", for
  * the ?page=my_bricks_top100 overview.
@@ -690,7 +694,8 @@ function getBricklinkPartPriceCoverage(PDO $pdo): array
          FROM (
              SELECT si.part_id, si.color_id
              FROM storage_items si
-             WHERE si.color_id IS NOT NULL
+             INNER JOIN storage_locations sl ON sl.id = si.location_id
+             WHERE si.color_id IS NOT NULL AND (sl.location_type IS NULL OR sl.location_type != 'owned_set')
              GROUP BY si.part_id, si.color_id
              HAVING SUM(si.quantity) > 0
          ) owned
@@ -734,10 +739,11 @@ function computeLoosePartsBricklinkValueTotal(PDO $pdo): array
 }
 
 /**
- * The N owned parts (any storage location — loose and materialized inside
- * owned sets alike, unlike computeLoosePartsBricklinkValueTotal()'s scope)
- * with the highest priced BrickLink unit price, for the "100 teuersten
- * Bauteile" overview (?page=my_bricks_top100). Mirrors
+ * The N owned parts — loose stock only, same scope
+ * computeLoosePartsBricklinkValueTotal() uses (explicit follow-up request:
+ * this overview is specifically about loose parts, not whatever's sitting
+ * built into an owned set) — with the highest priced BrickLink unit price,
+ * for the "100 teuersten Bauteile" overview (?page=my_bricks_top100). Mirrors
  * getTopValuedOwnedMinifigs()'s shape: SQL does the per-part/color/condition
  * aggregation (storage_items already groups that way, unlike
  * minifig_storage_items' one-row-per-instance shape, so no PHP-side grouping
@@ -764,9 +770,11 @@ function getTopValuedOwnedParts(PDO $pdo, int $limit = 100): array
          FROM storage_items si
          INNER JOIN parts p ON p.id = si.part_id
          INNER JOIN colors c ON c.id = si.color_id
+         INNER JOIN storage_locations sl ON sl.id = si.location_id
          INNER JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
          LEFT JOIN part_color_images pci ON pci.part_id = si.part_id AND pci.color_id = c.color_id
-         WHERE (CASE si.condition_type WHEN 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END) IS NOT NULL
+         WHERE (sl.location_type IS NULL OR sl.location_type != 'owned_set')
+            AND (CASE si.condition_type WHEN 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END) IS NOT NULL
          GROUP BY si.part_id, si.color_id, si.condition_type, p.part_num, p.name, c.name, c.rgb,
                   c.color_id, pbp.bricklink_price_new, pbp.bricklink_price_used, pbp.bricklink_price_currency
          HAVING SUM(si.quantity - si.damaged_quantity) > 0"
