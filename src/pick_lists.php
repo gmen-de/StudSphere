@@ -249,15 +249,18 @@ function getSetAvailablePartsForPickList(PDO $pdo, int $inventoryId, string $loc
 
 /**
  * Creates a pick list from exactly the rows the user left checked in the
- * "Bauteile auf Pickliste setzen" dialog — $selectedKeys is a set of
- * "part_id:color_id" strings from the client (which parts to include), but
- * the quantities themselves are always taken fresh from
- * getSetAvailablePartsForPickList() at submit time, never from client input,
- * so a stale dialog snapshot (stock moved between opening the dialog and
- * submitting) can't be used to request more than is genuinely available
- * right now.
+ * "Bauteile auf Pickliste setzen" dialog, at whatever quantity they left in
+ * each row's own input — $requestedQuantities is "part_id:color_id" =>
+ * requested quantity from the client (an absent/zero key means "excluded",
+ * same as unchecking it). The client's requested quantity is only ever
+ * allowed to lower a row's default, never raise it: each is clamped to
+ * getSetAvailablePartsForPickList()'s freshly-recomputed needed_quantity
+ * (itself already min(bom quantity, current loose stock)) at submit time —
+ * a stale dialog snapshot (stock moved between opening the dialog and
+ * submitting, or a client trying to request more than was ever offered)
+ * can't be used to end up with more than is genuinely available right now.
  */
-function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, string $description, array $selectedKeys): ?int
+function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, string $description, array $requestedQuantities): ?int
 {
     $setNum = getCatalogSetNum($pdo, $setId);
     $inventoryId = $setNum !== null ? getSetInventoryId($pdo, $setNum) : null;
@@ -266,13 +269,18 @@ function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, str
     }
 
     $available = getSetAvailablePartsForPickList($pdo, $inventoryId);
-    $selectedKeys = array_flip($selectedKeys);
     $itemsToInsert = [];
     foreach ($available as $part) {
         $key = $part['part_id'] . ':' . $part['color_id'];
-        if (isset($selectedKeys[$key])) {
-            $itemsToInsert[] = $part;
+        if (!isset($requestedQuantities[$key])) {
+            continue;
         }
+        $quantity = min((int) $requestedQuantities[$key], $part['needed_quantity']);
+        if ($quantity <= 0) {
+            continue;
+        }
+        $part['needed_quantity'] = $quantity;
+        $itemsToInsert[] = $part;
     }
     if (empty($itemsToInsert)) {
         return null;
@@ -749,7 +757,7 @@ function renderCreatePickListFromSetModal(int $setId): string
         }
         partsBox.innerHTML = '';
         res.parts.forEach(function(part) {
-          var row = document.createElement('label');
+          var row = document.createElement('div');
           row.className = 'set-pick-list-part-row';
           var checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
@@ -762,8 +770,18 @@ function renderCreatePickListFromSetModal(int $setId): string
             row.appendChild(img);
           }
           var text = document.createElement('span');
-          text.textContent = part.part_num + ' ' + part.name + (part.color_name ? ' \\u00b7 ' + part.color_name : '') + ' (' + part.needed_quantity + ')';
+          text.className = 'set-pick-list-part-name';
+          text.textContent = part.part_num + ' ' + part.name + (part.color_name ? ' \\u00b7 ' + part.color_name : '');
           row.appendChild(text);
+          var qtyInput = document.createElement('input');
+          qtyInput.type = 'number';
+          qtyInput.className = 'set-pick-list-part-qty';
+          qtyInput.min = '1';
+          qtyInput.max = String(part.needed_quantity);
+          qtyInput.value = String(part.needed_quantity);
+          qtyInput.dataset.key = part.part_id + ':' + part.color_id;
+          row.appendChild(qtyInput);
+          checkbox.addEventListener('change', function() { qtyInput.disabled = !checkbox.checked; });
           partsBox.appendChild(row);
         });
       })
@@ -785,8 +803,8 @@ function renderCreatePickListFromSetModal(int $setId): string
   submitBtn.addEventListener('click', function() {
     errorEl.textContent = '';
     var description = nameInput.value.trim();
-    var selectedKeys = Array.prototype.slice.call(partsBox.querySelectorAll('input[type=checkbox]:checked')).map(function(cb) { return cb.dataset.key; });
-    if (!description || !selectedKeys.length) {
+    var checkedBoxes = Array.prototype.slice.call(partsBox.querySelectorAll('input[type=checkbox]:checked'));
+    if (!description || !checkedBoxes.length) {
       errorEl.textContent = $errorGenericJson;
       return;
     }
@@ -795,7 +813,13 @@ function renderCreatePickListFromSetModal(int $setId): string
     formData.set('action', 'create_pick_list_from_set_available');
     formData.set('set_id', String(setId));
     formData.set('description', description);
-    selectedKeys.forEach(function(key) { formData.append('selected_keys[]', key); });
+    checkedBoxes.forEach(function(cb) {
+      var qtyInput = partsBox.querySelector('input.set-pick-list-part-qty[data-key="' + cb.dataset.key + '"]');
+      var qty = qtyInput ? (parseInt(qtyInput.value, 10) || 0) : 0;
+      if (qty > 0) {
+        formData.set('quantities[' + cb.dataset.key + ']', String(qty));
+      }
+    });
     fetch('?action=create_pick_list_from_set_available', { method: 'POST', body: formData, credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
       .then(function(res) {

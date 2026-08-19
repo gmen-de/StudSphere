@@ -502,16 +502,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     header('Content-Type: application/json');
     $availSetId = (int) ($_POST['set_id'] ?? 0);
     $availDescription = trim((string) ($_POST['description'] ?? ''));
-    $availSelectedKeys = array_filter(array_map('trim', (array) ($_POST['selected_keys'] ?? [])), fn (string $k): bool => $k !== '');
+    // "part_id:color_id" => requested quantity — createPickListFromAvailableParts()
+    // clamps each to the freshly-recomputed available amount itself, this
+    // only filters out blank/non-numeric/zero-or-negative client input.
+    $availQuantities = [];
+    foreach ((array) ($_POST['quantities'] ?? []) as $availKey => $availQtyRaw) {
+        $availQty = (int) $availQtyRaw;
+        if ($availQty > 0) {
+            $availQuantities[trim((string) $availKey)] = $availQty;
+        }
+    }
 
-    if ($availSetId <= 0 || $availDescription === '' || empty($availSelectedKeys)) {
+    if ($availSetId <= 0 || $availDescription === '' || empty($availQuantities)) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => t('pick_error_invalid_request')], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     try {
-        $newAvailPickListId = createPickListFromAvailableParts($pdo, (int) $_SESSION['user_id'], $availSetId, $availDescription, $availSelectedKeys);
+        $newAvailPickListId = createPickListFromAvailableParts($pdo, (int) $_SESSION['user_id'], $availSetId, $availDescription, $availQuantities);
         if ($newAvailPickListId === null) {
             http_response_code(400);
             echo json_encode(['success' => false, 'message' => t('pick_error_no_inventory')], JSON_UNESCAPED_UNICODE);

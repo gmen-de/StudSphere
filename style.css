@@ -3679,6 +3679,20 @@ footer {
   flex-shrink: 0;
 }
 
+.set-pick-list-part-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.set-pick-list-part-qty {
+  width: 3.5rem;
+  flex-shrink: 0;
+  padding: 0.3rem;
+  border-radius: 0.4rem;
+  border: 1px solid #e2e8f0;
+  text-align: center;
+}
+
 .owned-set-wizard-nav {
   display: flex;
   align-items: center;
