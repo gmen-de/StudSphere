@@ -163,16 +163,17 @@ body.pick-body-no-navbar {
 }
 
 /* ---------- Login screen: /pick/'s own, see index.php's doc comment for
-   why this isn't just the main app's login form. Reuses the same body
-   background (so it isn't its own solid-color block like the splash),
-   plain grouped-list-style inputs, a capsule submit button. ---------- */
+   why this isn't just the main app's login form. Sits in normal document
+   flow directly under the nav bar (which carries the brand mark + "Anmeldung"
+   title here — deliberately NOT its own centered full-height box: that
+   centering was what made the page tall enough to need scrolling in the
+   first place once iOS shrank the visible viewport for the keyboard/
+   AutoFill bar. A short, top-anchored page has no surplus height to
+   scroll through. ---------- */
 .pick-login-screen {
-  min-height: 100vh;
-  min-height: 100dvh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 1.5rem;
+  display: flex;
+  justify-content: center;
 }
 
 .pick-login-card {
@@ -182,33 +183,10 @@ body.pick-body-no-navbar {
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
-  padding: 2rem 1.5rem;
+  padding: 1.75rem 1.5rem;
   background: var(--pick-card);
   border-radius: 1.1rem;
   box-shadow: var(--pick-shadow);
-}
-
-.pick-login-mark {
-  width: 3.5rem;
-  height: 3.5rem;
-  margin-bottom: 0.25rem;
-}
-
-.pick-login-mark svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.pick-login-title {
-  font-size: 1.3rem;
-  font-weight: 700;
-}
-
-.pick-login-subtitle {
-  font-size: 0.9rem;
-  color: var(--pick-muted);
-  margin-bottom: 1.25rem;
 }
 
 .pick-login-card label {

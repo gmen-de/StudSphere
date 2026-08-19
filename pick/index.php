@@ -172,14 +172,7 @@ echo '<meta name="theme-color" content="#2563eb">';
 echo '<meta name="color-scheme" content="light dark">';
 echo '<script>if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js?v=' . $swVersion . '"); }); }</script>';
 echo '<link rel="stylesheet" href="style.css?v=' . $swVersion . '">';
-// The login screen has no nav bar (nothing to navigate to yet), but body's
-// padding-top otherwise always reserves space for one (see pick/style.css —
-// it's a fixed-position bar, taken out of flow, so something has to push
-// content below it) — left in place here, that reserved space plus the
-// login card's own min-height: 100vh made the page just tall enough to
-// scroll despite having nothing worth scrolling to. pick-body-no-navbar
-// drops it back to just the safe-area inset.
-echo '<body' . ($currentUser === null ? ' class="pick-body-no-navbar"' : '') . '>';
+echo '<body>';
 
 // Cold-launch splash only — a full-screen navigation inside /pick/ (every
 // link here is a plain server round-trip, see this file's own doc comment)
@@ -198,15 +191,24 @@ echo '<script>(function(){var s=document.getElementById("pick-splash");if(sessio
 
 if ($currentUser === null) {
     // Own login screen (see this file's doc comment for why) rather than
-    // bouncing to the main app's — same brand mark/wordmark as the splash,
-    // a plain POST-to-self form (the action=login branch handled above), and
-    // nothing else: no nav bar/menu, there's nowhere to navigate yet.
+    // bouncing to the main app's — same nav bar every other screen gets
+    // (logo + title, no trailing menu button since there's nothing to
+    // navigate to yet), with the form sitting directly below it in normal
+    // document flow rather than centered in an artificial min-height:100vh
+    // box. That centering was the actual cause of the page needing to
+    // scroll at all: it made total page height equal the full viewport even
+    // though the form itself is much shorter, so the moment iOS shrank the
+    // visible viewport for the keyboard/AutoFill bar, the (still
+    // full-height) page became just tall enough to scroll — into a screen's
+    // worth of empty space below the card, as reported. A short, top-anchored
+    // page has no such surplus height to begin with.
+    echo '<header class="pick-navbar" id="pick-navbar">';
+    echo '<span class="pick-navbar-leading">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
+    echo '<span class="pick-navbar-title">' . htmlspecialchars(t('login_title')) . '</span>';
+    echo '</header>';
     echo '<div class="pick-login-screen">';
     echo '<form method="post" class="pick-login-card">';
     echo '<input type="hidden" name="action" value="login">';
-    echo '<span class="pick-login-mark">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
-    echo '<span class="pick-login-title">StudSphere</span>';
-    echo '<span class="pick-login-subtitle">Pick Tool</span>';
     if ($loginError) {
         echo '<p class="pick-error">' . htmlspecialchars(t('login_failed_message')) . '</p>';
     }
