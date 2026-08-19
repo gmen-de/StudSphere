@@ -2680,13 +2680,18 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
 
     $content .= renderSetGeneralInfoTable($pdo, $set, $themeTree ?? null);
 
+    $totalOwnedTooltip = t('set_detail_owned_tooltip_total', ['actual' => (string) $inventorySummary['total_actual'], 'nominal' => (string) $inventorySummary['total_nominal']]);
+    $exclusiveOwnedTooltip = t('set_detail_owned_tooltip_exclusive', ['actual' => (string) $inventorySummary['exclusive_actual'], 'nominal' => (string) $inventorySummary['exclusive_nominal']]);
+    $rareOwnedTooltip = t('set_detail_owned_tooltip_rare', ['actual' => (string) $inventorySummary['rare_actual'], 'nominal' => (string) $inventorySummary['rare_nominal']]);
+    $stickersOwnedTooltip = t('set_detail_owned_tooltip_stickers', ['actual' => (string) $inventorySummary['stickers_actual'], 'nominal' => (string) $inventorySummary['stickers_nominal']]);
+
     $content .= '<div class="set-detail-table-wrap">';
     $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
     $content .= '<table class="set-detail-table">';
-    $content .= '<tr class="owned-set-total-row"><td colspan="2">' . renderOwnedSetTotalRing($inventoryTotalPercent, $inventorySummary['total_actual'], $inventorySummary['total_nominal'], true, true) . '</td></tr>';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_exclusive')) . '</th><td>' . (int) $inventorySummary['exclusive_nominal'] . ' (' . (int) $inventorySummary['exclusive_actual'] . ')</td></tr>';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_rare')) . '</th><td>' . (int) $inventorySummary['rare_nominal'] . ' (' . (int) $inventorySummary['rare_actual'] . ')</td></tr>';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_stickers')) . '</th><td>' . (int) $inventorySummary['stickers_nominal'] . ' (' . (int) $inventorySummary['stickers_actual'] . ')</td></tr>';
+    $content .= '<tr class="owned-set-total-row"><td colspan="2">' . renderOwnedSetTotalRing($inventoryTotalPercent, $inventorySummary['total_actual'], $inventorySummary['total_nominal'], true, true, $totalOwnedTooltip) . '</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_exclusive')) . '</th><td>' . (int) $inventorySummary['exclusive_nominal'] . ' (<span title="' . htmlspecialchars($exclusiveOwnedTooltip) . '">' . (int) $inventorySummary['exclusive_actual'] . '</span>)</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_rare')) . '</th><td>' . (int) $inventorySummary['rare_nominal'] . ' (<span title="' . htmlspecialchars($rareOwnedTooltip) . '">' . (int) $inventorySummary['rare_actual'] . '</span>)</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_stickers')) . '</th><td>' . (int) $inventorySummary['stickers_nominal'] . ' (<span title="' . htmlspecialchars($stickersOwnedTooltip) . '">' . (int) $inventorySummary['stickers_actual'] . '</span>)</td></tr>';
     $content .= '</table>';
     $content .= '</div>';
 

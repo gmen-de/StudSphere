@@ -2064,9 +2064,12 @@ function ownedSetCompletenessRingClass(float $percent): string
  * set_detail-only for now, since owned_set_detail/the minifig instance ring
  * have their own live-updating JS keyed to the plain single-line label
  * ($ringLabel.textContent = ... in owned_sets.php/owned_minifigs.php) that
- * would need updating too if it also grew a percent line.
+ * would need updating too if it also grew a percent line. $tooltip, if
+ * given, becomes a title="" attribute on the wrapper (native browser
+ * tooltip) — used by set_detail for an explanatory sentence ("X von Y
+ * Bauteilen ... im Lager"); owned_set_detail/minifig callers never pass one.
  */
-function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal, bool $nominalFirst = false, bool $showPercent = false): string
+function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal, bool $nominalFirst = false, bool $showPercent = false, ?string $tooltip = null): string
 {
     $circumference = 2 * M_PI * 45;
     $offset = $circumference * (1 - min(100.0, $percent) / 100);
@@ -2075,7 +2078,7 @@ function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal, bool
         : formatNumber($actual) . ' / ' . formatNumber($nominal);
     $ringClass = ownedSetCompletenessRingClass($percent);
 
-    $html = '<div class="owned-set-total-ring-wrap">';
+    $html = '<div class="owned-set-total-ring-wrap"' . ($tooltip !== null ? ' title="' . htmlspecialchars($tooltip) . '"' : '') . '>';
     $html .= '<svg class="owned-set-total-ring" viewBox="0 0 100 100" aria-hidden="true">';
     $html .= '<circle class="owned-set-total-ring-bg" cx="50" cy="50" r="45"></circle>';
     $html .= '<circle class="owned-set-total-ring-fg ' . $ringClass . '" id="owned-set-total-ring-fg" cx="50" cy="50" r="45" style="stroke-dasharray: ' . sprintf('%.2f', $circumference) . '; stroke-dashoffset: ' . sprintf('%.2f', $offset) . ';"></circle>';
