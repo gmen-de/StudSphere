@@ -711,6 +711,7 @@ SCRIPT;
         'brickIcon' => getNavIcon('bricks'),
         'minifigIcon' => getNavIcon('minifigs'),
         'setIcon' => getNavIcon('sets'),
+        'pickListIcon' => getActionIcon('pick_list'),
         'expandLabel' => t('locations_tree_expand_label'),
         'editLabel' => t('location_edit_link'),
         'deleteLabel' => t('location_delete_link'),
@@ -1480,10 +1481,19 @@ SCRIPT;
     // its contents can be viewed exactly like any other location, but it's
     // never a real organizational location: no rename/delete/add-child (the
     // set's own removal flow owns that), and it never has children of its
-    // own, so no expand arrow either.
+    // own, so no expand arrow either. A pick list (src/pick_lists.php) gets
+    // the exact same leaf-only treatment for the same reason — managed only
+    // through /pick/'s own UI, never nested/reorganized here. "Pick Lager"
+    // itself (the single root every pick list nests under) is a third,
+    // distinct case: also no rename/delete, but it DOES have real children
+    // (the individual pick lists), so it keeps its expand arrow.
     var isOwnedSet = node.location_type === 'owned_set';
+    var isPickList = node.location_type === 'pick_list';
+    var isPickLagerRoot = node.location_type === 'pick_lager_root';
+    var isLeafOnly = isOwnedSet || isPickList;
+    var isSpecialIcon = isOwnedSet || isPickList || isPickLagerRoot;
 
-    if (isOwnedSet) {
+    if (isLeafOnly) {
       var spacer = document.createElement('span');
       spacer.className = 'location-tree-arrow location-tree-arrow-empty';
       row.appendChild(spacer);
@@ -1498,17 +1508,17 @@ SCRIPT;
 
     var nameBtn = document.createElement('button');
     nameBtn.type = 'button';
-    nameBtn.className = 'location-tree-name' + (isRoot ? ' location-tree-name-root' : '') + (isOwnedSet ? ' location-tree-name-set' : '');
-    if (isOwnedSet) {
+    nameBtn.className = 'location-tree-name' + (isRoot ? ' location-tree-name-root' : '') + (isSpecialIcon ? ' location-tree-name-set' : '');
+    if (isSpecialIcon) {
       var setIconEl = document.createElement('span');
       setIconEl.className = 'location-tree-set-icon';
-      setIconEl.innerHTML = texts.setIcon;
+      setIconEl.innerHTML = isOwnedSet ? texts.setIcon : texts.pickListIcon;
       nameBtn.appendChild(setIconEl);
     }
     nameBtn.appendChild(document.createTextNode(node.name));
     row.appendChild(nameBtn);
 
-    if (!isRoot && !isOwnedSet) {
+    if (!isRoot && !isOwnedSet && !isPickList && !isPickLagerRoot) {
       var actions = document.createElement('span');
       actions.className = 'location-tree-row-actions';
 
@@ -1540,7 +1550,7 @@ SCRIPT;
 
     wrap.appendChild(row);
 
-    if (isOwnedSet) {
+    if (isLeafOnly) {
       // No children, no "(Neu)" row — nothing to expand.
       nameBtn.addEventListener('click', function() {
         selectLocation(node.id, node.name, row);
@@ -3213,11 +3223,18 @@ SCRIPT;
     // Content-Disposition response is all that's needed (see
     // action=owned_set_pdf_report, src/routes/actions.php), no modal/JS.
     $content .= '<a class="owned-set-action-pill" href="?action=owned_set_pdf_report&owned_set_id=' . $ownedSet['id'] . '" target="_blank" rel="noopener" title="' . htmlspecialchars(t('owned_set_pdf_report_button')) . '" aria-label="' . htmlspecialchars(t('owned_set_pdf_report_button')) . '">' . getActionIcon('pdf') . '</a>';
-    // Placeholder: matches missing/damaged parts against loose stock elsewhere
-    // and lets the user queue them onto a pick list, eventually worked through
-    // via a future mobile PWA that adjusts stock as items get picked — none of
-    // that backend exists yet, this button is just the reserved spot + icon.
-    $content .= '<button type="button" class="owned-set-action-pill" onclick="alert(' . json_encode(t('owned_set_pick_list_coming_soon'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ')" title="' . htmlspecialchars(t('owned_set_pick_list_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_pick_list_label')) . '">' . getActionIcon('pick_list') . '</button>';
+    // Creates a pick list scoped to this instance's missing/damaged parts
+    // (action=create_pick_list_from_owned_set, src/routes/actions.php) and
+    // redirects straight into /pick/ to start picking — the description
+    // prompt is the same lightweight window.prompt() pattern the /pick/ PWA
+    // itself uses for its stocktake-flag note, not a full modal, since this
+    // is the one piece of input this button actually needs.
+    $content .= '<form method="post" id="owned-set-pick-list-form" class="owned-set-action-pill-form">';
+    $content .= '<input type="hidden" name="action" value="create_pick_list_from_owned_set">';
+    $content .= '<input type="hidden" name="owned_set_id" value="' . $ownedSet['id'] . '">';
+    $content .= '<input type="hidden" name="description" id="owned-set-pick-list-description">';
+    $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-pick-list-open" title="' . htmlspecialchars(t('owned_set_pick_list_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_pick_list_label')) . '">' . getActionIcon('pick_list') . '</button>';
+    $content .= '</form>';
     $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-sell-open" title="' . htmlspecialchars(t('owned_set_sell_heading')) . '" aria-label="' . htmlspecialchars(t('owned_set_sell_heading')) . '">' . getActionIcon('sell') . '</button>';
     $removeConfirmJson = json_encode(t('owned_set_remove_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $content .= <<<SCRIPT
@@ -3229,6 +3246,24 @@ SCRIPT;
     if (!window.confirm($removeConfirmJson)) {
       e.preventDefault();
     }
+  });
+})();
+</script>
+SCRIPT;
+
+    $pickListPromptJson = json_encode(t('owned_set_pick_list_prompt'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $content .= <<<SCRIPT
+<script>
+(function(){
+  var openBtn = document.getElementById("owned-set-pick-list-open");
+  var form = document.getElementById("owned-set-pick-list-form");
+  var descField = document.getElementById("owned-set-pick-list-description");
+  if (!openBtn || !form || !descField) { return; }
+  openBtn.addEventListener("click", function() {
+    var description = window.prompt($pickListPromptJson);
+    if (!description || !description.trim()) { return; }
+    descField.value = description.trim();
+    form.submit();
   });
 })();
 </script>

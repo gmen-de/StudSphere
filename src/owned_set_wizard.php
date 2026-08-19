@@ -6,6 +6,7 @@ require_once __DIR__ . '/i18n.php';
 require_once __DIR__ . '/icons.php';
 require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/sets.php';
+require_once __DIR__ . '/pick_lists.php';
 
 /**
  * The "Set zur Sammlung hinzufügen" assistant: version (if the set has more
@@ -79,6 +80,25 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     $html .= '<div class="owned-set-wizard-step" id="owned-set-wizard-step-' . $stepNames['location'] . '" data-step="' . $stepNames['location'] . '"' . ($hasVersionStep ? ' style="display:none;"' : '') . '>';
     $html .= '<h3>' . htmlspecialchars(t('owned_set_wizard_step1_heading')) . '</h3>';
     $html .= '<div class="location-picker" id="owned-set-wizard-location-picker"></div>';
+
+    // Pick-list-as-source is optional and only offered when the user
+    // actually has one or more usable (active/completed) pick lists for
+    // THIS set — src/pick_lists.php's fulfillOwnedSetFromPickList(),
+    // called from addOwnedSet() when a value here is selected, moves
+    // whatever that pick list already holds into the new instance instead
+    // of conjuring everything fresh; any shortfall is still materialized
+    // fresh exactly as when nothing is selected here.
+    $pickListsForSet = getPickListsForSet($pdo, (int) ($_SESSION['user_id'] ?? 0), $setId);
+    if (!empty($pickListsForSet)) {
+        $html .= '<label class="owned-set-wizard-pick-list-label">' . htmlspecialchars(t('owned_set_wizard_pick_list_label'));
+        $html .= '<select id="owned-set-wizard-pick-list-select">';
+        $html .= '<option value="">' . htmlspecialchars(t('owned_set_wizard_pick_list_none')) . '</option>';
+        foreach ($pickListsForSet as $pl) {
+            $html .= '<option value="' . (int) $pl['id'] . '">' . htmlspecialchars($pl['name']) . '</option>';
+        }
+        $html .= '</select></label>';
+    }
+
     $html .= '</div>';
 
     $footerHtml .= '<div class="owned-set-wizard-footer-step" data-step="' . $stepNames['location'] . '" style="display:none;">';
@@ -277,6 +297,8 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     var firstVersionRadio = modal.querySelector('input[name="owned-set-wizard-version"]');
     if (firstVersionRadio) { firstVersionRadio.checked = true; }
     locationPicker.reset();
+    var pickListSelectReset = document.getElementById('owned-set-wizard-pick-list-select');
+    if (pickListSelectReset) { pickListSelectReset.value = ''; }
     document.getElementById('owned-set-wizard-step1-error').textContent = '';
     document.getElementById('owned-set-wizard-step3-error').textContent = '';
     document.getElementById('owned-set-wizard-step4-error').textContent = '';
@@ -436,6 +458,10 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
     var versionRadio = modal.querySelector('input[name="owned-set-wizard-version"]:checked');
     if (versionRadio) {
       formData.set('inventory_id', versionRadio.value);
+    }
+    var pickListSelect = document.getElementById('owned-set-wizard-pick-list-select');
+    if (pickListSelect && pickListSelect.value) {
+      formData.set('pick_list_id', pickListSelect.value);
     }
 
     return fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })

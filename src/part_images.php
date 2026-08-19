@@ -10,12 +10,15 @@ require_once __DIR__ . '/images.php';
 /**
  * Cached color-correct part image, keyed by Rebrickable's own color_id — the
  * same numbering inventory_parts.color_id uses, NOT colors.id (the surrogate
- * PK storage_items.color_id uses).
+ * PK storage_items.color_id uses). $angle defaults to 'home' — LDraw's
+ * default isometric view and every existing row's angle before the
+ * Pickliste's 4-perspective feature (src/pick_lists.php) introduced the
+ * others — so every pre-existing call site is unaffected.
  */
-function getCachedPartColorImage(PDO $pdo, int $partId, int $rebrickableColorId): ?string
+function getCachedPartColorImage(PDO $pdo, int $partId, int $rebrickableColorId, string $angle = 'home'): ?string
 {
-    $stmt = $pdo->prepare('SELECT local_image_path FROM part_color_images WHERE part_id = ? AND color_id = ?');
-    $stmt->execute([$partId, $rebrickableColorId]);
+    $stmt = $pdo->prepare('SELECT local_image_path FROM part_color_images WHERE part_id = ? AND color_id = ? AND angle = ?');
+    $stmt->execute([$partId, $rebrickableColorId, $angle]);
     $path = $stmt->fetchColumn();
     return $path !== false && $path !== null ? (string) $path : null;
 }

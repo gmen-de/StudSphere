@@ -697,6 +697,102 @@ function getSchemaMigrations(): array
             // src/routes/actions.php).
             addColumnIfMissing($pdo, 'parts', 'brickowl_id', 'VARCHAR(20) DEFAULT NULL');
         },
+        40 => function (PDO $pdo): void {
+            // Pickliste PWA (src/pick_lists.php, /pick/) — a pick list walks
+            // a set's/minifig's needed parts against current stock,
+            // decrementing loose storage as parts get physically picked.
+            // Every pick list is itself a storage_locations row so its
+            // contents stay visible as loose stock everywhere else (per
+            // explicit requirement — see getLooseStockMap()'s unchanged
+            // 'owned_set'-only exclusion). "Pick Lager" is the single
+            // top-level root every pick list nests under, found via
+            // location_type rather than a stored id — same
+            // self-identifying-marker idiom as 'owned_set'. Idempotent: a
+            // second run of this migration must not create a duplicate root.
+            $existingRoot = $pdo->query(
+                "SELECT id FROM storage_locations WHERE location_type = 'pick_lager_root' LIMIT 1"
+            )->fetchColumn();
+            if ($existingRoot === false) {
+                $pdo->prepare(
+                    "INSERT INTO storage_locations (parent_id, name, location_type) VALUES (NULL, 'Pick Lager', 'pick_lager_root')"
+                )->execute();
+            }
+
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS pick_lists (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    location_id INT NOT NULL,
+                    source_type ENUM(\'set\', \'minifig\') NOT NULL,
+                    set_id INT DEFAULT NULL,
+                    minifig_id INT DEFAULT NULL,
+                    inventory_id INT DEFAULT NULL,
+                    owned_set_id INT DEFAULT NULL,
+                    status ENUM(\'active\', \'completed\', \'closed\') NOT NULL DEFAULT \'active\',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP NULL DEFAULT NULL,
+                    closed_at TIMESTAMP NULL DEFAULT NULL,
+                    CONSTRAINT fk_picklist_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_picklist_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_picklist_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE SET NULL,
+                    CONSTRAINT fk_picklist_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE SET NULL,
+                    CONSTRAINT fk_picklist_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE SET NULL,
+                    INDEX idx_picklist_user_status (user_id, status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS pick_list_items (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    pick_list_id INT NOT NULL,
+                    item_type ENUM(\'part\', \'minifig\') NOT NULL,
+                    part_id INT DEFAULT NULL,
+                    color_id INT DEFAULT NULL,
+                    minifig_id INT DEFAULT NULL,
+                    source_minifig_storage_item_id INT DEFAULT NULL,
+                    needed_quantity INT NOT NULL,
+                    picked_quantity INT NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_plitem_list FOREIGN KEY (pick_list_id) REFERENCES pick_lists(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_plitem_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_plitem_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_plitem_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
+                    INDEX idx_plitem_list (pick_list_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS pick_list_stocktake_flags (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    pick_list_id INT NOT NULL,
+                    pick_list_item_id INT DEFAULT NULL,
+                    location_id INT NOT NULL,
+                    part_id INT NOT NULL,
+                    color_id INT DEFAULT NULL,
+                    note VARCHAR(500) DEFAULT NULL,
+                    flagged_by INT DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP NULL DEFAULT NULL,
+                    CONSTRAINT fk_plflag_list FOREIGN KEY (pick_list_id) REFERENCES pick_lists(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_plflag_item FOREIGN KEY (pick_list_item_id) REFERENCES pick_list_items(id) ON DELETE SET NULL,
+                    CONSTRAINT fk_plflag_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_plflag_user FOREIGN KEY (flagged_by) REFERENCES users(id) ON DELETE SET NULL,
+                    INDEX idx_plflag_unresolved (resolved_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+
+            // LDraw 4-perspective renders (src/ldraw.php) — 'home' is today's
+            // only angle, so DEFAULT 'home' turns every existing row into a
+            // valid angle='home' entry with zero re-rendering and zero
+            // filename/path changes.
+            addColumnIfMissing($pdo, 'part_color_images', 'angle', "VARCHAR(20) NOT NULL DEFAULT 'home'");
+            dropIndexIfExists($pdo, 'part_color_images', 'part_color_image_unique');
+            $pdo->exec('ALTER TABLE part_color_images ADD UNIQUE KEY part_color_image_unique (part_id, color_id, angle)');
+
+            addColumnIfMissing($pdo, 'ldraw_render_queue', 'angle', "VARCHAR(20) NOT NULL DEFAULT 'home'");
+            dropIndexIfExists($pdo, 'ldraw_render_queue', 'ldraw_render_queue_pair');
+            $pdo->exec('ALTER TABLE ldraw_render_queue ADD UNIQUE KEY ldraw_render_queue_pair (part_id, color_id, angle)');
+        },
     ];
 }
 
@@ -777,7 +873,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 39;
+const CURRENT_SCHEMA_VERSION = 40;
 
 function getInstalledSchemaVersion(): int
 {

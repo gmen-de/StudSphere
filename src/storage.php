@@ -226,10 +226,15 @@ function getStorageLocationTree(): array
 function getChildLocations(?int $parentId): array
 {
     $pdo = getPDO();
+    // Excludes 'owned_set' AND 'pick_list' nodes — neither is a valid manual
+    // move/organize target: owned-set instances have always been managed
+    // only through their own set flow, and pick lists (src/pick_lists.php)
+    // only through /pick/'s own dedicated UI, never by nesting something new
+    // inside them here.
     if ($parentId === null) {
-        $stmt = $pdo->query("SELECT id, name, location_type FROM storage_locations WHERE parent_id IS NULL AND (location_type IS NULL OR location_type != 'owned_set')");
+        $stmt = $pdo->query("SELECT id, name, location_type FROM storage_locations WHERE parent_id IS NULL AND (location_type IS NULL OR location_type NOT IN ('owned_set', 'pick_list'))");
     } else {
-        $stmt = $pdo->prepare("SELECT id, name, location_type FROM storage_locations WHERE parent_id = ? AND (location_type IS NULL OR location_type != 'owned_set')");
+        $stmt = $pdo->prepare("SELECT id, name, location_type FROM storage_locations WHERE parent_id = ? AND (location_type IS NULL OR location_type NOT IN ('owned_set', 'pick_list'))");
         $stmt->execute([$parentId]);
     }
     $rows = $stmt->fetchAll();
@@ -244,7 +249,16 @@ function getChildLocations(?int $parentId): array
  * (upsert on the existing UNIQUE KEY) and writes a matching audit row to
  * storage_movements. Returns the resulting total quantity at that spot.
  */
-function addStorageStock(int $locationId, int $partId, int $colorId, string $conditionType, int $quantity, ?int $userId): int
+/**
+ * $movementType/$relatedMovementId are only for callers that want this
+ * addition to read as one half of a relocation rather than genuinely new
+ * stock (e.g. src/pick_lists.php's pickItem()/putAwayItem(), which pair a
+ * setStorageItemQuantity() decrement with an addStorageStock() increment and
+ * want the pair to read as 'move_out'/'move_in' — same linked-pair
+ * convention moveStorageItem() already uses — instead of the default 'in').
+ * Every existing caller omits both and keeps today's plain 'in' behavior.
+ */
+function addStorageStock(int $locationId, int $partId, int $colorId, string $conditionType, int $quantity, ?int $userId, ?string $movementType = null, ?int $relatedMovementId = null): int
 {
     $pdo = getPDO();
     $pdo->beginTransaction();
@@ -263,10 +277,10 @@ function addStorageStock(int $locationId, int $partId, int $colorId, string $con
         $resultingQuantity = (int) $resultStmt->fetchColumn();
 
         $moveStmt = $pdo->prepare(
-            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity)
-             VALUES (?, ?, ?, ?, ?, \'in\', ?, ?)'
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity, related_movement_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $quantity, $resultingQuantity]);
+        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $movementType ?? 'in', $quantity, $resultingQuantity, $relatedMovementId]);
 
         $pdo->commit();
         return $resultingQuantity;
@@ -283,8 +297,14 @@ function addStorageStock(int $locationId, int $partId, int $colorId, string $con
  * Inserts the row if it doesn't exist yet; a resulting quantity of 0 still
  * leaves the row in place rather than deleting it (getLocationStock() and
  * getPartStock() already filter zero-quantity rows out of their results).
+ * $movementType overrides the default 'correction' log entry (e.g.
+ * 'move_out', for src/pick_lists.php's pickItem()/putAwayItem() — see
+ * addStorageStock()'s matching $movementType param) — every existing caller
+ * omits it and keeps today's 'correction' behavior. Returns the inserted
+ * storage_movements row's id, so a paired addStorageStock() call can link to
+ * it via $relatedMovementId (existing callers all ignore this return value).
  */
-function setStorageItemQuantity(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $userId, ?int $damagedQuantity = null): void
+function setStorageItemQuantity(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $userId, ?int $damagedQuantity = null, ?string $movementType = null): int
 {
     $pdo = getPDO();
     $pdo->beginTransaction();
@@ -315,11 +335,13 @@ function setStorageItemQuantity(int $locationId, int $partId, int $colorId, stri
 
         $moveStmt = $pdo->prepare(
             'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity)
-             VALUES (?, ?, ?, ?, ?, \'correction\', ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $newQuantity - $currentQuantity, $newQuantity]);
+        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $movementType ?? 'correction', $newQuantity - $currentQuantity, $newQuantity]);
+        $movementId = (int) $pdo->lastInsertId();
 
         $pdo->commit();
+        return $movementId;
     } catch (Throwable $e) {
         $pdo->rollBack();
         throw $e;
@@ -598,6 +620,15 @@ function getLooseStockMap(PDO $pdo): array
  * that same fallback once a color is already known but a location isn't);
  * left null, every color is returned.
  *
+ * Also excludes location_type 'pick_list' (src/pick_lists.php) — stock
+ * already sitting in an active pick list isn't "generally available" source
+ * stock for something else to draw from (another pick list, buildMinifigFromStock()
+ * in src/build.php). This is deliberately narrower than getLooseStockMap(),
+ * which must keep counting pick-list stock as loose for other purposes (e.g.
+ * the collection-value/stats totals) — this function answers "where could I
+ * pick/consume this part FROM right now", getLooseStockMap() answers "how
+ * much of this part do I own in total".
+ *
  * @return array<int, array{location_id:int, location_path:string, color_id:?int, color_name:?string, color_rgb:?string, condition_type:string, quantity:int, damaged_quantity:int}>
  */
 function getPartStock(int $partId, ?int $colorId = null): array
@@ -609,7 +640,7 @@ function getPartStock(int $partId, ?int $colorId = null): array
          INNER JOIN storage_locations sl ON sl.id = si.location_id
          LEFT JOIN colors c ON c.id = si.color_id
          WHERE si.part_id = ? AND si.quantity > 0
-           AND (sl.location_type IS NULL OR sl.location_type != 'owned_set')";
+           AND (sl.location_type IS NULL OR sl.location_type NOT IN ('owned_set', 'pick_list'))";
     $params = [$partId];
     if ($colorId !== null) {
         $sql .= ' AND si.color_id = ?';
@@ -728,7 +759,7 @@ function getLocationContentRecursive(PDO $pdo, int $locationId): array
          INNER JOIN parts p ON p.id = si.part_id
          LEFT JOIN part_categories pc ON pc.part_cat_id = p.part_category
          LEFT JOIN colors c ON c.id = si.color_id
-         LEFT JOIN part_color_images pci ON pci.part_id = si.part_id AND pci.color_id = c.color_id
+         LEFT JOIN part_color_images pci ON pci.part_id = si.part_id AND pci.color_id = c.color_id AND pci.angle = 'home'
          WHERE si.location_id IN ($loosePlaceholders) AND si.quantity > 0
          ORDER BY pc.name IS NULL, pc.name, p.part_num"
     );

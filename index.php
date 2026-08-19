@@ -19,6 +19,7 @@ require_once __DIR__ . '/src/sets.php';
 require_once __DIR__ . '/src/bricklink_prices.php';
 require_once __DIR__ . '/src/instructions.php';
 require_once __DIR__ . '/src/ldraw.php';
+require_once __DIR__ . '/src/pick_lists.php';
 require_once __DIR__ . '/src/owned_sets.php';
 require_once __DIR__ . '/src/owned_set_wizard.php';
 require_once __DIR__ . '/src/minifigs.php';
@@ -79,16 +80,19 @@ if (schemaMigrationPending()) {
 }
 
 // A login should stay valid for 12 months — both the cookie the browser
-// holds onto and the server-side session lifetime. Only 'lifetime' is
-// passed to session_set_cookie_params() so every other cookie attribute
-// (path, domain, secure, httponly, samesite) keeps using the host's own ini
-// defaults rather than this app overriding them. Must run after the
-// migration check above: registerDatabaseSessionHandler() (src/
+// holds onto and the server-side session lifetime. 'path' is set explicitly
+// to '/' so the same session cookie is reliably readable from the /pick/
+// PWA's own entry point too (Apache's default cookie path is the invoking
+// script's own directory — harmlessly '/' for this file today, but /pick/
+// index.php would otherwise default to '/pick/' and NOT share a session
+// with this one). Every other cookie attribute (domain, secure, httponly,
+// samesite) still keeps using the host's own ini defaults. Must run after
+// the migration check above: registerDatabaseSessionHandler() (src/
 // session_handler.php) needs the "sessions" table to already exist, and on
 // a pre-existing install that's exactly what the migration just above may
 // have just created.
 const LOGIN_SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 365;
-session_set_cookie_params(['lifetime' => LOGIN_SESSION_LIFETIME_SECONDS]);
+session_set_cookie_params(['lifetime' => LOGIN_SESSION_LIFETIME_SECONDS, 'path' => '/']);
 ini_set('session.gc_maxlifetime', (string) LOGIN_SESSION_LIFETIME_SECONDS);
 require_once __DIR__ . '/src/session_handler.php';
 registerDatabaseSessionHandler();

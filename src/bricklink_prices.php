@@ -800,7 +800,7 @@ function getTopValuedOwnedParts(PDO $pdo, int $limit = 100): array
          INNER JOIN colors c ON c.id = si.color_id
          INNER JOIN storage_locations sl ON sl.id = si.location_id
          INNER JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
-         LEFT JOIN part_color_images pci ON pci.part_id = si.part_id AND pci.color_id = c.color_id
+         LEFT JOIN part_color_images pci ON pci.part_id = si.part_id AND pci.color_id = c.color_id AND pci.angle = 'home'
          WHERE (sl.location_type IS NULL OR sl.location_type != 'owned_set')
             AND (CASE si.condition_type WHEN 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END) IS NOT NULL
          GROUP BY si.part_id, si.color_id, si.condition_type, p.part_num, p.name, c.name, c.rgb,

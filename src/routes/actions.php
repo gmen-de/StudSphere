@@ -369,6 +369,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
     $stickersNotes = $stickersNotes !== '' ? $stickersNotes : null;
     $inventoryIdRaw = trim((string) ($_POST['inventory_id'] ?? ''));
     $ownedSetInventoryId = $inventoryIdRaw !== '' ? (int) $inventoryIdRaw : null;
+    $pickListIdRaw = trim((string) ($_POST['pick_list_id'] ?? ''));
+    $sourcePickListId = $pickListIdRaw !== '' ? (int) $pickListIdRaw : null;
 
     try {
         $ownedSetCatalogSet = $ownedSetSetId > 0 ? getSetById($pdo, $ownedSetSetId) : null;
@@ -377,6 +379,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
         }
         if ($parentLocationId === null) {
             throw new RuntimeException(t('owned_set_wizard_location_required'));
+        }
+        if ($sourcePickListId !== null) {
+            $sourcePickList = getPickList($pdo, $sourcePickListId);
+            if ($sourcePickList === null || (int) $sourcePickList['user_id'] !== (int) $_SESSION['user_id']
+                || !in_array($sourcePickList['status'], ['active', 'completed'], true)
+            ) {
+                throw new RuntimeException(t('owned_set_invalid_pick_list'));
+            }
         }
         $newOwnedSetId = addOwnedSet(
             $pdo,
@@ -393,7 +403,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
             $boxCompleteNotes,
             $ownedSetInventoryId,
             $stickersApplied,
-            $stickersNotes
+            $stickersNotes,
+            $sourcePickListId
         );
         refreshAppStatsCache($pdo);
         // Fetched synchronously here (not left to the opportunistic
@@ -414,6 +425,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
+    exit;
+}
+
+// owned_set_detail's "Pickliste" action-bar button (src/routes/pages.php) —
+// creates a pick list scoped to only what's still MISSING from this owned
+// instance (nominal - actual + damaged, same "wanted" formula used
+// elsewhere in this file's BrickLink-XML export), not the set's full parts
+// list from scratch. Redirects into /pick/ itself rather than returning
+// JSON, since the button is a plain form submit, not a fetch() call —
+// simpler than duplicating the description-prompt + fetch dance the /pick/
+// PWA's own create screen uses, for a button that only ever needs one
+// specific owned set as its target.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_pick_list_from_owned_set') {
+    $ownedSetIdForPickList = (int) ($_POST['owned_set_id'] ?? 0);
+    $pickListDescription = trim((string) ($_POST['description'] ?? ''));
+    $ownedSetForPickList = $ownedSetIdForPickList > 0 ? getOwnedSetById($pdo, $ownedSetIdForPickList) : null;
+    if ($ownedSetForPickList === null || $pickListDescription === '') {
+        http_response_code(400);
+        exit;
+    }
+
+    $missingParts = [];
+    foreach (getOwnedSetPartsWithStatus($pdo, $ownedSetForPickList) as $item) {
+        $wanted = max(0, $item['nominal_quantity'] - $item['actual_quantity']) + $item['damaged_quantity'];
+        if ($wanted > 0) {
+            $missingParts[$item['part_id'] . ':' . $item['color_id']] = $wanted;
+        }
+    }
+    $missingMinifigs = [];
+    foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSetForPickList) as $fig) {
+        $wanted = max(0, $fig['nominal_quantity'] - $fig['actual_quantity']) + $fig['damaged_quantity'];
+        if ($wanted > 0) {
+            $missingMinifigs[$fig['minifig_id']] = $wanted;
+        }
+    }
+
+    $newPickListId = createPickList(
+        $pdo, (int) $_SESSION['user_id'], 'set', (int) $ownedSetForPickList['set_id'], $pickListDescription,
+        $ownedSetIdForPickList, ['parts' => $missingParts, 'minifigs' => $missingMinifigs]
+    );
+    if ($newPickListId === null) {
+        http_response_code(400);
+        exit;
+    }
+    header('Location: pick/index.php?screen=pick&id=' . $newPickListId);
     exit;
 }
 
@@ -502,7 +558,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
         echo json_encode(['error' => t('location_detail_not_found')], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    $readOnly = $location['location_type'] === 'owned_set';
+    $readOnly = in_array($location['location_type'], ['owned_set', 'pick_list'], true);
     $ownedSetId = null;
     if ($readOnly) {
         $ownedSetIdStmt = $pdo->prepare('SELECT id FROM owned_sets WHERE location_id = ?');
@@ -593,7 +649,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
             $ownLocationType = !empty($ancestors) ? end($ancestors)['location_type'] : null;
             $locationInfoCache[$itemLocationId] = [
                 'label' => implode(' -> ', array_column($relevant, 'name')),
-                'readOnly' => $ownLocationType === 'owned_set',
+                'readOnly' => in_array($ownLocationType, ['owned_set', 'pick_list'], true),
             ];
         }
         return $locationInfoCache[$itemLocationId];

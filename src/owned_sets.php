@@ -7,6 +7,7 @@ require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/sets.php';
 require_once __DIR__ . '/minifigs.php';
 require_once __DIR__ . '/i18n.php';
+require_once __DIR__ . '/pick_lists.php';
 
 /**
  * Distinct on-disk root for owned-set photos — separate from
@@ -718,15 +719,26 @@ function getMinifigPartsPreview(PDO $pdo, string $figNum, int $minifigNominalCou
  * limitation specific to this feature). $inventoryId is the specific
  * revision the user picked when adding the set (see resolveOwnedSetInventoryId()),
  * not necessarily the newest.
+ *
+ * $alreadyFulfilled ("part_id:color_id" => quantity), when given, reduces
+ * each conjured quantity by however much a pick list already contributed for
+ * that part+color (fulfillOwnedSetFromPickList(), src/pick_lists.php,
+ * called first by addOwnedSet() when the wizard's user picked a pick list as
+ * a fulfillment source) — partial pick-list coverage plus a fresh top-up for
+ * the remainder is the expected, normal case, not an error.
  */
-function materializeOwnedSetStock(PDO $pdo, int $inventoryId, int $locationId, string $conditionType, ?int $userId): void
+function materializeOwnedSetStock(PDO $pdo, int $inventoryId, int $locationId, string $conditionType, ?int $userId, array $alreadyFulfilled = []): void
 {
     $items = getSetPartsList($pdo, $inventoryId, false, 'en');
     foreach ($items as $item) {
         if ($item['color_id'] === null || $item['quantity'] <= 0) {
             continue;
         }
-        addStorageStock($locationId, $item['part_id'], $item['color_id'], $conditionType, $item['quantity'], $userId);
+        $quantity = $item['quantity'] - ($alreadyFulfilled[$item['part_id'] . ':' . $item['color_id']] ?? 0);
+        if ($quantity <= 0) {
+            continue;
+        }
+        addStorageStock($locationId, $item['part_id'], $item['color_id'], $conditionType, $quantity, $userId);
     }
 }
 
@@ -773,6 +785,14 @@ function materializeOwnedSetMinifigs(PDO $pdo, int $ownedSetId, int $inventoryId
  * chosen by a user) as a child of $parentLocationId, the owned_sets
  * metadata row, and materializes the set's parts into that new location's
  * stock.
+ *
+ * $sourcePickListId, when given (the add-to-collection wizard's optional
+ * pick-list selector, src/owned_set_wizard.php), fulfills as much of the
+ * set's needed parts/minifigs as that pick list currently holds by moving
+ * them into the new instance (fulfillOwnedSetFromPickList(),
+ * src/pick_lists.php) instead of conjuring everything from nothing; any
+ * shortfall beyond what the pick list holds is still materialized fresh
+ * exactly as when no pick list is involved.
  */
 function addOwnedSet(
     PDO $pdo,
@@ -789,7 +809,8 @@ function addOwnedSet(
     ?string $boxCompleteNotes = null,
     ?int $inventoryId = null,
     bool $stickersApplied = false,
-    ?string $stickersNotes = null
+    ?string $stickersNotes = null,
+    ?int $sourcePickListId = null
 ): int {
     $set = getSetById($pdo, $setId);
     if ($set === null) {
@@ -841,7 +862,11 @@ function addOwnedSet(
     $ownedSetId = (int) $pdo->lastInsertId();
 
     if ($inventoryId !== null) {
-        materializeOwnedSetStock($pdo, $inventoryId, $locationId, $conditionType, $userId);
+        $fulfilledFromPickList = [];
+        if ($sourcePickListId !== null) {
+            $fulfilledFromPickList = fulfillOwnedSetFromPickList($pdo, $sourcePickListId, $inventoryId, $locationId, $conditionType, $userId);
+        }
+        materializeOwnedSetStock($pdo, $inventoryId, $locationId, $conditionType, $userId, $fulfilledFromPickList);
         materializeOwnedSetSpares($pdo, $inventoryId, $locationId, $conditionType);
         materializeOwnedSetMinifigs($pdo, $ownedSetId, $inventoryId);
     }

@@ -325,9 +325,10 @@ CREATE TABLE IF NOT EXISTS part_color_images (
     id INT AUTO_INCREMENT PRIMARY KEY,
     part_id INT NOT NULL,
     color_id INT NOT NULL,
+    angle VARCHAR(20) NOT NULL DEFAULT 'home',
     local_image_path VARCHAR(512) DEFAULT NULL,
     fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY part_color_image_unique (part_id, color_id),
+    UNIQUE KEY part_color_image_unique (part_id, color_id, angle),
     CONSTRAINT fk_partcolorimage_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -335,11 +336,12 @@ CREATE TABLE IF NOT EXISTS ldraw_render_queue (
     id INT AUTO_INCREMENT PRIMARY KEY,
     part_id INT NOT NULL,
     color_id INT NOT NULL,
+    angle VARCHAR(20) NOT NULL DEFAULT 'home',
     status ENUM('pending', 'rendering') NOT NULL DEFAULT 'pending',
     attempts INT NOT NULL DEFAULT 0,
     started_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY ldraw_render_queue_pair (part_id, color_id),
+    UNIQUE KEY ldraw_render_queue_pair (part_id, color_id, angle),
     CONSTRAINT fk_ldrawrenderqueue_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -461,6 +463,70 @@ CREATE TABLE IF NOT EXISTS owned_set_minifig_parts (
     CONSTRAINT fk_ownedsetminifigpart_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
     CONSTRAINT fk_ownedsetminifigpart_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
     CONSTRAINT fk_ownedsetminifigpart_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Pickliste PWA (src/pick_lists.php, /pick/): a pick list walks a set's/
+-- minifig's needed parts against current stock, decrementing loose storage
+-- as parts get physically picked. Every pick list is itself a
+-- storage_locations row (location_type='pick_list', nested under the single
+-- location_type='pick_lager_root' "Pick Lager" location) so its contents
+-- stay visible as loose stock everywhere else (getLooseStockMap() only ever
+-- excludes 'owned_set', unchanged by this feature).
+CREATE TABLE IF NOT EXISTS pick_lists (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    location_id INT NOT NULL,
+    source_type ENUM('set', 'minifig') NOT NULL,
+    set_id INT DEFAULT NULL,
+    minifig_id INT DEFAULT NULL,
+    inventory_id INT DEFAULT NULL,
+    owned_set_id INT DEFAULT NULL,
+    status ENUM('active', 'completed', 'closed') NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL DEFAULT NULL,
+    closed_at TIMESTAMP NULL DEFAULT NULL,
+    CONSTRAINT fk_picklist_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_picklist_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_picklist_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE SET NULL,
+    CONSTRAINT fk_picklist_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE SET NULL,
+    CONSTRAINT fk_picklist_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE SET NULL,
+    INDEX idx_picklist_user_status (user_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS pick_list_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    pick_list_id INT NOT NULL,
+    item_type ENUM('part', 'minifig') NOT NULL,
+    part_id INT DEFAULT NULL,
+    color_id INT DEFAULT NULL,
+    minifig_id INT DEFAULT NULL,
+    source_minifig_storage_item_id INT DEFAULT NULL,
+    needed_quantity INT NOT NULL,
+    picked_quantity INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_plitem_list FOREIGN KEY (pick_list_id) REFERENCES pick_lists(id) ON DELETE CASCADE,
+    CONSTRAINT fk_plitem_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_plitem_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_plitem_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
+    INDEX idx_plitem_list (pick_list_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS pick_list_stocktake_flags (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    pick_list_id INT NOT NULL,
+    pick_list_item_id INT DEFAULT NULL,
+    location_id INT NOT NULL,
+    part_id INT NOT NULL,
+    color_id INT DEFAULT NULL,
+    note VARCHAR(500) DEFAULT NULL,
+    flagged_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP NULL DEFAULT NULL,
+    CONSTRAINT fk_plflag_list FOREIGN KEY (pick_list_id) REFERENCES pick_lists(id) ON DELETE CASCADE,
+    CONSTRAINT fk_plflag_item FOREIGN KEY (pick_list_item_id) REFERENCES pick_list_items(id) ON DELETE SET NULL,
+    CONSTRAINT fk_plflag_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_plflag_user FOREIGN KEY (flagged_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_plflag_unresolved (resolved_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- "Baubare Sets" (?page=build_sets, src/build_sets.php): one row per catalog

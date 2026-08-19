@@ -550,7 +550,7 @@ function getSetPartsList(PDO $pdo, int $inventoryId, bool $spares, string $local
          FROM inventory_parts ip
          INNER JOIN parts p ON p.id = ip.part_id
          LEFT JOIN colors c ON c.color_id = ip.color_id
-         LEFT JOIN part_color_images pci ON pci.part_id = p.id AND pci.color_id = ip.color_id
+         LEFT JOIN part_color_images pci ON pci.part_id = p.id AND pci.color_id = ip.color_id AND pci.angle = \'home\'
          WHERE ip.inventory_id = ? AND ip.is_spare = ?
          GROUP BY p.id, p.part_num, p.name, c.id, ip.color_id, c.name, c.rgb
          ORDER BY p.name ASC'

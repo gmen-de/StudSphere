@@ -1,0 +1,327 @@
+/* Pickliste PWA — deliberately separate from ../style.css: this is a
+   mobile-first, thumb-driven single-column flow (no sidebar, no desktop
+   tables), so sharing the desktop app's stylesheet would mean fighting its
+   layout assumptions rather than reusing anything useful from it. */
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --pick-bg: #f8fafc;
+  --pick-card: #ffffff;
+  --pick-border: #e2e8f0;
+  --pick-text: #0f172a;
+  --pick-muted: #64748b;
+  --pick-accent: #2563eb;
+  --pick-accent-soft: #eff6ff;
+  --pick-danger: #dc2626;
+}
+
+body {
+  margin: 0;
+  background: var(--pick-bg);
+  color: var(--pick-text);
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pick-screen {
+  max-width: 30rem;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem;
+}
+
+.pick-screen h1 {
+  font-size: 1.4rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.pick-screen h2.pick-group-heading {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pick-muted);
+  margin: 1.5rem 0 0.6rem;
+}
+
+.pick-back-link {
+  display: inline-block;
+  color: var(--pick-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.pick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.9rem 1.2rem;
+  border-radius: 0.8rem;
+  border: 1px solid var(--pick-border);
+  background: var(--pick-card);
+  color: var(--pick-text);
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  min-height: 3rem;
+}
+
+.pick-btn-primary {
+  background: var(--pick-accent);
+  border-color: var(--pick-accent);
+  color: #fff;
+}
+
+.pick-create-fab {
+  display: block;
+  text-align: center;
+  margin-bottom: 1.25rem;
+}
+
+.pick-list-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pick-list-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--pick-border);
+  background: var(--pick-card);
+  text-decoration: none;
+  color: var(--pick-text);
+}
+
+.pick-list-card-name {
+  font-weight: 600;
+}
+
+.pick-progress-badge {
+  font-variant-numeric: tabular-nums;
+  color: var(--pick-muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.pick-empty-hint {
+  color: var(--pick-muted);
+}
+
+.pick-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.pick-tab {
+  flex: 1;
+  text-align: center;
+  padding: 0.7rem;
+  border-radius: 0.7rem;
+  border: 1px solid var(--pick-border);
+  text-decoration: none;
+  color: var(--pick-text);
+  font-weight: 600;
+}
+
+.pick-tab.active {
+  background: var(--pick-accent-soft);
+  border-color: var(--pick-accent);
+  color: var(--pick-accent);
+}
+
+.pick-search-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.pick-search-form input[type="search"] {
+  flex: 1;
+  padding: 0.75rem;
+  border-radius: 0.7rem;
+  border: 1px solid var(--pick-border);
+  font-size: 1rem;
+}
+
+.pick-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.pick-search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem;
+  border-radius: 0.7rem;
+  border: 1px solid var(--pick-border);
+  background: var(--pick-card);
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.pick-search-result img {
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.pick-create-confirm {
+  padding: 1rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--pick-accent);
+  background: var(--pick-accent-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pick-create-confirm label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--pick-muted);
+}
+
+.pick-create-confirm input[type="text"] {
+  padding: 0.7rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--pick-border);
+  font-size: 1rem;
+}
+
+.pick-error {
+  color: var(--pick-danger);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.pick-item-card {
+  background: var(--pick-card);
+  border: 1px solid var(--pick-border);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pick-item-thumb {
+  width: 8rem;
+  height: 8rem;
+  object-fit: contain;
+  margin: 0 auto;
+}
+
+.pick-item-color {
+  color: var(--pick-muted);
+  margin: -0.4rem 0 0;
+}
+
+.pick-step-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.pick-step-location {
+  font-weight: 600;
+}
+
+.pick-step-box input[type="number"] {
+  padding: 0.9rem;
+  font-size: 1.2rem;
+  text-align: center;
+  border-radius: 0.7rem;
+  border: 1px solid var(--pick-border);
+}
+
+.pick-shortfall {
+  color: var(--pick-danger);
+  font-weight: 600;
+}
+
+.pick-complete-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: stretch;
+  padding: 1.5rem;
+  background: var(--pick-card);
+  border: 1px solid var(--pick-border);
+  border-radius: 1rem;
+  text-align: center;
+}
+
+.pick-4views-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.9);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.pick-4views-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 24rem;
+  color: #fff;
+  text-align: center;
+}
+
+.pick-4views-grid img {
+  width: 100%;
+  background: #fff;
+  border-radius: 0.5rem;
+}
+
+.pick-putaway-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pick-putaway-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.9rem;
+  border-radius: 0.8rem;
+  border: 1px solid var(--pick-border);
+  background: var(--pick-card);
+}
+
+.pick-putaway-suggestion {
+  color: var(--pick-muted);
+  font-size: 0.9rem;
+}
+
+.pick-putaway-manual-location {
+  padding: 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--pick-border);
+}

@@ -57,6 +57,15 @@ const LDRAW_RENDER_NICE_LEVEL = 19;
 // the render worker only ever needs to pace the calls that actually hit it.
 const LDRAW_API_CALL_DELAY_MICROSECONDS = 350_000; // ~2.8 req/s
 
+// The 4 angles the Pickliste's per-part detail view offers (src/pick_lists.php,
+// /pick/). 'home' is LeoCAD's own default isometric view and also the ONLY
+// angle every part_color_images/ldraw_render_queue row predates this feature
+// with (migration 40 defaults the new 'angle' column to 'home') — keeping it
+// first in this list means most parts only ever need 3 *new* renders, not 4.
+// front/left/back are valid LeoCAD --viewpoint keywords giving a reasonable
+// 3-flat-side spread alongside the isometric default.
+const LDRAW_PICK_DETAIL_ANGLES = ['home', 'front', 'left', 'back'];
+
 /**
  * storage/ldraw — protected from direct web access via storage/.htaccess,
  * same reasoning as storage/rebrickable: these are source/working files
@@ -241,11 +250,18 @@ function matchLdrawColorCode(string $rgbHex, bool $isTrans): ?int
  *   condition, not proof the part can never render, so the caller must leave
  *   it unresolved (no DB row) rather than permanently blacklisting it.
  */
-function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outputPath): ?bool
+function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outputPath, string $viewpoint = 'home'): ?bool
 {
     $partFile = $ldrawId . '.dat';
     if (!is_file(getLdrawPartFilePath($ldrawId))) {
         return false;
+    }
+    // Whitelisted, not just escapeshellarg()'d — this value can originate
+    // from a DB queue row (ldraw_render_queue.angle), so it must be
+    // constrained to known-good LeoCAD --viewpoint keywords before ever
+    // reaching exec(), not just shell-escaped.
+    if (!in_array($viewpoint, LDRAW_PICK_DETAIL_ANGLES, true)) {
+        $viewpoint = 'home';
     }
 
     $tmpDir = getLdrawRenderTmpDir();
@@ -259,7 +275,7 @@ function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outp
     }
 
     $cmd = sprintf(
-        'nice -n %d timeout %d xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --aa-samples %d --viewpoint home %s 2>&1',
+        'nice -n %d timeout %d xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --aa-samples %d --viewpoint %s %s 2>&1',
         LDRAW_RENDER_NICE_LEVEL,
         LDRAW_RENDER_EXEC_TIMEOUT_SECONDS,
         escapeshellarg(getLdrawLibraryRootDir()),
@@ -268,6 +284,7 @@ function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outp
         LDRAW_RENDER_IMAGE_SIZE,
         LDRAW_STUD_STYLE,
         LDRAW_AA_SAMPLES,
+        escapeshellarg($viewpoint),
         escapeshellarg($snippetPath)
     );
     exec($cmd, $outputLines, $exitCode);
@@ -428,9 +445,14 @@ function getMissingLdrawRenderPairs(PDO $pdo, array $items): array
         $pairParams[] = $c['color_id'];
     }
 
-    // A pair with ANY row already (a real path, or a NULL "can't render"
-    // marker) is settled — drop it before it ever reaches the queue.
-    $existingStmt = $pdo->prepare("SELECT part_id, color_id FROM part_color_images WHERE (part_id, color_id) IN ($pairPlaceholders)");
+    // A pair with a 'home'-angle row already (a real path, or a NULL "can't
+    // render" marker) is settled for THIS (single-angle) code path — drop it
+    // before it ever reaches the queue. Scoped to 'home' specifically: a
+    // part that's only had its 'front'/'left'/'back' angle rendered so far
+    // (via the Pickliste's on-demand 4-view feature, src/pick_lists.php)
+    // still needs its 'home' angle enqueued here, since that's the only one
+    // this set_detail/location_content code path ever displays.
+    $existingStmt = $pdo->prepare("SELECT part_id, color_id FROM part_color_images WHERE angle = 'home' AND (part_id, color_id) IN ($pairPlaceholders)");
     $existingStmt->execute($pairParams);
     foreach ($existingStmt->fetchAll() as $row) {
         unset($candidates[$row['part_id'] . ':' . $row['color_id']]);
@@ -484,19 +506,39 @@ function countLdrawRenderablePairs(array $items): int
 
 /**
  * INSERT IGNOREs each pair into ldraw_render_queue — the UNIQUE key on
- * (part_id, color_id) is what makes this safe to call from many concurrent
- * pollers (different sets/users sharing a part) without ever double-queuing
- * the same pair.
+ * (part_id, color_id, angle) is what makes this safe to call from many
+ * concurrent pollers (different sets/users sharing a part) without ever
+ * double-queuing the same pair+angle. Each pair may carry an optional
+ * 'angle' key; omitted, it defaults to 'home' (every existing caller's
+ * behavior, unchanged) via the column's own DEFAULT.
  */
 function enqueueLdrawRenders(PDO $pdo, array $pairs): void
 {
     if (empty($pairs)) {
         return;
     }
-    $stmt = $pdo->prepare('INSERT IGNORE INTO ldraw_render_queue (part_id, color_id) VALUES (?, ?)');
+    $stmt = $pdo->prepare('INSERT IGNORE INTO ldraw_render_queue (part_id, color_id, angle) VALUES (?, ?, ?)');
     foreach ($pairs as $pair) {
-        $stmt->execute([$pair['part_id'], $pair['color_id']]);
+        $stmt->execute([$pair['part_id'], $pair['color_id'], $pair['angle'] ?? 'home']);
     }
+}
+
+/**
+ * Thin wrapper around enqueueLdrawRenders() for the Pickliste's "4 views"
+ * detail button (src/pick_lists.php) — enqueues whichever of
+ * LDRAW_PICK_DETAIL_ANGLES aren't already queued/rendered for one specific
+ * part+color, given $rebrickableColorId (matches ldraw_render_queue.color_id
+ * / part_color_images.color_id, which are keyed the same way
+ * getMissingLdrawRenderPairs() already uses — Rebrickable's own color_id,
+ * not the colors.id surrogate storage_items uses).
+ */
+function enqueueLdrawRenderAngles(PDO $pdo, int $partId, int $rebrickableColorId, array $angles): void
+{
+    $pairs = [];
+    foreach ($angles as $angle) {
+        $pairs[] = ['part_id' => $partId, 'color_id' => $rebrickableColorId, 'angle' => $angle];
+    }
+    enqueueLdrawRenders($pdo, $pairs);
 }
 
 /**
@@ -528,6 +570,73 @@ function getLdrawSetRenderProgress(PDO $pdo, array $items): array
         'total' => $total,
         'currentPart' => $queueStatus['currentPart'],
         'queueDepth' => $queueStatus['queueDepth'],
+    ];
+}
+
+/**
+ * The 4 cached angle images for one part+color, whichever already exist —
+ * one query, keyed by angle. A NULL local_image_path (a permanently
+ * unrenderable pair, e.g. a sticker) shows up the same as any other
+ * settled/non-missing angle, distinguished from "not yet rendered" (key
+ * absent entirely) by getLdrawFourAngleProgress()'s caller.
+ *
+ * @return array<string, ?string> angle => local_image_path, only for angles that already have a row
+ */
+function getLdrawFourAngleImages(PDO $pdo, int $partId, int $rebrickableColorId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT angle, local_image_path FROM part_color_images WHERE part_id = ? AND color_id = ? AND angle IN (' .
+        implode(',', array_fill(0, count(LDRAW_PICK_DETAIL_ANGLES), '?')) . ')'
+    );
+    $stmt->execute(array_merge([$partId, $rebrickableColorId], LDRAW_PICK_DETAIL_ANGLES));
+    $images = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $images[$row['angle']] = $row['local_image_path'];
+    }
+    return $images;
+}
+
+/**
+ * The Pickliste's "4 views" detail button (src/pick_lists.php) — same shape
+ * as getLdrawSetRenderProgress() but scoped to one part+color's 4 angles
+ * instead of a whole set's worth of pairs, and used strictly on demand (only
+ * when a user actually opens this modal for a specific part while picking —
+ * never bulk-enqueued for a whole pick list up front, to keep worker load
+ * bounded and predictable).
+ *
+ * @return array{status:string, percent:int, done:int, total:int, currentPart:?string, queueDepth:int, images:array<string,?string>}
+ */
+function getLdrawFourAngleProgress(PDO $pdo, int $partId, int $rebrickableColorId): array
+{
+    $images = getLdrawFourAngleImages($pdo, $partId, $rebrickableColorId);
+
+    // A part already known unrenderable at 'home' (e.g. a sticker, marked by
+    // getMissingLdrawRenderPairs()) will never render at any other angle
+    // either — short-circuit as fully "done" (all 4 angles unavailable)
+    // instead of enqueueing 3 renders guaranteed to fail the same way.
+    if (array_key_exists('home', $images) && $images['home'] === null) {
+        return [
+            'status' => 'done', 'percent' => 100, 'done' => 4, 'total' => 4,
+            'currentPart' => null, 'queueDepth' => 0, 'images' => $images,
+        ];
+    }
+
+    $missingAngles = array_values(array_diff(LDRAW_PICK_DETAIL_ANGLES, array_keys($images)));
+    enqueueLdrawRenderAngles($pdo, $partId, $rebrickableColorId, $missingAngles);
+
+    $total = count(LDRAW_PICK_DETAIL_ANGLES);
+    $done = $total - count($missingAngles);
+    $percent = (int) round(min(1.0, $done / $total) * 100);
+    $queueStatus = getLdrawQueueStatus($pdo);
+
+    return [
+        'status' => count($missingAngles) > 0 ? 'running' : 'done',
+        'percent' => $percent,
+        'done' => $done,
+        'total' => $total,
+        'currentPart' => $queueStatus['currentPart'],
+        'queueDepth' => $queueStatus['queueDepth'],
+        'images' => $images,
     ];
 }
 
@@ -624,7 +733,7 @@ function runLdrawRenderWorkerOnce(PDO $pdo): bool
 {
     $pdo->beginTransaction();
     $row = $pdo->query(
-        "SELECT id, part_id, color_id, attempts FROM ldraw_render_queue
+        "SELECT id, part_id, color_id, angle, attempts FROM ldraw_render_queue
          WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1 FOR UPDATE"
     )->fetch();
     if (!$row) {
@@ -636,8 +745,8 @@ function runLdrawRenderWorkerOnce(PDO $pdo): bool
     $pdo->commit();
 
     $upsertStmt = $pdo->prepare(
-        'INSERT INTO part_color_images (part_id, color_id, local_image_path)
-         VALUES (?, ?, ?)
+        'INSERT INTO part_color_images (part_id, color_id, angle, local_image_path)
+         VALUES (?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE local_image_path = VALUES(local_image_path), fetched_at = CURRENT_TIMESTAMP'
     );
     $deleteStmt = $pdo->prepare('DELETE FROM ldraw_render_queue WHERE id = ?');
@@ -655,18 +764,22 @@ function runLdrawRenderWorkerOnce(PDO $pdo): bool
         if ($target['ldrawId'] === null || $target['ldrawColorCode'] === null) {
             // Definitively resolved either way (confirmed no LDraw mapping, or
             // no usable color) — permanent, mark it rather than re-attempting.
-            $upsertStmt->execute([$row['part_id'], $row['color_id'], null]);
+            $upsertStmt->execute([$row['part_id'], $row['color_id'], $row['angle'], null]);
             $deleteStmt->execute([$row['id']]);
             return true;
         }
 
-        $filename = $row['color_id'] . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $target['ldrawId']) . '.png';
+        // Angle suffix only for non-'home' renders, so every filename/path
+        // this feature predates (all of them 'home') stays byte-for-byte
+        // unchanged — no migration/rename pass needed for existing renders.
+        $angleSuffix = $row['angle'] !== 'home' ? '_' . $row['angle'] : '';
+        $filename = $row['color_id'] . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $target['ldrawId']) . $angleSuffix . '.png';
         $shard = getImageShard($filename);
         $dir = getImageStorageDir('part_color_images', $shard);
         $absolutePath = $dir . '/' . $filename;
         $relativePath = getImageRelativePath('part_color_images', $shard, $filename);
 
-        $renderResult = renderLdrawPartImage($target['ldrawId'], $target['ldrawColorCode'], $absolutePath);
+        $renderResult = renderLdrawPartImage($target['ldrawId'], $target['ldrawColorCode'], $absolutePath, $row['angle']);
     } catch (Throwable $e) {
         // A Rebrickable API hiccup during resolveLdrawRenderTarget() (network
         // blip, transient 5xx) is not a verdict on the part — send it to the
@@ -677,12 +790,12 @@ function runLdrawRenderWorkerOnce(PDO $pdo): bool
     }
 
     if ($renderResult === true) {
-        $upsertStmt->execute([$row['part_id'], $row['color_id'], $relativePath]);
+        $upsertStmt->execute([$row['part_id'], $row['color_id'], $row['angle'], $relativePath]);
         $deleteStmt->execute([$row['id']]);
     } elseif ($renderResult === false) {
         // The .dat file wasn't found in the library — a real (if rare) gap,
         // permanent for this library version.
-        $upsertStmt->execute([$row['part_id'], $row['color_id'], null]);
+        $upsertStmt->execute([$row['part_id'], $row['color_id'], $row['angle'], null]);
         $deleteStmt->execute([$row['id']]);
     } else {
         // null: killed by LDRAW_RENDER_EXEC_TIMEOUT_SECONDS — transient, not
@@ -691,7 +804,7 @@ function runLdrawRenderWorkerOnce(PDO $pdo): bool
         // only worker; only given up on after repeated attempts.
         $attempts = (int) $row['attempts'] + 1;
         if ($attempts >= LDRAW_RENDER_MAX_ATTEMPTS) {
-            $upsertStmt->execute([$row['part_id'], $row['color_id'], null]);
+            $upsertStmt->execute([$row['part_id'], $row['color_id'], $row['angle'], null]);
             $deleteStmt->execute([$row['id']]);
         } else {
             $requeueStmt->execute([$attempts, $row['id']]);
