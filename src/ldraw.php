@@ -578,7 +578,12 @@ function getLdrawSetRenderProgress(PDO $pdo, array $items): array
  * one query, keyed by angle. A NULL local_image_path (a permanently
  * unrenderable pair, e.g. a sticker) shows up the same as any other
  * settled/non-missing angle, distinguished from "not yet rendered" (key
- * absent entirely) by getLdrawFourAngleProgress()'s caller.
+ * absent entirely). Used directly by the Pickliste's active-picking screen
+ * (renderPickListActive(), src/pick_pages.php) to build its image gallery —
+ * rendering itself was already queued in full at pick-list creation time
+ * (enqueueLdrawAnglesForPickListItems(), src/pick_lists.php), so this just
+ * reads back whatever's finished by the time the user gets to this item, no
+ * polling/enqueueing needed here.
  *
  * @return array<string, ?string> angle => local_image_path, only for angles that already have a row
  */
@@ -594,50 +599,6 @@ function getLdrawFourAngleImages(PDO $pdo, int $partId, int $rebrickableColorId)
         $images[$row['angle']] = $row['local_image_path'];
     }
     return $images;
-}
-
-/**
- * The Pickliste's "4 views" detail button (src/pick_lists.php) — same shape
- * as getLdrawSetRenderProgress() but scoped to one part+color's 4 angles
- * instead of a whole set's worth of pairs, and used strictly on demand (only
- * when a user actually opens this modal for a specific part while picking —
- * never bulk-enqueued for a whole pick list up front, to keep worker load
- * bounded and predictable).
- *
- * @return array{status:string, percent:int, done:int, total:int, currentPart:?string, queueDepth:int, images:array<string,?string>}
- */
-function getLdrawFourAngleProgress(PDO $pdo, int $partId, int $rebrickableColorId): array
-{
-    $images = getLdrawFourAngleImages($pdo, $partId, $rebrickableColorId);
-
-    // A part already known unrenderable at 'home' (e.g. a sticker, marked by
-    // getMissingLdrawRenderPairs()) will never render at any other angle
-    // either — short-circuit as fully "done" (all 4 angles unavailable)
-    // instead of enqueueing 3 renders guaranteed to fail the same way.
-    if (array_key_exists('home', $images) && $images['home'] === null) {
-        return [
-            'status' => 'done', 'percent' => 100, 'done' => 4, 'total' => 4,
-            'currentPart' => null, 'queueDepth' => 0, 'images' => $images,
-        ];
-    }
-
-    $missingAngles = array_values(array_diff(LDRAW_PICK_DETAIL_ANGLES, array_keys($images)));
-    enqueueLdrawRenderAngles($pdo, $partId, $rebrickableColorId, $missingAngles);
-
-    $total = count(LDRAW_PICK_DETAIL_ANGLES);
-    $done = $total - count($missingAngles);
-    $percent = (int) round(min(1.0, $done / $total) * 100);
-    $queueStatus = getLdrawQueueStatus($pdo);
-
-    return [
-        'status' => count($missingAngles) > 0 ? 'running' : 'done',
-        'percent' => $percent,
-        'done' => $done,
-        'total' => $total,
-        'currentPart' => $queueStatus['currentPart'],
-        'queueDepth' => $queueStatus['queueDepth'],
-        'images' => $images,
-    ];
 }
 
 /**

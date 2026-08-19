@@ -146,7 +146,6 @@ function renderPickListCreate(PDO $pdo, string $sourceType, string $query, ?int 
     $sourceType = $sourceType === 'minifig' ? 'minifig' : 'set';
 
     $html = '<div class="pick-screen">';
-    $html .= '<a class="pick-back-link" href="?screen=list">&lsaquo; ' . htmlspecialchars(t('pick_back_to_overview')) . '</a>';
     $html .= '<h1>' . htmlspecialchars(t('pick_create_heading')) . '</h1>';
 
     $html .= '<div class="pick-tabs">';
@@ -260,7 +259,6 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
     $picked = array_sum(array_column($items, 'picked_quantity'));
 
     $html = '<div class="pick-screen">';
-    $html .= '<a class="pick-back-link" href="?screen=list">&lsaquo; ' . htmlspecialchars(t('pick_back_to_overview')) . '</a>';
     $locationStmt = $pdo->prepare('SELECT name FROM storage_locations WHERE id = ?');
     $locationStmt->execute([$pickList['location_id']]);
     $html .= '<h1>' . htmlspecialchars((string) $locationStmt->fetchColumn()) . '</h1>';
@@ -323,20 +321,40 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
 
     $display = getPickItemDisplayInfo($pdo, $openItem);
 
+    // Whatever LDraw angles are already cached for this part+color, in a
+    // fixed order — rendering was queued in full back when this pick list
+    // was created (enqueueLdrawAnglesForPickListItems(), src/pick_lists.php),
+    // not on demand while picking, so by the time the user actually reaches
+    // this item most/all of them are typically already done; no polling
+    // needed here, just show whatever's ready right now. Falls back to the
+    // one generic thumbnail if LDraw rendering isn't enabled or nothing has
+    // rendered yet at all.
+    $galleryImages = [];
+    if ($display['part_id'] !== null && $display['rebrickable_color_id'] !== null) {
+        $angleImages = getLdrawFourAngleImages($pdo, $display['part_id'], $display['rebrickable_color_id']);
+        foreach (LDRAW_PICK_DETAIL_ANGLES as $angle) {
+            if (!empty($angleImages[$angle])) {
+                $galleryImages[] = $angleImages[$angle];
+            }
+        }
+    }
+    if (empty($galleryImages) && !empty($display['thumbnail'])) {
+        $galleryImages[] = $display['thumbnail'];
+    }
+
     $html .= '<div class="pick-item-card">';
-    if (!empty($display['thumbnail'])) {
-        $html .= '<img class="pick-item-thumb" src="' . htmlspecialchars(pickAssetUrl($display['thumbnail'])) . '" alt="">';
+    if (!empty($galleryImages)) {
+        $html .= '<div class="pick-item-gallery">';
+        foreach ($galleryImages as $galleryImage) {
+            $html .= '<img src="' . htmlspecialchars(pickAssetUrl($galleryImage)) . '" alt="">';
+        }
+        $html .= '</div>';
     }
     $html .= '<h2>' . htmlspecialchars($display['label']) . '</h2>';
     if ($display['color_name'] !== null) {
         $html .= '<p class="pick-item-color">' . htmlspecialchars($display['color_name']) . '</p>';
     }
     $html .= '<p>' . htmlspecialchars(t('pick_item_needed_label', ['needed' => (string) $openItem['needed_quantity'], 'picked' => (string) $openItem['picked_quantity']])) . '</p>';
-
-    if ($display['part_id'] !== null) {
-        $html .= '<button type="button" class="pick-btn" id="pick-4views-btn" data-part-id="' . $display['part_id'] . '" data-rebrickable-color-id="' . ($display['rebrickable_color_id'] ?? '') . '">' . htmlspecialchars(t('pick_item_4views_button')) . '</button>';
-        $html .= '<div class="pick-4views-modal" id="pick-4views-modal" style="display:none;"><div class="pick-4views-grid" id="pick-4views-grid">' . htmlspecialchars(t('pick_item_4views_loading')) . '</div><button type="button" class="pick-btn" id="pick-4views-close">' . htmlspecialchars(t('close_button')) . '</button></div>';
-    }
 
     if (!empty($steps['steps'])) {
         $step = $steps['steps'][0];
@@ -419,43 +437,6 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
     });
   }
 
-  var viewsBtn = document.getElementById('pick-4views-btn');
-  var viewsModal = document.getElementById('pick-4views-modal');
-  var viewsGrid = document.getElementById('pick-4views-grid');
-  var viewsClose = document.getElementById('pick-4views-close');
-  if (viewsBtn) {
-    var poll = null;
-    viewsBtn.addEventListener('click', function() {
-      viewsModal.style.display = 'block';
-      viewsGrid.textContent = '…';
-      function tick() {
-        var params = new URLSearchParams();
-        params.set('action', 'pick_ldraw_angle_progress');
-        params.set('part_id', viewsBtn.dataset.partId);
-        params.set('rebrickable_color_id', viewsBtn.dataset.rebrickableColorId || '0');
-        fetch('?' + params.toString(), { credentials: 'same-origin' })
-          .then(function(r) { return r.json(); })
-          .then(function(res) {
-            if (!res.success) { return; }
-            var html = '';
-            Object.keys(res.images || {}).forEach(function(angle) {
-              if (res.images[angle]) {
-                html += '<img src="' + res.images[angle] + '" alt="' + angle + '">';
-              }
-            });
-            viewsGrid.innerHTML = html || '…';
-            if (res.status === 'running') {
-              poll = setTimeout(tick, 1500);
-            }
-          });
-      }
-      tick();
-    });
-    viewsClose.addEventListener('click', function() {
-      viewsModal.style.display = 'none';
-      if (poll) { clearTimeout(poll); }
-    });
-  }
 })();
 </script>
 SCRIPT;
@@ -469,7 +450,6 @@ function renderPickListPutAway(PDO $pdo, array $pickList): string
     $suggestions = getPutAwaySuggestions($pdo, (int) $pickList['id']);
 
     $html = '<div class="pick-screen">';
-    $html .= '<a class="pick-back-link" href="?screen=list">&lsaquo; ' . htmlspecialchars(t('pick_back_to_overview')) . '</a>';
     $html .= '<h1>' . htmlspecialchars(t('pick_putaway_heading')) . '</h1>';
 
     if (empty($suggestions)) {

@@ -141,14 +141,6 @@ body {
   margin: 1.5rem 0 0.6rem;
 }
 
-.pick-back-link {
-  display: inline-block;
-  color: var(--pick-muted);
-  text-decoration: none;
-  font-size: 0.9rem;
-  margin-bottom: 0.5rem;
-}
-
 .pick-btn {
   display: inline-flex;
   align-items: center;
@@ -318,11 +310,31 @@ body {
   gap: 0.6rem;
 }
 
-.pick-item-thumb {
+/* Horizontal-scroll-snap gallery for the picking screen's LDraw angle
+   images (renderPickListActive(), src/pick_pages.php) — native touch
+   scrolling already gives the "swipe through the pictures" behavior asked
+   for, no JS carousel needed. Falls back to a single centered image
+   automatically: one <img> with scroll-snap and nothing to scroll to just
+   sits still. */
+.pick-item-gallery {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  gap: 0.5rem;
+  margin: 0 auto;
+  max-width: 100%;
+}
+
+.pick-item-gallery img {
+  flex-shrink: 0;
   width: 8rem;
   height: 8rem;
   object-fit: contain;
-  margin: 0 auto;
+  scroll-snap-align: center;
+}
+
+.pick-item-gallery:has(img:only-child) {
+  justify-content: center;
 }
 
 .pick-item-color {
@@ -371,35 +383,6 @@ body {
   border: 1px solid var(--pick-border);
   border-radius: 1rem;
   text-align: center;
-}
-
-.pick-4views-modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.9);
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 1rem;
-}
-
-.pick-4views-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-  width: 100%;
-  max-width: 24rem;
-  color: #fff;
-  text-align: center;
-}
-
-.pick-4views-grid img {
-  width: 100%;
-  background: #fff;
-  border-radius: 0.5rem;
 }
 
 .pick-putaway-rows {

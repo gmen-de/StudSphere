@@ -8,6 +8,7 @@ require_once __DIR__ . '/sets.php';
 require_once __DIR__ . '/minifigs.php';
 require_once __DIR__ . '/icons.php';
 require_once __DIR__ . '/i18n.php';
+require_once __DIR__ . '/ldraw.php';
 
 /**
  * Pickliste domain logic (/pick/, see the project plan) — a pick list walks
@@ -201,9 +202,56 @@ function createPickList(PDO $pdo, int $userId, string $sourceType, int $catalogI
                 $item['minifig_id'], $item['source_minifig_storage_item_id'], $item['needed_quantity'],
             ]);
         }
+        enqueueLdrawAnglesForPickListItems($pdo, $items);
     }
 
     return $pickListId;
+}
+
+/**
+ * Queues all of LDRAW_PICK_DETAIL_ANGLES for every 'part' item in a
+ * newly-created pick list — per explicit feedback, rendering the extra 3
+ * angles on demand while actively picking took too long to feel useful (a
+ * leocad render is 60-120s each, see renderLdrawPartImage()'s own doc
+ * comment); queuing them all right away, while the user is still on
+ * set_detail/creating the list rather than standing at a shelf waiting,
+ * means the picking screen's little image strip (renderPickListActive(),
+ * src/pick_pages.php) mostly just has to display whatever's already
+ * finished by the time picking actually reaches that part. $items is
+ * whatever computePickListNeededItems()/getSetAvailablePartsForPickList()
+ * already produced — reuses their part_id/color_id (surrogate colors.id)
+ * pairs rather than re-querying.
+ */
+function enqueueLdrawAnglesForPickListItems(PDO $pdo, array $items): void
+{
+    if (!ldrawContextualRenderingReady()) {
+        return;
+    }
+    $partIds = [];
+    foreach ($items as $item) {
+        if (($item['item_type'] ?? 'part') === 'part' && $item['color_id'] !== null) {
+            $partIds[$item['part_id'] . ':' . $item['color_id']] = ['part_id' => $item['part_id'], 'color_id' => $item['color_id']];
+        }
+    }
+    if (empty($partIds)) {
+        return;
+    }
+
+    $colorIds = array_values(array_unique(array_column($partIds, 'color_id')));
+    $placeholders = implode(',', array_fill(0, count($colorIds), '?'));
+    $colorStmt = $pdo->prepare("SELECT id, color_id FROM colors WHERE id IN ($placeholders)");
+    $colorStmt->execute($colorIds);
+    $rebrickableColorIds = [];
+    foreach ($colorStmt->fetchAll() as $row) {
+        $rebrickableColorIds[(int) $row['id']] = (int) $row['color_id'];
+    }
+
+    foreach ($partIds as $pair) {
+        $rebrickableColorId = $rebrickableColorIds[$pair['color_id']] ?? null;
+        if ($rebrickableColorId !== null) {
+            enqueueLdrawRenderAngles($pdo, $pair['part_id'], $rebrickableColorId, LDRAW_PICK_DETAIL_ANGLES);
+        }
+    }
 }
 
 /**
@@ -308,6 +356,7 @@ function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, str
         $insertItemStmt->execute([$pickListId, $part['part_id'], $part['color_id'], $part['needed_quantity']]);
         $totalQuantity += $part['needed_quantity'];
     }
+    enqueueLdrawAnglesForPickListItems($pdo, $itemsToInsert);
 
     return ['pickListId' => $pickListId, 'totalQuantity' => $totalQuantity];
 }
