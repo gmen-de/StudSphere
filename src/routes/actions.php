@@ -266,6 +266,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw
     exit;
 }
 
+// Catalog set_detail's "Bauteile auf Pickliste setzen" dialog polls this
+// right after creating a pick list (renderCreatePickListFromSetModal(),
+// src/pick_lists.php) — same tick shape as ldraw_set_render_tick above, just
+// scoped to one pick list's own items (getLdrawPickListRenderProgress(),
+// src/ldraw.php) instead of a whole set's inventory. Duplicated in
+// src/routes/pick_actions.php for the PWA's own create screen, which is a
+// genuinely separate entry point with its own action dispatch (see that
+// file's doc comment) — not reachable from here.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw_pick_list_render_tick') {
+    header('Content-Type: application/json');
+    try {
+        if (!ldrawContextualRenderingReady()) {
+            throw new RuntimeException(t('ldraw_tools_unavailable', ['missing' => 'leocad, xvfb']));
+        }
+
+        $tickPickListId = (int) ($_POST['pick_list_id'] ?? 0);
+        if ($tickPickListId <= 0) {
+            throw new RuntimeException(t('ldraw_invalid_inventory'));
+        }
+
+        echo json_encode(getLdrawPickListRenderProgress($pdo, $tickPickListId), JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'percent' => 0, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'check_update') {
     header('Content-Type: application/json');
     try {

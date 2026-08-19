@@ -368,7 +368,92 @@ SCRIPT;
     return $html;
 }
 
-function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
+/**
+ * PWA-native counterpart to the desktop app's .ldraw-render-overlay
+ * (style.css) — same ring/percent/message/status/skip shape, styled to
+ * /pick/'s own iOS-HIG design tokens (pick/style.css) instead of the
+ * desktop app's fixed dark scrim, since this is a genuinely different visual
+ * system (light/dark via prefers-color-scheme here, not a permanent dark
+ * overlay). Polls action=ldraw_pick_list_render_tick (src/routes/pick_actions.php)
+ * and reloads this same URL once done — simplest correct way to reveal the
+ * now-ready deck, matching how every other action on this screen already
+ * works (see src/pick_pages.php's own file-level doc comment: "a plain,
+ * reliable server render"). Skip re-requests the same URL with
+ * &skip_render=1, which renderPickListActive() checks to skip this block
+ * entirely on that one load.
+ */
+function renderPickListLdrawWaitOverlay(int $pickListId): string
+{
+    $pickListIdJson = json_encode($pickListId);
+    $currentTemplateJson = json_encode(t('ldraw_set_render_current'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $waitingJson = json_encode(t('ldraw_set_render_waiting'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $html = '<div class="pick-render-overlay" id="pick-render-overlay">';
+    $html .= '<div class="pick-render-ring-wrap">';
+    $html .= '<svg class="pick-render-ring" viewBox="0 0 100 100" aria-hidden="true">';
+    $html .= '<circle class="pick-render-ring-bg" cx="50" cy="50" r="45"></circle>';
+    $html .= '<circle class="pick-render-ring-fg" id="pick-render-ring-fg" cx="50" cy="50" r="45"></circle>';
+    $html .= '</svg>';
+    $html .= '<span class="pick-render-percent" id="pick-render-percent">0%</span>';
+    $html .= '</div>';
+    $html .= '<p class="pick-render-message">' . htmlspecialchars(t('ldraw_set_render_message')) . '</p>';
+    $html .= '<p class="pick-render-status" id="pick-render-status"></p>';
+    $html .= '<button type="button" class="pick-btn" id="pick-render-skip">' . htmlspecialchars(t('ldraw_set_render_skip')) . '</button>';
+    $html .= '</div>';
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var pickListId = $pickListIdJson;
+  var ringFg = document.getElementById('pick-render-ring-fg');
+  var percentLabel = document.getElementById('pick-render-percent');
+  var statusLabel = document.getElementById('pick-render-status');
+  var skipBtn = document.getElementById('pick-render-skip');
+  var circumference = 2 * Math.PI * 45;
+  ringFg.style.strokeDasharray = circumference.toFixed(2);
+
+  skipBtn.addEventListener('click', function() {
+    var params = new URLSearchParams(window.location.search);
+    params.set('skip_render', '1');
+    window.location.href = '?' + params.toString();
+  });
+
+  function tick() {
+    var formData = new FormData();
+    formData.set('action', 'ldraw_pick_list_render_tick');
+    formData.set('pick_list_id', String(pickListId));
+    fetch('?action=ldraw_pick_list_render_tick', { method: 'POST', body: formData, credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var percent = data.percent || 0;
+        percentLabel.textContent = percent + '%';
+        ringFg.style.strokeDashoffset = (circumference * (1 - percent / 100)).toFixed(2);
+        if (data.currentPart) {
+          statusLabel.textContent = $currentTemplateJson.replace('{part}', data.currentPart).replace('{count}', data.queueDepth);
+        } else if (data.queueDepth > 0) {
+          statusLabel.textContent = $waitingJson;
+        } else {
+          statusLabel.textContent = '';
+        }
+        if (data.status === 'done' || data.status === 'error') {
+          window.location.reload();
+          return;
+        }
+        setTimeout(tick, 1000);
+      })
+      .catch(function() {
+        setTimeout(tick, 2000);
+      });
+  }
+  tick();
+})();
+</script>
+SCRIPT;
+
+    return $html;
+}
+
+function renderPickListActive(PDO $pdo, array $pickList, int $userId, bool $skipRenderWait = false): string
 {
     $items = getPickListItems($pdo, (int) $pickList['id']);
     $needed = array_sum(array_column($items, 'needed_quantity'));
@@ -389,6 +474,22 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
         $html .= '<p class="pick-empty-hint">' . htmlspecialchars(t('pick_list_closed_hint')) . '</p>';
         $html .= '</div>';
         return $html;
+    }
+
+    // Blocks on the list's own still-missing LDraw renders (per explicit
+    // request — waiting up front at creation/entry time rather than the
+    // gallery quietly catching up over the next several visits) before
+    // showing the deck at all. Skippable (skip_render=1, set by the overlay's
+    // own button below) and self-clearing: once getLdrawPickListRenderProgress()
+    // reports 'done' on a later load, this block is simply never entered
+    // again, no flag to reset anywhere.
+    if (!$skipRenderWait && ldrawContextualRenderingReady()) {
+        $renderProgress = getLdrawPickListRenderProgress($pdo, (int) $pickList['id']);
+        if ($renderProgress['status'] === 'running') {
+            $html .= renderPickListLdrawWaitOverlay((int) $pickList['id']);
+            $html .= '</div>';
+            return $html;
+        }
     }
 
     // Skips items with a genuine shortfall (getPickStepsForItem() found no

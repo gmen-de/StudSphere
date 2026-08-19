@@ -197,3 +197,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'flag_
     exit;
 }
 
+// Duplicated from src/routes/actions.php's identically-named branch — this
+// is a genuinely separate entry point (see this file's own doc comment), so
+// the main app's copy isn't reachable from here. Both call the same
+// getLdrawPickListRenderProgress() (src/ldraw.php); polled by the active
+// picking screen (renderPickListActive(), src/pick_pages.php) when it needs
+// to block on still-missing renders rather than showing a partial gallery.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ldraw_pick_list_render_tick') {
+    header('Content-Type: application/json');
+    try {
+        if (!ldrawContextualRenderingReady()) {
+            throw new RuntimeException(t('ldraw_tools_unavailable', ['missing' => 'leocad, xvfb']));
+        }
+
+        $tickPickListId = (int) ($_POST['pick_list_id'] ?? 0);
+        $tickPickList = $tickPickListId > 0 ? getPickList($pdo, $tickPickListId) : null;
+        if ($tickPickList === null || (int) $tickPickList['user_id'] !== $pickUserId) {
+            throw new RuntimeException(t('pick_error_not_found'));
+        }
+
+        echo json_encode(getLdrawPickListRenderProgress($pdo, $tickPickListId), JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'percent' => 0, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+

@@ -938,9 +938,37 @@ function renderCreatePickListFromSetModal(int $setId): string
     $html .= '</div>';
     $html .= '</div></div>';
 
+    // Shown between a successful create and the success box above — waits
+    // for the new list's still-missing LDraw renders (getLdrawPickListRenderProgress(),
+    // src/ldraw.php) rather than leaving the picking screen's gallery to
+    // catch up on its own over the next several pick-session visits, per
+    // explicit request. Reuses the SAME .ldraw-render-* classes as the
+    // existing set_detail-inventory-tab overlay (style.css) — own element
+    // ids throughout so the two can coexist on the same page without
+    // colliding — but instead of that overlay's window.location.reload() on
+    // completion, this one just reveals the success box in place, since
+    // there's no page navigation involved (fetch()-based, same as the rest
+    // of this modal).
+    $html .= '<div class="ldraw-render-overlay" id="set-pick-list-render-overlay" style="display:none;">';
+    $html .= '<div class="ldraw-render-panel">';
+    $html .= '<div class="ldraw-render-ring-wrap">';
+    $html .= '<svg class="ldraw-render-ring" viewBox="0 0 100 100" aria-hidden="true">';
+    $html .= '<circle class="ldraw-render-ring-bg" cx="50" cy="50" r="45"></circle>';
+    $html .= '<circle class="ldraw-render-ring-fg" id="set-pick-list-render-ring-fg" cx="50" cy="50" r="45"></circle>';
+    $html .= '</svg>';
+    $html .= '<span class="ldraw-render-percent" id="set-pick-list-render-percent">0%</span>';
+    $html .= '</div>';
+    $html .= '<p class="ldraw-render-message">' . htmlspecialchars(t('ldraw_set_render_message')) . '</p>';
+    $html .= '<p class="ldraw-render-status" id="set-pick-list-render-status"></p>';
+    $html .= '<button type="button" class="ldraw-render-skip" id="set-pick-list-render-skip">' . htmlspecialchars(t('ldraw_set_render_skip')) . '</button>';
+    $html .= '</div>';
+    $html .= '</div>';
+
     $setIdJson = json_encode($setId);
     $errorGenericJson = json_encode(t('pick_error_generic'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $emptyJson = json_encode(t('set_pick_list_empty'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $renderCurrentTemplateJson = json_encode(t('ldraw_set_render_current'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $renderWaitingJson = json_encode(t('ldraw_set_render_waiting'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $html .= <<<SCRIPT
 <script>
 (function(){
@@ -958,7 +986,68 @@ function renderCreatePickListFromSetModal(int $setId): string
   var successMessage = document.getElementById('set-pick-list-success-message');
   var successOpenLink = document.getElementById('set-pick-list-success-open');
   var successCloseBtn = document.getElementById('set-pick-list-success-close');
+  var renderOverlay = document.getElementById('set-pick-list-render-overlay');
+  var renderRingFg = document.getElementById('set-pick-list-render-ring-fg');
+  var renderPercent = document.getElementById('set-pick-list-render-percent');
+  var renderStatus = document.getElementById('set-pick-list-render-status');
+  var renderSkipBtn = document.getElementById('set-pick-list-render-skip');
   if (!openBtn || !modal) { return; }
+
+  var renderCircumference = 2 * Math.PI * 45;
+  if (renderRingFg) { renderRingFg.style.strokeDasharray = renderCircumference.toFixed(2); }
+
+  function showSuccess() {
+    renderOverlay.style.display = 'none';
+    formBox.style.display = 'none';
+    successBox.style.display = 'block';
+  }
+
+  // Polls the new list's own render progress (getLdrawPickListRenderProgress(),
+  // src/ldraw.php via action=ldraw_pick_list_render_tick) until every part's
+  // LDraw angles are ready, or the user taps skip — either way ends at
+  // showSuccess(), never a page reload (nothing here navigates).
+  function pollRenderProgress(pickListId) {
+    var stopped = false;
+    if (renderSkipBtn) {
+      renderSkipBtn.onclick = function() { stopped = true; showSuccess(); };
+    }
+
+    function tick() {
+      if (stopped) { return; }
+      var formData = new FormData();
+      formData.set('action', 'ldraw_pick_list_render_tick');
+      formData.set('pick_list_id', String(pickListId));
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (stopped) { return; }
+          var percent = data.percent || 0;
+          renderPercent.textContent = percent + '%';
+          if (renderRingFg) {
+            renderRingFg.style.strokeDashoffset = (renderCircumference * (1 - percent / 100)).toFixed(2);
+          }
+          if (data.currentPart) {
+            renderStatus.textContent = $renderCurrentTemplateJson.replace('{part}', data.currentPart).replace('{count}', data.queueDepth);
+          } else if (data.queueDepth > 0) {
+            renderStatus.textContent = $renderWaitingJson;
+          } else {
+            renderStatus.textContent = '';
+          }
+          if (data.status === 'done' || data.status === 'error') {
+            showSuccess();
+            return;
+          }
+          setTimeout(tick, 1000);
+        })
+        .catch(function() {
+          // A transient network hiccup shouldn't strand the user behind the
+          // overlay forever — same reasoning as the images already showing
+          // whatever's ready: fail open into the success box.
+          showSuccess();
+        });
+    }
+    tick();
+  }
 
   function showForm() {
     formBox.style.display = 'block';
@@ -1070,8 +1159,15 @@ function renderCreatePickListFromSetModal(int $setId): string
         }
         successMessage.textContent = res.message;
         successOpenLink.href = 'pick/index.php?screen=pick&id=' + res.pickListId;
-        formBox.style.display = 'none';
-        successBox.style.display = 'block';
+        if (renderOverlay) {
+          renderOverlay.style.display = 'flex';
+          renderPercent.textContent = '0%';
+          if (renderRingFg) { renderRingFg.style.strokeDashoffset = renderCircumference.toFixed(2); }
+          renderStatus.textContent = '';
+          pollRenderProgress(res.pickListId);
+        } else {
+          showSuccess();
+        }
       })
       .catch(function() {
         submitBtn.disabled = false;

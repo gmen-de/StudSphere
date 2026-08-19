@@ -904,3 +904,73 @@ body.pick-body-no-navbar {
   background: var(--pick-fill-secondary);
   color: var(--pick-text);
 }
+
+/* Render-wait overlay (renderPickListLdrawWaitOverlay(), src/pick_pages.php)
+   — the PWA-native counterpart to the desktop app's .ldraw-render-overlay
+   (style.css): same ring/percent/message/status/skip shape, using this
+   app's own light/dark tokens instead of a fixed dark scrim, since /pick/
+   genuinely supports both appearances rather than being a permanent
+   dark-on-dark overlay. Sits in normal flow within .pick-screen (not
+   position:fixed) — it fully replaces the deck for this one render rather
+   than floating over other content. */
+.pick-render-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--pick-card);
+  box-shadow: var(--pick-shadow);
+  border-radius: 1rem;
+  padding: 1rem 1.5rem 1.5rem;
+}
+
+.pick-render-ring-wrap {
+  position: relative;
+  width: 7rem;
+  height: 7rem;
+  margin: 0.5rem auto;
+}
+
+.pick-render-ring {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.pick-render-ring-bg {
+  fill: none;
+  stroke: var(--pick-fill-secondary);
+  stroke-width: 8;
+}
+
+.pick-render-ring-fg {
+  fill: none;
+  stroke: var(--pick-accent);
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.2s ease;
+}
+
+.pick-render-percent {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pick-render-message {
+  text-align: center;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.pick-render-status {
+  text-align: center;
+  color: var(--pick-muted);
+  font-size: 0.85rem;
+  min-height: 1.1em;
+  margin: 0 0 1.25rem;
+}

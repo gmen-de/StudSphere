@@ -141,7 +141,7 @@ if ($currentUser !== null) {
                 exit;
             }
             $currentPickListId = (int) $pickList['id'];
-            $content = renderPickListActive($pdo, $pickList, (int) $currentUser['id']);
+            $content = renderPickListActive($pdo, $pickList, (int) $currentUser['id'], ($_GET['skip_render'] ?? '') === '1');
             $screenTitle = $pickList['name'] !== '' ? $pickList['name'] : t('pick_app_title');
             break;
         case 'list':

@@ -619,6 +619,81 @@ function getLdrawPickAngleImages(PDO $pdo, int $partId, int $rebrickableColorId)
 }
 
 /**
+ * getLdrawSetRenderProgress()'s counterpart for a pick list, per explicit
+ * request: waiting for renders to catch up at pick-list CREATION time (this
+ * function, polled from a blocking overlay) rather than discovering gaps
+ * later while actively picking. Scoped to the list's own 'part' items (each
+ * needs BOTH LDRAW_PICK_DETAIL_ANGLES, unlike the single-'home'-angle
+ * set_detail/location_content overlay this shares its queue/worker with)
+ * rather than a getSetPartsList()-shaped $items array, since pick_list_items
+ * already IS the definitive "what does this list need" source and re-deriving
+ * it from the set/minifig's full BOM would drag in parts the list itself
+ * doesn't actually contain (e.g. an owned_set_id-scoped "missing parts only"
+ * list, see createPickList()'s $missingOnly).
+ *
+ * @return array{status:string, percent:int, done:int, total:int, currentPart:?string, queueDepth:int}
+ */
+function getLdrawPickListRenderProgress(PDO $pdo, int $pickListId): array
+{
+    $pairsStmt = $pdo->prepare("SELECT DISTINCT part_id, color_id FROM pick_list_items WHERE pick_list_id = ? AND item_type = 'part'");
+    $pairsStmt->execute([$pickListId]);
+    $pairs = $pairsStmt->fetchAll();
+    if (empty($pairs)) {
+        return ['status' => 'done', 'percent' => 100, 'done' => 0, 'total' => 0, 'currentPart' => null, 'queueDepth' => 0];
+    }
+
+    // pick_list_items.color_id is the colors.id surrogate (matches
+    // storage_items) — resolve to Rebrickable's own color_id in one batch
+    // query, same pattern enqueueLdrawAnglesForPickListItems() already uses.
+    $colorIds = array_values(array_unique(array_column($pairs, 'color_id')));
+    $placeholders = implode(',', array_fill(0, count($colorIds), '?'));
+    $colorStmt = $pdo->prepare("SELECT id, color_id FROM colors WHERE id IN ($placeholders)");
+    $colorStmt->execute($colorIds);
+    $rebrickableColorIds = [];
+    foreach ($colorStmt->fetchAll() as $row) {
+        $rebrickableColorIds[(int) $row['id']] = (int) $row['color_id'];
+    }
+
+    $angleCount = count(LDRAW_PICK_DETAIL_ANGLES);
+    $existingStmt = $pdo->prepare(
+        'SELECT angle FROM part_color_images WHERE part_id = ? AND color_id = ? AND angle IN (' .
+        implode(',', array_fill(0, $angleCount, '?')) . ')'
+    );
+
+    $total = 0;
+    $missing = [];
+    foreach ($pairs as $pair) {
+        $rebrickableColorId = $rebrickableColorIds[(int) $pair['color_id']] ?? null;
+        if ($rebrickableColorId === null) {
+            continue;
+        }
+        $existingStmt->execute(array_merge([(int) $pair['part_id'], $rebrickableColorId], LDRAW_PICK_DETAIL_ANGLES));
+        $existingAngles = $existingStmt->fetchAll(PDO::FETCH_COLUMN);
+        foreach (LDRAW_PICK_DETAIL_ANGLES as $angle) {
+            $total++;
+            if (!in_array($angle, $existingAngles, true)) {
+                $missing[] = ['part_id' => (int) $pair['part_id'], 'color_id' => $rebrickableColorId, 'angle' => $angle];
+            }
+        }
+    }
+
+    enqueueLdrawRenders($pdo, $missing);
+
+    $done = $total - count($missing);
+    $percent = $total > 0 ? (int) round(min(1.0, $done / $total) * 100) : 100;
+    $queueStatus = getLdrawQueueStatus($pdo);
+
+    return [
+        'status' => count($missing) > 0 ? 'running' : 'done',
+        'percent' => $percent,
+        'done' => $done,
+        'total' => $total,
+        'currentPart' => $queueStatus['currentPart'],
+        'queueDepth' => $queueStatus['queueDepth'],
+    ];
+}
+
+/**
  * What the persistent render worker is doing right now — shared by
  * getLdrawSetRenderProgress() and any other caller that enqueues renders
  * and wants to show live status (see the location Explorer's loose-parts
