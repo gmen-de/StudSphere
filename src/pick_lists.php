@@ -917,12 +917,11 @@ function renderCreatePickListFromSetModal(int $setId): string
         }
         // The pick list's own display name defaults to (and is pre-filled
         // with) the set's own label, editable same as the PWA's own create
-        // screen — but the container field stays genuinely empty (a
-        // placeholder hint only) since that's a distinct, physical answer
-        // ("which box are you collecting into") that must not silently
-        // default to the set name.
+        // screen — but the container field's placeholder stays the generic
+        // "z.B. Tupper Box #1" example (set in the HTML already) rather than
+        // the set name, since that's a distinct, physical answer ("which box
+        // are you collecting into") with nothing to do with the set.
         listNameInput.value = res.defaultDescription || '';
-        nameInput.placeholder = res.defaultDescription || '';
         if (!res.parts.length) {
           partsBox.textContent = $emptyJson;
           return;
