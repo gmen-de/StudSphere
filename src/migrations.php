@@ -786,12 +786,10 @@ function getSchemaMigrations(): array
             // valid angle='home' entry with zero re-rendering and zero
             // filename/path changes.
             addColumnIfMissing($pdo, 'part_color_images', 'angle', "VARCHAR(20) NOT NULL DEFAULT 'home'");
-            dropIndexIfExists($pdo, 'part_color_images', 'part_color_image_unique');
-            $pdo->exec('ALTER TABLE part_color_images ADD UNIQUE KEY part_color_image_unique (part_id, color_id, angle)');
+            widenUniqueKeyOverForeignKey($pdo, 'part_color_images', 'part_color_image_unique', ['part_id', 'color_id', 'angle']);
 
             addColumnIfMissing($pdo, 'ldraw_render_queue', 'angle', "VARCHAR(20) NOT NULL DEFAULT 'home'");
-            dropIndexIfExists($pdo, 'ldraw_render_queue', 'ldraw_render_queue_pair');
-            $pdo->exec('ALTER TABLE ldraw_render_queue ADD UNIQUE KEY ldraw_render_queue_pair (part_id, color_id, angle)');
+            widenUniqueKeyOverForeignKey($pdo, 'ldraw_render_queue', 'ldraw_render_queue_pair', ['part_id', 'color_id', 'angle']);
         },
     ];
 }
@@ -853,6 +851,41 @@ function dropIndexIfExists(PDO $pdo, string $table, string $indexName): void
         return;
     }
     $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`");
+}
+
+/**
+ * Widens an existing UNIQUE KEY to cover additional trailing columns (e.g.
+ * (part_id, color_id) -> (part_id, color_id, angle)), safe to call even when
+ * that key's leading column is also the target of a FOREIGN KEY constraint
+ * on this table. A plain dropIndexIfExists() + separate ADD fails there with
+ * MySQL/MariaDB error 1553 ("needed in a foreign key constraint") — dropping
+ * the index leaves the table with no index at all covering the FK's column
+ * for the brief moment before the new one is added, which InnoDB refuses.
+ * Combining DROP and ADD into one ALTER TABLE statement instead makes MySQL
+ * evaluate the constraint against the final resulting schema, not the
+ * intermediate state, so it never actually goes without a covering index.
+ * Idempotent: does nothing once $indexName already has exactly $columns.
+ */
+function widenUniqueKeyOverForeignKey(PDO $pdo, string $table, string $indexName, array $columns): void
+{
+    $stmt = $pdo->prepare(
+        'SELECT column_name FROM information_schema.statistics
+         WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
+         ORDER BY seq_in_index'
+    );
+    $stmt->execute([$table, $indexName]);
+    $currentColumns = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    if ($currentColumns === $columns) {
+        return;
+    }
+
+    $columnList = implode(', ', array_map(fn (string $c): string => "`$c`", $columns));
+    if (empty($currentColumns)) {
+        $pdo->exec("ALTER TABLE `$table` ADD UNIQUE KEY `$indexName` ($columnList)");
+        return;
+    }
+    $pdo->exec("ALTER TABLE `$table` DROP INDEX `$indexName`, ADD UNIQUE KEY `$indexName` ($columnList)");
 }
 
 /**
