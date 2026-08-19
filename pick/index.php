@@ -203,6 +203,26 @@ echo <<<SCRIPT
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
+
+    // Auto-shrink the large title to fit on one line rather than wrapping
+    // or truncating — pick list names/set labels vary a lot in length and
+    // this app has no layout budget to reserve for a worst case. Mirrors
+    // iOS's own "adjustsFontSizeToFitWidth" large-title behavior: reset to
+    // the CSS baseline, then step the font-size down in whole pixels until
+    // scrollWidth (the text's real width) fits within clientWidth (the
+    // available box), down to a hard floor where the CSS ellipsis (see
+    // .pick-screen h1, pick/style.css) takes over as a last resort.
+    var MIN_TITLE_PX = 20;
+    var fitTitle = function() {
+      heading.style.fontSize = '';
+      var size = parseFloat(window.getComputedStyle(heading).fontSize);
+      while (heading.scrollWidth > heading.clientWidth && size > MIN_TITLE_PX) {
+        size -= 1;
+        heading.style.fontSize = size + 'px';
+      }
+    };
+    fitTitle();
+    window.addEventListener('resize', fitTitle);
   } else if (navbar) {
     navbar.classList.add('pick-navbar-scrolled');
   }

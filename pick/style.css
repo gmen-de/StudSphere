@@ -287,6 +287,14 @@ body {
   font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0.4rem 0 1rem;
+  /* Baseline safety net for the auto-shrink script in index.php (which
+     reduces font-size until this fits on one line): forces single-line
+     layout so the browser has something to measure against before JS runs,
+     and falls back to a plain ellipsis in the pathological case where even
+     the script's minimum size still doesn't fit. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pick-screen h2.pick-group-heading {
