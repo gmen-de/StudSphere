@@ -581,13 +581,24 @@ function renderPickListPutAway(PDO $pdo, array $pickList): string
 
     $html .= '<div class="pick-putaway-rows">';
     foreach ($suggestions as $i => $s) {
-        $partStmt = $pdo->prepare('SELECT part_num, name FROM parts WHERE id = ?');
-        $partStmt->execute([$s['part_id']]);
-        $part = $partStmt->fetch();
-        $label = $part !== false ? $part['part_num'] . ' ' . $part['name'] : ('#' . $s['part_id']);
+        if ($s['item_type'] === 'minifig') {
+            $figStmt = $pdo->prepare('SELECT fig_num, name FROM minifigs WHERE id = ?');
+            $figStmt->execute([$s['minifig_id']]);
+            $fig = $figStmt->fetch();
+            $label = $fig !== false ? $fig['fig_num'] . ' ' . $fig['name'] : ('#' . $s['minifig_id']);
+        } else {
+            $partStmt = $pdo->prepare('SELECT part_num, name FROM parts WHERE id = ?');
+            $partStmt->execute([$s['part_id']]);
+            $part = $partStmt->fetch();
+            $label = $part !== false ? $part['part_num'] . ' ' . $part['name'] : ('#' . $s['part_id']);
+        }
+        $quantityLabel = $s['item_type'] === 'minifig' ? '' : (' &times; ' . $s['quantity']);
 
-        $html .= '<div class="pick-putaway-row" data-index="' . $i . '" data-part-id="' . $s['part_id'] . '" data-color-id="' . ($s['color_id'] ?? '') . '" data-condition-type="' . htmlspecialchars($s['condition_type']) . '" data-quantity="' . $s['quantity'] . '" data-suggested-location-id="' . ($s['suggested_location_id'] ?? '') . '">';
-        $html .= '<span>' . htmlspecialchars($label) . ' &times; ' . $s['quantity'] . '</span>';
+        $html .= '<div class="pick-putaway-row" data-index="' . $i . '" data-item-type="' . htmlspecialchars($s['item_type']) . '"'
+            . ' data-part-id="' . $s['part_id'] . '" data-color-id="' . ($s['color_id'] ?? '') . '" data-condition-type="' . htmlspecialchars($s['condition_type']) . '" data-quantity="' . $s['quantity'] . '"'
+            . ' data-minifig-storage-item-id="' . ($s['minifig_storage_item_id'] ?? '') . '"'
+            . ' data-suggested-location-id="' . ($s['suggested_location_id'] ?? '') . '">';
+        $html .= '<span>' . htmlspecialchars($label) . $quantityLabel . '</span>';
         if ($s['suggested_location_id'] !== null) {
             $html .= '<span class="pick-putaway-suggestion">' . htmlspecialchars($s['suggested_location_path']) . '</span>';
             $html .= '<button type="button" class="pick-btn pick-putaway-confirm-btn">' . htmlspecialchars(t('pick_putaway_confirm_button')) . '</button>';
@@ -618,10 +629,15 @@ function renderPickListPutAway(PDO $pdo, array $pickList): string
       var formData = new FormData();
       formData.set('action', 'put_away_item');
       formData.set('pick_list_id', String(pickListId));
-      formData.set('part_id', row.dataset.partId);
-      formData.set('color_id', row.dataset.colorId);
-      formData.set('condition_type', row.dataset.conditionType);
-      formData.set('quantity', row.dataset.quantity);
+      formData.set('item_type', row.dataset.itemType);
+      if (row.dataset.itemType === 'minifig') {
+        formData.set('minifig_storage_item_id', row.dataset.minifigStorageItemId);
+      } else {
+        formData.set('part_id', row.dataset.partId);
+        formData.set('color_id', row.dataset.colorId);
+        formData.set('condition_type', row.dataset.conditionType);
+        formData.set('quantity', row.dataset.quantity);
+      }
       formData.set('destination_location_id', destinationId);
       fetch('?action=put_away_item', { method: 'POST', body: formData, credentials: 'same-origin' })
         .then(function(r) { return r.json(); })

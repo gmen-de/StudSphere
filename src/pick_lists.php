@@ -608,14 +608,20 @@ function maybeCompletePickList(PDO $pdo, int $pickListId): void
 }
 
 /**
- * One suggested put-away destination per part+color still sitting at a pick
- * list's own location: wherever that exact part+color already lives
- * elsewhere in storage (getPartStock()) — "put it back where its siblings
- * already are" needs no typing in the common case. Falls back to null
- * (pick manually) the first time a part+color has never been stored
- * anywhere else.
+ * One suggested put-away destination per part+color, and per already-
+ * assembled minifig instance, still sitting at a pick list's own location:
+ * wherever that same part+color/minifig already lives elsewhere in storage
+ * (getPartStock()/a sibling-instance lookup) — "put it back where its
+ * siblings already are" needs no typing in the common case. Falls back to
+ * null (pick manually) the first time something has never been stored
+ * anywhere else. A minifig row here is exactly the counterpart to a picked
+ * assembled instance (item_type='minifig' in pick_list_items,
+ * moveMinifigStorageItemInstance() on the way in) — a minifig that instead
+ * fell back to its constituent parts at pick time (no assembled instance
+ * available then) already shows up in the part rows below like any other
+ * part, nothing extra needed for that case.
  *
- * @return array<int, array{part_id:int, color_id:?int, condition_type:string, quantity:int, suggested_location_id:?int, suggested_location_path:?string}>
+ * @return array<int, array{item_type:string, part_id:?int, color_id:?int, condition_type:string, quantity:?int, minifig_storage_item_id:?int, minifig_id:?int, suggested_location_id:?int, suggested_location_path:?string}>
  */
 function getPutAwaySuggestions(PDO $pdo, int $pickListId): array
 {
@@ -623,21 +629,78 @@ function getPutAwaySuggestions(PDO $pdo, int $pickListId): array
     if ($pickList === null) {
         return [];
     }
-    $stock = getLocationStock((int) $pickList['location_id']);
+    $locationId = (int) $pickList['location_id'];
     $suggestions = [];
+
+    $stock = getLocationStock($locationId);
     foreach ($stock as $row) {
         $existing = $row['color_id'] !== null ? getPartStock($row['part_id'], $row['color_id']) : [];
-        $existing = array_values(array_filter($existing, fn (array $r): bool => $r['location_id'] !== (int) $pickList['location_id']));
+        $existing = array_values(array_filter($existing, fn (array $r): bool => $r['location_id'] !== $locationId));
         $suggestions[] = [
+            'item_type' => 'part',
             'part_id' => $row['part_id'],
             'color_id' => $row['color_id'],
             'condition_type' => $row['condition_type'],
             'quantity' => $row['quantity'],
+            'minifig_storage_item_id' => null,
+            'minifig_id' => null,
             'suggested_location_id' => $existing[0]['location_id'] ?? null,
             'suggested_location_path' => $existing[0]['location_path'] ?? null,
         ];
     }
+
+    $minifigStmt = $pdo->prepare('SELECT id, minifig_id, condition_type FROM minifig_storage_items WHERE location_id = ?');
+    $minifigStmt->execute([$locationId]);
+    $siblingStmt = $pdo->prepare(
+        "SELECT msi.location_id FROM minifig_storage_items msi
+         INNER JOIN storage_locations sl ON sl.id = msi.location_id
+         WHERE msi.minifig_id = ? AND msi.id != ?
+           AND (sl.location_type IS NULL OR sl.location_type NOT IN ('owned_set', 'pick_list'))
+         ORDER BY msi.id LIMIT 1"
+    );
+    foreach ($minifigStmt->fetchAll() as $row) {
+        $siblingStmt->execute([(int) $row['minifig_id'], (int) $row['id']]);
+        $siblingLocationId = $siblingStmt->fetchColumn();
+        $suggestions[] = [
+            'item_type' => 'minifig',
+            'part_id' => null,
+            'color_id' => null,
+            'condition_type' => $row['condition_type'],
+            'quantity' => null,
+            'minifig_storage_item_id' => (int) $row['id'],
+            'minifig_id' => (int) $row['minifig_id'],
+            'suggested_location_id' => $siblingLocationId !== false ? (int) $siblingLocationId : null,
+            'suggested_location_path' => $siblingLocationId !== false ? getStorageLocationPath((int) $siblingLocationId) : null,
+        ];
+    }
+
     return $suggestions;
+}
+
+/**
+ * Moves one already-assembled minifig instance out of a pick list's location
+ * back into general storage — the minifig counterpart to putAwayItem() below.
+ * No quantity/stock math needed (unlike parts): a minifig_storage_items row
+ * is always exactly one physical instance, so this is just a location move,
+ * same primitive pickItem() already uses to move it IN
+ * (moveMinifigStorageItemInstance(), src/storage.php).
+ */
+function putAwayMinifigItem(PDO $pdo, int $pickListId, int $minifigStorageItemId, int $destinationLocationId, ?int $userId): void
+{
+    $pickList = getPickList($pdo, $pickListId);
+    if ($pickList === null) {
+        throw new RuntimeException('Pick list not found.');
+    }
+
+    $stmt = $pdo->prepare('SELECT location_id FROM minifig_storage_items WHERE id = ?');
+    $stmt->execute([$minifigStorageItemId]);
+    $currentLocationId = $stmt->fetchColumn();
+    if ($currentLocationId === false || (int) $currentLocationId !== (int) $pickList['location_id']) {
+        throw new RuntimeException('Not enough stock at the pick list to put away.');
+    }
+
+    moveMinifigStorageItemInstance($minifigStorageItemId, $destinationLocationId);
+    closePickListIfEmpty($pdo, $pickListId);
 }
 
 function putAwayItem(PDO $pdo, int $pickListId, int $partId, int $colorId, string $conditionType, int $quantity, int $destinationLocationId, ?int $userId): void

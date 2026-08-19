@@ -146,10 +146,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'put_awa
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'put_away_item') {
     header('Content-Type: application/json');
     $pickListId = (int) ($_POST['pick_list_id'] ?? 0);
-    $partId = (int) ($_POST['part_id'] ?? 0);
-    $colorId = (int) ($_POST['color_id'] ?? 0);
-    $conditionType = ($_POST['condition_type'] ?? 'used') === 'new' ? 'new' : 'used';
-    $quantity = (int) ($_POST['quantity'] ?? 0);
     $destinationLocationId = (int) ($_POST['destination_location_id'] ?? 0);
 
     $pickList = getPickList($pdo, $pickListId);
@@ -158,7 +154,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'put_a
     }
 
     try {
-        putAwayItem($pdo, $pickListId, $partId, $colorId, $conditionType, $quantity, $destinationLocationId, $pickUserId);
+        if (($_POST['item_type'] ?? 'part') === 'minifig') {
+            $minifigStorageItemId = (int) ($_POST['minifig_storage_item_id'] ?? 0);
+            putAwayMinifigItem($pdo, $pickListId, $minifigStorageItemId, $destinationLocationId, $pickUserId);
+        } else {
+            $partId = (int) ($_POST['part_id'] ?? 0);
+            $colorId = (int) ($_POST['color_id'] ?? 0);
+            $conditionType = ($_POST['condition_type'] ?? 'used') === 'new' ? 'new' : 'used';
+            $quantity = (int) ($_POST['quantity'] ?? 0);
+            putAwayItem($pdo, $pickListId, $partId, $colorId, $conditionType, $quantity, $destinationLocationId, $pickUserId);
+        }
         echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         pickJsonError($e->getMessage());
