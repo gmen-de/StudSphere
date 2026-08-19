@@ -98,6 +98,14 @@ body {
   overflow: hidden;
 }
 
+/* Must come after the base rule above (and be at least as specific) to
+   actually win — the base rule's own unconditional `display: flex` was
+   silently overriding the [hidden] attribute's usual display:none, which is
+   why the menu rendered permanently open regardless of the attribute. */
+.pick-menu-panel[hidden] {
+  display: none;
+}
+
 .pick-menu-panel a {
   padding: 0.85rem 1rem;
   color: var(--pick-text);

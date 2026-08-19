@@ -722,6 +722,7 @@ return [
     'pick_create_submit_button' => 'Pickliste erstellen',
     'pick_list_closed_hint' => 'Diese Pickliste ist abgeschlossen.',
     'pick_complete_heading' => 'Alle Bauteile gepickt!',
+    'pick_all_shortfall_heading' => '{count} Bauteile fehlen komplett — nichts weiter zu picken. Bereits Gepicktes kann zurückgelegt werden.',
     'pick_complete_putaway_button' => 'Jetzt zurücklegen',
     'pick_complete_use_for_set_button' => 'Für neues Set verwenden',
     'pick_complete_leave_button' => 'Im Pick Lager lassen',

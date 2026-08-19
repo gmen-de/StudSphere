@@ -722,6 +722,7 @@ return [
     'pick_create_submit_button' => 'Create pick list',
     'pick_list_closed_hint' => 'This pick list is closed.',
     'pick_complete_heading' => 'All parts picked!',
+    'pick_all_shortfall_heading' => '{count} parts are completely missing — nothing left to pick. Whatever you already picked can still be put away.',
     'pick_complete_putaway_button' => 'Put away now',
     'pick_complete_use_for_set_button' => 'Use for a new set',
     'pick_complete_leave_button' => 'Leave in Pick Lager',

@@ -272,15 +272,29 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
         return $html;
     }
 
+    // Skips items with a genuine shortfall (getPickStepsForItem() found no
+    // location at all) rather than stopping there — entering quantity 0 for
+    // a shortfall item (§ pickItem()) doesn't change picked_quantity, so
+    // without this skip the SAME item would keep coming back forever and
+    // the user could never reach any of the list's other, still-pickable
+    // items. $openItems (still-needed rows) is walked in full so
+    // $shortfallCount reflects every item currently stuck, not just the
+    // ones scanned before the first pickable one was found.
+    $openItems = array_values(array_filter($items, fn (array $item): bool => (int) $item['picked_quantity'] < (int) $item['needed_quantity']));
     $openItem = null;
-    foreach ($items as $item) {
-        if ((int) $item['picked_quantity'] < (int) $item['needed_quantity']) {
+    $steps = null;
+    $shortfallCount = 0;
+    foreach ($openItems as $item) {
+        $itemSteps = getPickStepsForItem($pdo, $item);
+        if ($openItem === null && !empty($itemSteps['steps'])) {
             $openItem = $item;
-            break;
+            $steps = $itemSteps;
+        } elseif (empty($itemSteps['steps'])) {
+            $shortfallCount++;
         }
     }
 
-    if ($openItem === null) {
+    if (empty($openItems)) {
         $html .= '<div class="pick-complete-box">';
         $html .= '<p>' . htmlspecialchars(t('pick_complete_heading')) . '</p>';
         $html .= '<a class="pick-btn pick-btn-primary" href="?screen=putaway&id=' . (int) $pickList['id'] . '">' . htmlspecialchars(t('pick_complete_putaway_button')) . '</a>';
@@ -293,8 +307,21 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
         return $html;
     }
 
+    if ($openItem === null) {
+        // Every still-needed item is a genuine shortfall — nothing left to
+        // physically pick right now, but (unlike full completion above)
+        // some items are still short rather than done, so this gets its own
+        // wording instead of reusing pick_complete_heading.
+        $html .= '<div class="pick-complete-box">';
+        $html .= '<p class="pick-shortfall">' . htmlspecialchars(t('pick_all_shortfall_heading', ['count' => (string) $shortfallCount])) . '</p>';
+        $html .= '<a class="pick-btn pick-btn-primary" href="?screen=putaway&id=' . (int) $pickList['id'] . '">' . htmlspecialchars(t('pick_complete_putaway_button')) . '</a>';
+        $html .= '<a class="pick-btn" href="?screen=list">' . htmlspecialchars(t('pick_complete_leave_button')) . '</a>';
+        $html .= '</div>';
+        $html .= '</div>';
+        return $html;
+    }
+
     $display = getPickItemDisplayInfo($pdo, $openItem);
-    $steps = getPickStepsForItem($pdo, $openItem);
 
     $html .= '<div class="pick-item-card">';
     if (!empty($display['thumbnail'])) {
