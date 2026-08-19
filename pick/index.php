@@ -72,6 +72,12 @@ require_once __DIR__ . '/../src/routes/pick_actions.php';
 
 $screen = $_GET['screen'] ?? 'list';
 $content = '';
+// Set whenever a specific pick list is currently open (screen=pick or
+// screen=putaway) — the hamburger menu (below) uses this to offer a direct
+// "Zurücklegen" shortcut for THIS list without requiring every item to be
+// picked first, so a session can be stopped/consolidated early rather than
+// only at full completion.
+$currentPickListId = null;
 switch ($screen) {
     case 'create':
         $sourceType = (string) ($_GET['source_type'] ?? 'set');
@@ -85,6 +91,7 @@ switch ($screen) {
             header('Location: ?screen=list');
             exit;
         }
+        $currentPickListId = (int) $pickList['id'];
         $content = renderPickListPutAway($pdo, $pickList);
         break;
     case 'pick':
@@ -93,6 +100,7 @@ switch ($screen) {
             header('Location: ?screen=list');
             exit;
         }
+        $currentPickListId = (int) $pickList['id'];
         $content = renderPickListActive($pdo, $pickList, (int) $currentUser['id']);
         break;
     case 'list':
@@ -112,5 +120,45 @@ echo '<meta name="theme-color" content="#2563eb">';
 echo '<script>if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js?v=' . $swVersion . '"); }); }</script>';
 echo '<link rel="stylesheet" href="style.css?v=' . $swVersion . '">';
 echo '</head><body>';
+// Same brand mark + wordmark as the main app's header (renderApp()/render(),
+// index.php), just condensed for /pick/'s single-column mobile layout — no
+// stats bar/nav, this is purely a "you're still in StudSphere" identity
+// anchor at the top of every screen. The hamburger menu next to it is the
+// only persistent navigation /pick/ has (every screen otherwise only links
+// forward) — needed specifically so a pick session can be paused/switched
+// mid-way: "Zurücklegen" reaches the put-away flow for whatever's ALREADY
+// been picked without requiring the rest of the list to be finished first
+// (getPutAwaySuggestions()/putAwayItem() already support a partial list,
+// this just exposes that entry point directly instead of only after full
+// completion), and "Übersicht" is how you switch to a different pick list.
+echo '<header class="pick-brand-header">';
+echo '<span class="pick-brand-mark">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
+echo '<span class="pick-brand-title">' . htmlspecialchars(t('pick_app_title')) . '</span>';
+echo '<button type="button" class="pick-menu-btn" id="pick-menu-btn" aria-label="' . htmlspecialchars(t('pick_menu_label')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>';
+echo '</header>';
+echo '<div class="pick-menu-panel" id="pick-menu-panel" hidden>';
+echo '<a href="?screen=list">' . htmlspecialchars(t('pick_menu_overview')) . '</a>';
+if ($currentPickListId !== null) {
+    echo '<a href="?screen=putaway&id=' . $currentPickListId . '">' . htmlspecialchars(t('pick_menu_putaway')) . '</a>';
+}
+echo '</div>';
 echo $content;
+echo <<<SCRIPT
+<script>
+(function(){
+  var btn = document.getElementById('pick-menu-btn');
+  var panel = document.getElementById('pick-menu-panel');
+  if (!btn || !panel) { return; }
+  btn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    panel.hidden = !panel.hidden;
+  });
+  document.addEventListener('click', function(e) {
+    if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) {
+      panel.hidden = true;
+    }
+  });
+})();
+</script>
+SCRIPT;
 echo '</body></html>';

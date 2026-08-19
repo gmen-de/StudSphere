@@ -697,6 +697,9 @@ return [
 
     // Pick list PWA (/pick/, src/pick_pages.php, src/pick_lists.php)
     'pick_app_title' => 'StudSphere Pick List',
+    'pick_menu_label' => 'Menu',
+    'pick_menu_overview' => 'Overview',
+    'pick_menu_putaway' => 'Put away',
     'pick_error_invalid_request' => 'Invalid request.',
     'pick_error_no_inventory' => 'No inventory found for this set/minifig.',
     'pick_error_not_found' => 'Pick list not found.',

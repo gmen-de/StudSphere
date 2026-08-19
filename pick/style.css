@@ -20,10 +20,98 @@
 
 body {
   margin: 0;
-  background: var(--pick-bg);
+  /* Same subtle blue/green radial-gradient tint as the main app's body
+     (style.css) — falls back to plain --pick-bg wherever the gradients
+     don't reach, so this reads as "the same app" rather than a bolted-on
+     mini-tool. */
+  background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.1), transparent 30%),
+              radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.08), transparent 28%),
+              var(--pick-bg);
   color: var(--pick-text);
-  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Same font stack as the main app's :root (style.css) — Inter first,
+     falling back identically on any device that doesn't have it installed,
+     so neither app looks more "finished" than the other. */
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-tap-highlight-color: transparent;
+}
+
+.pick-brand-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: 30rem;
+  margin: 0 auto;
+  padding: 1.1rem 1rem 0;
+}
+
+.pick-brand-mark {
+  display: flex;
+  flex-shrink: 0;
+  width: 1.9rem;
+  height: 1.9rem;
+}
+
+.pick-brand-mark svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.pick-brand-title {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--pick-text);
+  flex: 1;
+}
+
+.pick-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--pick-text);
+  cursor: pointer;
+}
+
+.pick-menu-btn svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.pick-menu-panel {
+  position: absolute;
+  top: 3.4rem;
+  right: 1rem;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 11rem;
+  background: var(--pick-card);
+  border: 1px solid var(--pick-border);
+  border-radius: 0.8rem;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+  overflow: hidden;
+}
+
+.pick-menu-panel a {
+  padding: 0.85rem 1rem;
+  color: var(--pick-text);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.pick-menu-panel a:not(:last-child) {
+  border-bottom: 1px solid var(--pick-border);
+}
+
+.pick-menu-panel a:hover {
+  background: var(--pick-accent-soft);
 }
 
 .pick-screen {

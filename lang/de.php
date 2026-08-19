@@ -697,6 +697,9 @@ return [
 
     // Pickliste-PWA (/pick/, src/pick_pages.php, src/pick_lists.php)
     'pick_app_title' => 'StudSphere Pickliste',
+    'pick_menu_label' => 'Menü',
+    'pick_menu_overview' => 'Übersicht',
+    'pick_menu_putaway' => 'Zurücklegen',
     'pick_error_invalid_request' => 'Ungültige Anfrage.',
     'pick_error_no_inventory' => 'Für dieses Set/diese Minifigur liegt kein Inventar vor.',
     'pick_error_not_found' => 'Pickliste nicht gefunden.',
