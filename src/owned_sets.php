@@ -2055,13 +2055,19 @@ function ownedSetCompletenessRingClass(float $percent): string
  * offset already baked in (no tick loop — there's nothing asynchronous
  * here, just a snapshot of the current actual/nominal split). The ring's id
  * (owned-set-total-ring-fg/-label) lets a save handler update it in place
- * afterwards without touching the rest of the row.
+ * afterwards without touching the rest of the row. $nominalFirst only flips
+ * the label's word order (need/have instead of the default have/need) — used
+ * by the set_detail catalog page's "Gesamt vs. lose im Lager" ring, which
+ * reads more naturally as "how many does the set need, how many do I already
+ * have" than owned_set_detail's own "how many do I have, out of how many".
  */
-function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal): string
+function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal, bool $nominalFirst = false): string
 {
     $circumference = 2 * M_PI * 45;
     $offset = $circumference * (1 - min(100.0, $percent) / 100);
-    $label = formatNumber($actual) . ' / ' . formatNumber($nominal);
+    $label = $nominalFirst
+        ? formatNumber($nominal) . ' / ' . formatNumber($actual)
+        : formatNumber($actual) . ' / ' . formatNumber($nominal);
     $ringClass = ownedSetCompletenessRingClass($percent);
 
     $html = '<div class="owned-set-total-ring-wrap">';
