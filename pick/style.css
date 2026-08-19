@@ -53,6 +53,18 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Login screen only (index.php adds this class to <html>, alongside
+   body.pick-body-login below) — locking body alone turned out not to be
+   enough on iOS: the document/html level can still carry its own scroll
+   position independently while Safari auto-scrolls a focused input above
+   the keyboard/AutoFill bar, so both levels need pinning together. */
+html.pick-html-login {
+  position: fixed;
+  inset: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   /* Compensates for .pick-navbar being position: fixed (see that rule's
@@ -178,16 +190,17 @@ body.pick-body-no-navbar {
 }
 
 /* ---------- Login screen: /pick/'s own, see index.php's doc comment for
-   why this isn't just the main app's login form. Sits in normal document
-   flow directly under the nav bar (which carries the brand mark + "Anmeldung"
-   title here — deliberately NOT its own centered full-height box: that
-   centering was what made the page tall enough to need scrolling in the
-   first place once iOS shrank the visible viewport for the keyboard/
-   AutoFill bar. A short, top-anchored page has no surplus height to
-   scroll through. ---------- */
+   why this isn't just the main app's login form. Vertically centered again
+   (an earlier version of this rule deliberately avoided that, back when
+   avoiding scroll meant avoiding surplus height) — now that html/body's
+   position:fixed (see above) locks scrolling structurally regardless of
+   content height, centering is safe again and fills the space below a
+   short form instead of leaving it looking like an unfinished, empty page. */
 .pick-login-screen {
+  height: 100%;
   padding: 1.5rem;
   display: flex;
+  align-items: center;
   justify-content: center;
 }
 

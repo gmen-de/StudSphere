@@ -153,7 +153,13 @@ if ($currentUser !== null) {
 }
 
 $swVersion = htmlspecialchars(getCurrentVersion(), ENT_QUOTES);
-echo '<!DOCTYPE html><html lang="' . htmlspecialchars(getLocale()) . '"><head><meta charset="UTF-8">';
+// pick-body-login's position:fixed on <body> alone still wasn't enough on
+// iOS (confirmed live, screenshots showed the whole page scrolling away
+// once the password field's Passwords/AutoFill bar was up) — <html> needs
+// the same treatment, since iOS can move the document's own scroll
+// position independently of what body does, especially while auto-scrolling
+// a focused input above the keyboard.
+echo '<!DOCTYPE html><html lang="' . htmlspecialchars(getLocale()) . '"' . ($currentUser === null ? ' class="pick-html-login"' : '') . '><head><meta charset="UTF-8">';
 echo '<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">';
 echo '<title>' . htmlspecialchars(t('pick_app_title')) . '</title>';
 echo '<link rel="icon" type="image/svg+xml" href="../favicon.svg">';
@@ -201,15 +207,11 @@ if ($currentUser === null) {
     // Own login screen (see this file's doc comment for why) rather than
     // bouncing to the main app's — same nav bar every other screen gets
     // (logo + title, no trailing menu button since there's nothing to
-    // navigate to yet), with the form sitting directly below it in normal
-    // document flow rather than centered in an artificial min-height:100vh
-    // box. That centering was the actual cause of the page needing to
-    // scroll at all: it made total page height equal the full viewport even
-    // though the form itself is much shorter, so the moment iOS shrank the
-    // visible viewport for the keyboard/AutoFill bar, the (still
-    // full-height) page became just tall enough to scroll — into a screen's
-    // worth of empty space below the card, as reported. A short, top-anchored
-    // page has no such surplus height to begin with.
+    // navigate to yet), form vertically centered below it. Scrolling itself
+    // is locked structurally via html/body's position:fixed (pick/style.css)
+    // regardless of content height, so this doesn't reopen the earlier
+    // scroll-away bug — it's just what makes a short form look intentional
+    // instead of stranded at the top with dead space under it.
     echo '<header class="pick-navbar" id="pick-navbar">';
     echo '<span class="pick-navbar-leading">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
     echo '<span class="pick-navbar-title">' . htmlspecialchars(t('login_title')) . '</span>';
@@ -220,11 +222,22 @@ if ($currentUser === null) {
     if ($loginError) {
         echo '<p class="pick-error">' . htmlspecialchars(t('login_failed_message')) . '</p>';
     }
-    echo '<label>' . htmlspecialchars(t('login_username')) . '<input name="username" autocomplete="username" autofocus></label>';
+    // No autofocus: on iOS that fires the keyboard + Passwords/AutoFill bar
+    // immediately on load, which is exactly what was triggering the
+    // scroll-the-whole-page-away behavior even before the user touched
+    // anything.
+    echo '<label>' . htmlspecialchars(t('login_username')) . '<input name="username" autocomplete="username"></label>';
     echo '<label>' . htmlspecialchars(t('login_password')) . '<input type="password" name="password" autocomplete="current-password"></label>';
     echo '<button type="submit" class="pick-btn pick-btn-primary">' . htmlspecialchars(t('login_button')) . '</button>';
     echo '</form>';
     echo '</div>';
+    // Belt-and-suspenders on top of html/body's position:fixed (see
+    // pick/style.css) — iOS's own "scroll the focused input above the
+    // keyboard/AutoFill bar" behavior moves window.scrollY directly, a
+    // separate mechanism from normal overflow-based scrolling that CSS
+    // alone doesn't reliably intercept. Snapping scroll position back to 0
+    // on every 'scroll' event undoes it the instant it happens.
+    echo '<script>window.addEventListener("scroll", function() { window.scrollTo(0, 0); });</script>';
 } else {
     // Same brand mark as the main app's header (renderApp()/render(),
     // index.php) — the sole persistent identity anchor across every screen. Its
