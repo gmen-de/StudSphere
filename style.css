@@ -5074,3 +5074,80 @@ span.dashboard-vbar-cell-clickable:focus-visible {
   margin: 0;
   color: #92400e;
 }
+
+/* Lagerprotokoll (?page=storage_movements_log, src/routes/pages.php) */
+.storage-log-filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.storage-log-filter-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.storage-log-filter-form select,
+.storage-log-filter-form input[type="text"] {
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e2e8f0;
+  font-size: 0.95rem;
+  min-width: 12rem;
+}
+
+.storage-log-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.6rem;
+}
+
+.storage-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.storage-log-table th,
+.storage-log-table td {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.storage-log-table th {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.storage-log-table td:last-child {
+  white-space: normal;
+  color: #64748b;
+}
+
+.storage-log-qty-in {
+  color: #16a34a;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-log-qty-out {
+  color: #dc2626;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-log-qty-zero {
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}

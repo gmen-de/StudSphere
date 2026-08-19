@@ -194,7 +194,10 @@ function getNavMenu(PDO $pdo): array
             ['labelKey' => 'nav_my_bricks_top100', 'href' => '?page=my_bricks_top100'],
         ]],
         ['icon' => 'my_minifigs', 'labelKey' => 'nav_my_minifigs', 'href' => '?page=my_minifigs', 'children' => $myMinifigsChildren],
-        ['icon' => 'locations', 'labelKey' => 'locations_title', 'href' => '?page=locations', 'children' => []],
+        ['icon' => 'locations', 'labelKey' => 'locations_title', 'href' => '?page=locations', 'children' => [
+            ['labelKey' => 'locations_title', 'href' => '?page=locations'],
+            ['labelKey' => 'nav_storage_movements_log', 'href' => '?page=storage_movements_log'],
+        ]],
     ];
 }
 

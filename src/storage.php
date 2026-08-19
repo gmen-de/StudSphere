@@ -843,3 +843,86 @@ function deleteMinifigStorageItemInstance(int $instanceId): void
     $pdo = getPDO();
     $pdo->prepare('DELETE FROM minifig_storage_items WHERE id = ?')->execute([$instanceId]);
 }
+
+const STORAGE_MOVEMENTS_LOG_PAGE_SIZE = 50;
+
+/**
+ * For the "Lagerprotokoll" filter's user dropdown (src/routes/pages.php,
+ * ?page=storage_movements_log) — no existing helper returns id+a
+ * display-ready name together (the only other users-list query in this app,
+ * settings.php's admin section, doesn't select id at all).
+ *
+ * @return array<int, array{id:int, display_name:string}>
+ */
+function getUsersForFilter(PDO $pdo): array
+{
+    $stmt = $pdo->query('SELECT id, username, full_name FROM users ORDER BY COALESCE(NULLIF(full_name, \'\'), username)');
+    return array_map(
+        fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'display_name' => $row['full_name'] !== null && $row['full_name'] !== '' ? $row['full_name'] : $row['username'],
+        ],
+        $stmt->fetchAll()
+    );
+}
+
+/**
+ * storage_movements has been written on every stock change since it was
+ * introduced (addStorageStock()/setStorageItemQuantity(), both here) but
+ * never had a real reader before the dashboard's small recent-activity feed
+ * (getRecentActivity()) — this is the first full, filterable listing.
+ * $partQuery matches part_num/name (LIKE, same convention as searchSets()),
+ * not a part_id, since there's no part-picker widget anywhere in this app to
+ * drive an exact-id filter from — a plain text field is the closest existing
+ * idiom (src/sets.php's searchSets()).
+ *
+ * @return array{items: array, total: int, page: int, perPage: int}
+ */
+function searchStorageMovements(PDO $pdo, ?int $userId, string $partQuery, int $page, int $perPage): array
+{
+    $where = [];
+    $params = [];
+
+    if ($userId !== null) {
+        $where[] = 'sm.user_id = ?';
+        $params[] = $userId;
+    }
+    if ($partQuery !== '') {
+        $where[] = '(p.part_num LIKE ? OR p.name LIKE ?)';
+        $params[] = '%' . $partQuery . '%';
+        $params[] = '%' . $partQuery . '%';
+    }
+    $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+
+    $countStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM storage_movements sm LEFT JOIN parts p ON p.id = sm.part_id $whereSql"
+    );
+    $countStmt->execute($params);
+    $total = (int) $countStmt->fetchColumn();
+
+    $perPage = max(1, $perPage);
+    $offset = (max(1, $page) - 1) * $perPage;
+    $stmt = $pdo->prepare(
+        "SELECT sm.id, sm.created_at, sm.movement_type, sm.quantity_change, sm.resulting_quantity, sm.condition_type, sm.note,
+                u.username, u.full_name,
+                p.id AS part_id, p.part_num, p.name AS part_name,
+                c.name AS color_name,
+                sl.id AS location_id, sl.name AS location_name
+         FROM storage_movements sm
+         LEFT JOIN users u ON u.id = sm.user_id
+         LEFT JOIN parts p ON p.id = sm.part_id
+         LEFT JOIN colors c ON c.id = sm.color_id
+         LEFT JOIN storage_locations sl ON sl.id = sm.location_id
+         $whereSql
+         ORDER BY sm.created_at DESC, sm.id DESC
+         LIMIT $perPage OFFSET $offset"
+    );
+    $stmt->execute($params);
+
+    return [
+        'items' => $stmt->fetchAll(),
+        'total' => $total,
+        'page' => $page,
+        'perPage' => $perPage,
+    ];
+}

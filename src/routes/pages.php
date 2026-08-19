@@ -1661,6 +1661,146 @@ SCRIPT;
     exit;
 }
 
+// storage_movements has been written on every stock change since it was
+// introduced but never had a real listing anywhere — the dashboard's own
+// recent-activity widget (getRecentActivity(), src/dashboard.php) only ever
+// shows the last few rows as a short feed. This is the first full,
+// filterable log of it, reachable as a "Lagerprotokoll" sub-item under
+// "Mein Lager" (see index.php's getNavMenu()).
+if (isset($_GET['page']) && $_GET['page'] === 'storage_movements_log') {
+    $logUserId = isset($_GET['user_id']) && $_GET['user_id'] !== '' ? (int) $_GET['user_id'] : null;
+    $logPartQuery = trim((string) ($_GET['part'] ?? ''));
+    $logPage = max(1, (int) ($_GET['p'] ?? 1));
+    $logPerPage = STORAGE_MOVEMENTS_LOG_PAGE_SIZE;
+
+    $renderMovementRows = function (array $movements) use ($pdo): string {
+        $rowsHtml = '';
+        foreach ($movements as $m) {
+            $user = $m['full_name'] !== null && $m['full_name'] !== '' ? $m['full_name'] : ($m['username'] ?? t('dashboard_activity_unknown_user'));
+            $partLabel = $m['part_num'] !== null ? $m['part_num'] . ' ' . $m['part_name'] : '—';
+            $qty = (int) $m['quantity_change'];
+            $qtyClass = $qty > 0 ? 'storage-log-qty-in' : ($qty < 0 ? 'storage-log-qty-out' : 'storage-log-qty-zero');
+            $qtyText = ($qty > 0 ? '+' : '') . $qty;
+            $typeKey = 'storage_movement_type_' . $m['movement_type'];
+
+            $rowsHtml .= '<tr>';
+            $rowsHtml .= '<td>' . htmlspecialchars(formatDate($m['created_at'], true)) . '</td>';
+            $rowsHtml .= '<td>' . htmlspecialchars($user) . '</td>';
+            $rowsHtml .= '<td>' . htmlspecialchars($partLabel) . '</td>';
+            $rowsHtml .= '<td>' . htmlspecialchars($m['color_name'] ?? '—') . '</td>';
+            $rowsHtml .= '<td>' . htmlspecialchars($m['location_name'] ?? t('storage_movements_log_unknown_location')) . '</td>';
+            $rowsHtml .= '<td>' . htmlspecialchars(t($typeKey)) . '</td>';
+            $rowsHtml .= '<td class="' . $qtyClass . '">' . htmlspecialchars($qtyText) . '</td>';
+            $rowsHtml .= '<td>' . ($m['resulting_quantity'] !== null ? (int) $m['resulting_quantity'] : '—') . '</td>';
+            $rowsHtml .= '<td>' . htmlspecialchars($m['note'] ?? '') . '</td>';
+            $rowsHtml .= '</tr>';
+        }
+        return $rowsHtml;
+    };
+
+    // Infinite-scroll continuation request: same sentinel-driven pattern as
+    // sets_search/bricks_search, just appending <tr> rows into the existing
+    // <tbody> instead of grid cards.
+    if (($_GET['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        $results = searchStorageMovements($pdo, $logUserId, $logPartQuery, $logPage, $logPerPage);
+        $hasMore = ($logPage * $logPerPage) < $results['total'];
+        echo json_encode(['html' => $renderMovementRows($results['items']), 'hasMore' => $hasMore], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $results = searchStorageMovements($pdo, $logUserId, $logPartQuery, $logPage, $logPerPage);
+    $hasMore = ($logPage * $logPerPage) < $results['total'];
+
+    $content = '<h1>' . htmlspecialchars(t('storage_movements_log_title')) . '</h1>';
+
+    $content .= '<form method="get" class="storage-log-filter-form">';
+    $content .= '<input type="hidden" name="page" value="storage_movements_log">';
+    $content .= '<label>' . htmlspecialchars(t('storage_movements_log_filter_user'));
+    $content .= '<select name="user_id"><option value="">' . htmlspecialchars(t('storage_movements_log_filter_user_all')) . '</option>';
+    foreach (getUsersForFilter($pdo) as $filterUser) {
+        $selected = $logUserId === $filterUser['id'] ? ' selected' : '';
+        $content .= '<option value="' . $filterUser['id'] . '"' . $selected . '>' . htmlspecialchars($filterUser['display_name']) . '</option>';
+    }
+    $content .= '</select></label>';
+    $content .= '<label>' . htmlspecialchars(t('storage_movements_log_filter_part'));
+    $content .= '<input type="text" name="part" value="' . htmlspecialchars($logPartQuery) . '" placeholder="' . htmlspecialchars(t('storage_movements_log_filter_part_placeholder')) . '"></label>';
+    $content .= '<button type="submit">' . htmlspecialchars(t('search_button')) . '</button>';
+    if ($logUserId !== null || $logPartQuery !== '') {
+        $content .= '<a class="filter-reset-link" href="?page=storage_movements_log">' . htmlspecialchars(t('storage_movements_log_filter_reset')) . '</a>';
+    }
+    $content .= '</form>';
+
+    $content .= '<span class="results-summary">' . htmlspecialchars(t('storage_movements_log_count', ['count' => formatNumber($results['total'])])) . '</span>';
+
+    if (empty($results['items'])) {
+        $content .= '<section class="card"><p>' . htmlspecialchars(t('storage_movements_log_empty')) . '</p></section>';
+    } else {
+        $content .= '<div class="storage-log-table-wrap"><table class="storage-log-table">';
+        $content .= '<thead><tr>';
+        foreach (['storage_movements_log_col_time', 'storage_movements_log_col_user', 'storage_movements_log_col_part', 'storage_movements_log_col_color', 'storage_movements_log_col_location', 'storage_movements_log_col_type', 'storage_movements_log_col_quantity', 'storage_movements_log_col_resulting', 'storage_movements_log_col_note'] as $colKey) {
+            $content .= '<th>' . htmlspecialchars(t($colKey)) . '</th>';
+        }
+        $content .= '</tr></thead>';
+        $content .= '<tbody id="storage-log-body">' . $renderMovementRows($results['items']) . '</tbody>';
+        $content .= '</table></div>';
+        $content .= '<div id="storage-log-sentinel" class="parts-load-sentinel" data-has-more="' . ($hasMore ? '1' : '0') . '" data-next-page="' . ($logPage + 1) . '">';
+        $content .= '<span class="parts-load-status" data-loading-text="' . htmlspecialchars(t('parts_loading_more')) . '" data-end-text="' . htmlspecialchars(t('parts_no_more')) . '">' . ($hasMore ? '' : htmlspecialchars(t('parts_no_more'))) . '</span>';
+        $content .= '</div>';
+        $content .= <<<SCRIPT
+<script>
+(function(){
+  var sentinel = document.getElementById('storage-log-sentinel');
+  var body = document.getElementById('storage-log-body');
+  var status = sentinel ? sentinel.querySelector('.parts-load-status') : null;
+  if (!sentinel || !body || !status) { return; }
+  var loading = false;
+
+  function loadMore() {
+    if (loading || sentinel.dataset.hasMore !== '1') { return; }
+    loading = true;
+    status.textContent = status.dataset.loadingText;
+
+    var params = new URLSearchParams(window.location.search);
+    params.set('ajax', '1');
+    params.set('p', sentinel.dataset.nextPage);
+
+    fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        body.insertAdjacentHTML('beforeend', data.html);
+        sentinel.dataset.hasMore = data.hasMore ? '1' : '0';
+        sentinel.dataset.nextPage = String(parseInt(sentinel.dataset.nextPage, 10) + 1);
+        status.textContent = data.hasMore ? '' : status.dataset.endText;
+        loading = false;
+        if (data.hasMore) { checkAndLoad(); }
+      })
+      .catch(function() { loading = false; });
+  }
+
+  function checkAndLoad() {
+    var rect = sentinel.getBoundingClientRect();
+    if (rect.top < window.innerHeight + 400) { loadMore(); }
+  }
+
+  if ('IntersectionObserver' in window) {
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) { if (entry.isIntersecting) { loadMore(); } });
+    }, { rootMargin: '400px' });
+    observer.observe(sentinel);
+  } else {
+    window.addEventListener('scroll', checkAndLoad);
+    checkAndLoad();
+  }
+})();
+</script>
+SCRIPT;
+    }
+
+    renderApp(t('storage_movements_log_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('locations_title'), 'url' => '?page=locations'], ['label' => t('storage_movements_log_title'), 'url' => null]]);
+    exit;
+}
+
 if (isset($_GET['page']) && $_GET['page'] === 'location_detail') {
     $locationId = (int) ($_GET['id'] ?? 0);
     $location = getStorageLocation($locationId);
