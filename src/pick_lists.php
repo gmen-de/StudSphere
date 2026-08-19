@@ -736,10 +736,29 @@ function deletePickList(PDO $pdo, int $pickListId): void
     }
 
     $locationId = (int) $pickList['location_id'];
-    $pdo->prepare('DELETE FROM pick_lists WHERE id = ?')->execute([$pickListId]);
-    // Already confirmed empty above (both parts and minifigs), so this is
-    // safe unconditionally.
-    $pdo->prepare('DELETE FROM storage_locations WHERE id = ?')->execute([$locationId]);
+
+    // getLocationStock() (used above) only looks at quantity > 0 — a
+    // location can still hold quantity=0 storage_items rows (the "0 = not
+    // actually here" correction path in pickItem() writes exactly one of
+    // these rather than deleting the row), and storage_items.location_id
+    // has an FK RESTRICT onto storage_locations, so those zero-rows must be
+    // cleared before the location itself can go. Both deletes are wrapped
+    // in one transaction so a failure here can't leave the pick_lists row
+    // gone while its storage_locations row lingers orphaned (which is
+    // exactly what happened before this was a transaction: the pick_lists
+    // DELETE auto-committed, then the storage_locations DELETE threw 1451
+    // and rolled back nothing, since there was nothing to roll back).
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('DELETE FROM storage_items WHERE location_id = ? AND quantity = 0')
+            ->execute([$locationId]);
+        $pdo->prepare('DELETE FROM pick_lists WHERE id = ?')->execute([$pickListId]);
+        $pdo->prepare('DELETE FROM storage_locations WHERE id = ?')->execute([$locationId]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
 }
 
 /**
