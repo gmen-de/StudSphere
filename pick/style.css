@@ -1,101 +1,222 @@
 /* Pickliste PWA — deliberately separate from ../style.css: this is a
    mobile-first, thumb-driven single-column flow (no sidebar, no desktop
    tables), so sharing the desktop app's stylesheet would mean fighting its
-   layout assumptions rather than reusing anything useful from it. */
+   layout assumptions rather than reusing anything useful from it.
+
+   Styled after Apple's Human Interface Guidelines (iOS): system typography,
+   a large-title nav bar that collapses on scroll, grouped/inset lists,
+   segmented controls, capsule buttons, a translucent blurred toolbar, and
+   both light and dark appearances via prefers-color-scheme — this app has
+   no user-facing theme toggle, so the OS setting is the only signal. */
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 :root {
-  --pick-bg: #f8fafc;
-  --pick-card: #ffffff;
-  --pick-border: #e2e8f0;
-  --pick-text: #0f172a;
-  --pick-muted: #64748b;
-  --pick-accent: #2563eb;
-  --pick-accent-soft: #eff6ff;
-  --pick-danger: #dc2626;
+  /* iOS system colors (light) — kept as the actual iOS names in comments so
+     a future pass can cross-check against a fresh HIG read. */
+  --pick-bg: #f2f2f7;              /* systemGroupedBackground */
+  --pick-card: #ffffff;            /* systemBackground, used for grouped rows */
+  --pick-border: rgba(60, 60, 67, 0.29); /* separator */
+  --pick-text: rgba(0, 0, 0, 0.92);      /* label */
+  --pick-muted: rgba(60, 60, 67, 0.6);   /* secondaryLabel */
+  --pick-muted-2: rgba(60, 60, 67, 0.3); /* tertiaryLabel */
+  --pick-accent: #2563eb;          /* StudSphere's own brand tint, not systemBlue —
+                                       HIG explicitly allows/expects a custom tint */
+  --pick-accent-soft: rgba(37, 99, 235, 0.12);
+  --pick-danger: #ff3b30;          /* systemRed */
+  --pick-fill-secondary: rgba(120, 120, 128, 0.16); /* segmented control track */
+  --pick-navbar-bg: rgba(242, 242, 247, 0.82);
+  --pick-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pick-bg: #000000;
+    --pick-card: #1c1c1e;
+    --pick-border: rgba(84, 84, 88, 0.65);
+    --pick-text: rgba(255, 255, 255, 0.94);
+    --pick-muted: rgba(235, 235, 245, 0.6);
+    --pick-muted-2: rgba(235, 235, 245, 0.3);
+    --pick-accent: #4c8dff;
+    --pick-accent-soft: rgba(76, 141, 255, 0.16);
+    --pick-danger: #ff453a;
+    --pick-fill-secondary: rgba(120, 120, 128, 0.24);
+    --pick-navbar-bg: rgba(28, 28, 30, 0.8);
+    --pick-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
-  /* Same subtle blue/green radial-gradient tint as the main app's body
-     (style.css) — falls back to plain --pick-bg wherever the gradients
-     don't reach, so this reads as "the same app" rather than a bolted-on
-     mini-tool. */
-  background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.1), transparent 30%),
-              radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.08), transparent 28%),
-              var(--pick-bg);
+  /* Compensates for .pick-navbar being position: fixed (see that rule's
+     comment for why sticky was deliberately avoided here) — taken out of
+     normal flow entirely, so without this content would render underneath
+     it starting at y=0. Kept as a plain calc() rather than a JS-measured
+     custom property (contrast ../style.css's --sticky-header-height): this
+     bar's height is a fixed expression, nothing dynamic to measure. */
+  padding-top: calc(2.75rem + env(safe-area-inset-top));
+  background: var(--pick-bg);
   color: var(--pick-text);
-  /* Same font stack as the main app's :root (style.css) — Inter first,
-     falling back identically on any device that doesn't have it installed,
-     so neither app looks more "finished" than the other. */
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  -webkit-tap-highlight-color: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overscroll-behavior-y: contain;
 }
 
-.pick-brand-header {
+/* ---------- Splash (cold-launch only, see the sessionStorage check inline
+   in index.php — this is the CSS half: a solid brand screen that
+   self-dismisses via animation, no JS required to hide it, so it degrades
+   gracefully even if a script fails to run). ---------- */
+.pick-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  max-width: 30rem;
-  margin: 0 auto;
-  padding: 1.1rem 1rem 0;
+  justify-content: center;
+  background: var(--pick-accent);
+  animation: pick-splash-fade 400ms ease forwards;
+  animation-delay: 550ms;
 }
 
-.pick-brand-mark {
-  display: flex;
-  flex-shrink: 0;
-  width: 1.9rem;
-  height: 1.9rem;
+.pick-splash-mark {
+  width: 4.5rem;
+  height: 4.5rem;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.25));
+  animation: pick-splash-pop 550ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.pick-brand-mark svg {
+.pick-splash-mark svg {
   width: 100%;
   height: 100%;
   display: block;
 }
 
-.pick-brand-title {
-  font-weight: 700;
-  font-size: 1.05rem;
-  color: var(--pick-text);
-  flex: 1;
+@keyframes pick-splash-pop {
+  from { transform: scale(0.7); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 
-.pick-menu-btn {
+@keyframes pick-splash-fade {
+  to { opacity: 0; visibility: hidden; pointer-events: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pick-splash-mark { animation: none; }
+  .pick-splash { animation-duration: 1ms; animation-delay: 300ms; }
+}
+
+/* ---------- Nav bar: translucent, blurred, collapses from a large in-flow
+   title (each screen's own <h1>) into a small centered title once scrolled
+   — see the scroll listener in index.php.
+
+   position: fixed rather than sticky, deliberately: this exact codebase
+   already hit an unfixable Chromium sticky-positioning compositing bug on
+   the main app's header (see ../style.css's .app-header-fixed comment —
+   content vanished for a single composited frame mid-scroll) and fixed it
+   by switching to fixed + will-change: transform. Applying that same known
+   fix here up front, rather than risking the identical bug resurfacing on a
+   second header. */
+.pick-navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: calc(2.75rem + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 0.5rem 0;
+  background: transparent;
+  border-bottom: 1px solid transparent;
+  will-change: transform;
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+
+.pick-navbar.pick-navbar-scrolled {
+  background: var(--pick-navbar-bg);
+  border-bottom-color: var(--pick-border);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  backdrop-filter: blur(20px) saturate(1.8);
+}
+
+.pick-navbar-leading {
+  display: flex;
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.pick-navbar-leading svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.pick-navbar-title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.pick-navbar-scrolled .pick-navbar-title {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pick-navbar-menu-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.25rem;
+  height: 2.25rem;
   flex-shrink: 0;
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--pick-text);
+  color: var(--pick-accent);
   cursor: pointer;
+  border-radius: 50%;
 }
 
-.pick-menu-btn svg {
-  width: 1.5rem;
-  height: 1.5rem;
+.pick-navbar-menu-btn:active {
+  background: var(--pick-fill-secondary);
+}
+
+.pick-navbar-menu-btn svg {
+  width: 1.4rem;
+  height: 1.4rem;
 }
 
 .pick-menu-panel {
   position: absolute;
-  top: 3.4rem;
-  right: 1rem;
-  z-index: 20;
+  top: calc(2.75rem + env(safe-area-inset-top) + 0.25rem);
+  right: 0.5rem;
+  z-index: 21;
   display: flex;
   flex-direction: column;
-  min-width: 11rem;
+  min-width: 12rem;
   background: var(--pick-card);
   border: 1px solid var(--pick-border);
-  border-radius: 0.8rem;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+  border-radius: 0.9rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   overflow: hidden;
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  backdrop-filter: blur(20px) saturate(1.8);
 }
 
 /* Must come after the base rule above (and be at least as specific) to
@@ -107,79 +228,136 @@ body {
 }
 
 .pick-menu-panel a {
-  padding: 0.85rem 1rem;
+  padding: 0.85rem 1.1rem;
   color: var(--pick-text);
   text-decoration: none;
-  font-weight: 600;
-  font-size: 0.95rem;
+  font-weight: 500;
+  font-size: 0.98rem;
 }
 
 .pick-menu-panel a:not(:last-child) {
   border-bottom: 1px solid var(--pick-border);
 }
 
-.pick-menu-panel a:hover {
-  background: var(--pick-accent-soft);
+.pick-menu-panel a:active {
+  background: var(--pick-fill-secondary);
 }
 
+/* ---------- Pull-to-refresh (overview screen only, see index.php's
+   pickPullToRefreshEnabled flag) — a spinner that grows with the pull
+   distance, released past the threshold triggers a full reload, matching
+   this app's existing "every screen is a plain server render" philosophy
+   rather than a fetch-and-patch refresh. ---------- */
+.pick-refresh-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 0;
+  overflow: hidden;
+  color: var(--pick-muted);
+  transition: height 120ms ease;
+}
+
+.pick-refresh-spinner {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  border: 2px solid var(--pick-border);
+  border-top-color: var(--pick-accent);
+  transform: rotate(0deg);
+}
+
+.pick-refresh-indicator.pick-refresh-loading .pick-refresh-spinner {
+  animation: pick-refresh-spin 700ms linear infinite;
+}
+
+@keyframes pick-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- Screen content ---------- */
 .pick-screen {
   max-width: 30rem;
   margin: 0 auto;
-  padding: 1.25rem 1rem 3rem;
+  padding: 0 1rem calc(3rem + env(safe-area-inset-bottom));
 }
 
 .pick-screen h1 {
-  font-size: 1.4rem;
-  margin: 0.25rem 0 0.75rem;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0.4rem 0 1rem;
 }
 
 .pick-screen h2.pick-group-heading {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.03em;
+  font-weight: 600;
   color: var(--pick-muted);
-  margin: 1.5rem 0 0.6rem;
+  margin: 1.75rem 0.9rem 0.5rem;
 }
 
+/* ---------- Buttons: capsule-shaped, iOS style ---------- */
 .pick-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
+  width: 100%;
   padding: 0.9rem 1.2rem;
-  border-radius: 0.8rem;
-  border: 1px solid var(--pick-border);
-  background: var(--pick-card);
-  color: var(--pick-text);
-  font-size: 1rem;
+  border-radius: 0.85rem;
+  border: none;
+  background: var(--pick-fill-secondary);
+  color: var(--pick-accent);
+  font-size: 1.05rem;
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
   min-height: 3rem;
+  transition: transform 100ms ease, opacity 100ms ease;
+}
+
+.pick-btn:active {
+  transform: scale(0.97);
+  opacity: 0.85;
 }
 
 .pick-btn-primary {
   background: var(--pick-accent);
-  border-color: var(--pick-accent);
   color: #fff;
+}
+
+.pick-btn:disabled {
+  opacity: 0.5;
+  transform: none;
 }
 
 .pick-create-fab {
   display: block;
   text-align: center;
-  margin-bottom: 1.25rem;
+  margin: 0.25rem 0 1.5rem;
 }
 
+/* ---------- Grouped list: one rounded card per section, hairline dividers
+   between rows — the core iOS list idiom (Settings, Mail, ...), used for
+   the pick-list overview, search results, and put-away rows. ---------- */
 .pick-list-cards {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  border-radius: 0.9rem;
+  overflow: hidden;
+  background: var(--pick-card);
+  box-shadow: var(--pick-shadow);
 }
 
 .pick-list-card-wrap {
   position: relative;
-  border-radius: 0.9rem;
   overflow: hidden;
+}
+
+.pick-list-card-wrap:not(:last-child) .pick-list-card {
+  border-bottom: 1px solid var(--pick-border);
 }
 
 .pick-list-card {
@@ -189,13 +367,15 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 1rem;
-  border-radius: 0.9rem;
-  border: 1px solid var(--pick-border);
+  padding: 0.9rem 1rem;
   background: var(--pick-card);
   text-decoration: none;
   color: var(--pick-text);
   touch-action: pan-y;
+}
+
+.pick-list-card:active {
+  background: var(--pick-fill-secondary);
 }
 
 .pick-list-card-delete-bg {
@@ -213,7 +393,7 @@ body {
   border: none;
   background: transparent;
   color: #fff;
-  font-weight: 700;
+  font-weight: 600;
   font-size: 0.9rem;
 }
 
@@ -226,51 +406,58 @@ body {
 
 .pick-list-card-name {
   font-weight: 600;
+  font-size: 1.02rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pick-list-card-container {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: var(--pick-muted);
-}
-
-.pick-container-hint {
-  margin: -0.4rem 0 0.75rem;
-  color: var(--pick-muted);
-  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pick-progress-badge {
   font-variant-numeric: tabular-nums;
   color: var(--pick-muted);
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .pick-empty-hint {
   color: var(--pick-muted);
+  padding: 0 0.25rem;
 }
 
+/* ---------- Segmented control (Set / Minifig) ---------- */
 .pick-tabs {
   display: flex;
-  gap: 0.5rem;
+  gap: 2px;
+  padding: 2px;
   margin-bottom: 1rem;
+  background: var(--pick-fill-secondary);
+  border-radius: 0.65rem;
 }
 
 .pick-tab {
   flex: 1;
   text-align: center;
-  padding: 0.7rem;
-  border-radius: 0.7rem;
-  border: 1px solid var(--pick-border);
+  padding: 0.5rem;
+  border-radius: 0.5rem;
   text-decoration: none;
   color: var(--pick-text);
-  font-weight: 600;
+  font-weight: 500;
+  font-size: 0.92rem;
 }
 
 .pick-tab.active {
-  background: var(--pick-accent-soft);
-  border-color: var(--pick-accent);
-  color: var(--pick-accent);
+  background: var(--pick-card);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
 }
 
 .pick-search-form {
@@ -281,16 +468,26 @@ body {
 
 .pick-search-form input[type="search"] {
   flex: 1;
-  padding: 0.75rem;
+  padding: 0.7rem 0.9rem;
   border-radius: 0.7rem;
-  border: 1px solid var(--pick-border);
+  border: none;
+  background: var(--pick-fill-secondary);
+  color: var(--pick-text);
   font-size: 1rem;
+}
+
+.pick-search-form .pick-btn {
+  width: auto;
+  padding: 0.7rem 1.1rem;
 }
 
 .pick-search-results {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  border-radius: 0.9rem;
+  overflow: hidden;
+  background: var(--pick-card);
+  box-shadow: var(--pick-shadow);
   margin-bottom: 1.25rem;
 }
 
@@ -298,18 +495,28 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.6rem;
-  border-radius: 0.7rem;
-  border: 1px solid var(--pick-border);
+  padding: 0.65rem 1rem;
+  border: none;
+  border-bottom: 1px solid var(--pick-border);
   background: var(--pick-card);
   text-align: left;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 0.98rem;
+  color: var(--pick-text);
+  width: 100%;
+}
+
+.pick-search-result:last-child {
+  border-bottom: none;
+}
+
+.pick-search-result:active {
+  background: var(--pick-fill-secondary);
 }
 
 .pick-search-result img {
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.4rem;
+  height: 2.4rem;
   object-fit: contain;
   flex-shrink: 0;
 }
@@ -317,43 +524,62 @@ body {
 .pick-create-confirm {
   padding: 1rem;
   border-radius: 0.9rem;
-  border: 1px solid var(--pick-accent);
-  background: var(--pick-accent-soft);
+  background: var(--pick-card);
+  box-shadow: var(--pick-shadow);
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.9rem;
+}
+
+.pick-create-confirm > p:first-child {
+  margin: 0;
+  font-weight: 600;
 }
 
 .pick-create-confirm label {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.35rem;
   font-size: 0.85rem;
   color: var(--pick-muted);
 }
 
 .pick-create-confirm input[type="text"] {
-  padding: 0.7rem;
-  border-radius: 0.6rem;
-  border: 1px solid var(--pick-border);
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.65rem;
+  border: none;
+  background: var(--pick-fill-secondary);
+  color: var(--pick-text);
   font-size: 1rem;
 }
 
 .pick-error {
   color: var(--pick-danger);
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   margin: 0;
+}
+
+.pick-container-hint {
+  margin: -0.6rem 0 1rem;
+  color: var(--pick-muted);
+  font-size: 0.95rem;
 }
 
 .pick-item-card {
   background: var(--pick-card);
-  border: 1px solid var(--pick-border);
+  box-shadow: var(--pick-shadow);
   border-radius: 1rem;
   padding: 1.25rem;
   text-align: center;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+}
+
+.pick-item-card h2 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 0.25rem 0 0;
 }
 
 /* Horizontal-scroll-snap gallery for the picking screen's LDraw angle
@@ -401,10 +627,13 @@ body {
 
 .pick-step-box input[type="number"] {
   padding: 0.9rem;
-  font-size: 1.2rem;
+  font-size: 1.25rem;
+  font-weight: 600;
   text-align: center;
-  border-radius: 0.7rem;
-  border: 1px solid var(--pick-border);
+  border-radius: 0.75rem;
+  border: none;
+  background: var(--pick-fill-secondary);
+  color: var(--pick-text);
 }
 
 .pick-quantity-hint {
@@ -426,7 +655,7 @@ body {
   align-items: stretch;
   padding: 1.5rem;
   background: var(--pick-card);
-  border: 1px solid var(--pick-border);
+  box-shadow: var(--pick-shadow);
   border-radius: 1rem;
   text-align: center;
 }
@@ -434,17 +663,21 @@ body {
 .pick-putaway-rows {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  border-radius: 0.9rem;
+  overflow: hidden;
+  background: var(--pick-card);
+  box-shadow: var(--pick-shadow);
 }
 
 .pick-putaway-row {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  padding: 0.9rem;
-  border-radius: 0.8rem;
-  border: 1px solid var(--pick-border);
-  background: var(--pick-card);
+  padding: 0.9rem 1rem;
+}
+
+.pick-putaway-row:not(:last-child) {
+  border-bottom: 1px solid var(--pick-border);
 }
 
 .pick-putaway-suggestion {
@@ -455,5 +688,7 @@ body {
 .pick-putaway-manual-location {
   padding: 0.6rem;
   border-radius: 0.6rem;
-  border: 1px solid var(--pick-border);
+  border: none;
+  background: var(--pick-fill-secondary);
+  color: var(--pick-text);
 }

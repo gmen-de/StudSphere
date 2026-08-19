@@ -78,12 +78,18 @@ $content = '';
 // picked first, so a session can be stopped/consolidated early rather than
 // only at full completion.
 $currentPickListId = null;
+// Mirrors each screen's own in-flow <h1> — echoed server-side into the nav
+// bar's small collapsed title (see .pick-navbar-title, pick/style.css)
+// instead of reading it via JS, since PHP already knows it here and this
+// app has no client-side routing to keep the two in sync otherwise.
+$screenTitle = t('pick_app_title');
 switch ($screen) {
     case 'create':
         $sourceType = (string) ($_GET['source_type'] ?? 'set');
         $query = trim((string) ($_GET['q'] ?? ''));
         $ownedSetIdRaw = trim((string) ($_GET['owned_set_id'] ?? ''));
         $content = renderPickListCreate($pdo, $sourceType, $query, $ownedSetIdRaw !== '' ? (int) $ownedSetIdRaw : null);
+        $screenTitle = t('pick_create_heading');
         break;
     case 'putaway':
         $pickList = getPickList($pdo, (int) ($_GET['id'] ?? 0));
@@ -93,6 +99,7 @@ switch ($screen) {
         }
         $currentPickListId = (int) $pickList['id'];
         $content = renderPickListPutAway($pdo, $pickList);
+        $screenTitle = t('pick_putaway_heading');
         break;
     case 'pick':
         $pickList = getPickList($pdo, (int) ($_GET['id'] ?? 0));
@@ -102,10 +109,12 @@ switch ($screen) {
         }
         $currentPickListId = (int) $pickList['id'];
         $content = renderPickListActive($pdo, $pickList, (int) $currentUser['id']);
+        $screenTitle = $pickList['name'] !== '' ? $pickList['name'] : t('pick_app_title');
         break;
     case 'list':
     default:
         $content = renderPickListOverview($pdo, (int) $currentUser['id']);
+        $screenTitle = t('pick_overview_heading');
         break;
 }
 
@@ -116,25 +125,41 @@ echo '<title>' . htmlspecialchars(t('pick_app_title')) . '</title>';
 echo '<link rel="icon" type="image/svg+xml" href="../favicon.svg">';
 echo '<link rel="manifest" href="manifest.json">';
 echo '<link rel="apple-touch-icon" href="../apple-touch-icon.png">';
+echo '<meta name="apple-mobile-web-app-capable" content="yes">';
+echo '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">';
 echo '<meta name="theme-color" content="#2563eb">';
 echo '<script>if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js?v=' . $swVersion . '"); }); }</script>';
 echo '<link rel="stylesheet" href="style.css?v=' . $swVersion . '">';
 echo '</head><body>';
-// Same brand mark + wordmark as the main app's header (renderApp()/render(),
-// index.php), just condensed for /pick/'s single-column mobile layout — no
-// stats bar/nav, this is purely a "you're still in StudSphere" identity
-// anchor at the top of every screen. The hamburger menu next to it is the
-// only persistent navigation /pick/ has (every screen otherwise only links
+
+// Cold-launch splash only — a full-screen navigation inside /pick/ (every
+// link here is a plain server round-trip, see this file's own doc comment)
+// would otherwise replay it on every single tap, which reads as broken
+// rather than native. The inline script right after the div runs
+// synchronously before anything else paints, so a repeat visit within the
+// same tab session never even flashes it; sessionStorage (not localStorage)
+// deliberately re-arms it on the next genuinely fresh launch.
+echo '<div class="pick-splash" id="pick-splash"><span class="pick-splash-mark">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span></div>';
+echo '<script>(function(){var s=document.getElementById("pick-splash");if(sessionStorage.getItem("pickSplashShown")){s.style.display="none";}else{sessionStorage.setItem("pickSplashShown","1");}})();</script>';
+
+// Same brand mark as the main app's header (renderApp()/render(),
+// index.php) — the sole persistent identity anchor across every screen. The
+// large in-flow <h1> each screen renders IS the primary title (iOS
+// large-title pattern); this bar starts transparent/title-less and only
+// picks up a blurred background + the small centered title (echoed
+// server-side above as $screenTitle) once you scroll the large title out of
+// view, via the scroll listener below. The trailing "…" button is the only
+// persistent navigation /pick/ has (every screen otherwise only links
 // forward) — needed specifically so a pick session can be paused/switched
 // mid-way: "Zurücklegen" reaches the put-away flow for whatever's ALREADY
 // been picked without requiring the rest of the list to be finished first
 // (getPutAwaySuggestions()/putAwayItem() already support a partial list,
 // this just exposes that entry point directly instead of only after full
 // completion), and "Übersicht" is how you switch to a different pick list.
-echo '<header class="pick-brand-header">';
-echo '<span class="pick-brand-mark">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
-echo '<span class="pick-brand-title">' . htmlspecialchars(t('pick_app_title')) . '</span>';
-echo '<button type="button" class="pick-menu-btn" id="pick-menu-btn" aria-label="' . htmlspecialchars(t('pick_menu_label')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>';
+echo '<header class="pick-navbar" id="pick-navbar">';
+echo '<span class="pick-navbar-leading">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
+echo '<span class="pick-navbar-title" id="pick-navbar-title">' . htmlspecialchars($screenTitle) . '</span>';
+echo '<button type="button" class="pick-navbar-menu-btn" id="pick-menu-btn" aria-label="' . htmlspecialchars(t('pick_menu_label')) . '"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>';
 echo '</header>';
 echo '<div class="pick-menu-panel" id="pick-menu-panel" hidden>';
 echo '<a href="?screen=list">' . htmlspecialchars(t('pick_menu_overview')) . '</a>';
@@ -142,22 +167,89 @@ if ($currentPickListId !== null) {
     echo '<a href="?screen=putaway&id=' . $currentPickListId . '">' . htmlspecialchars(t('pick_menu_putaway')) . '</a>';
 }
 echo '</div>';
+
+$pullToRefreshEnabled = json_encode($screen === 'list');
+echo '<div class="pick-refresh-indicator" id="pick-refresh-indicator"><span class="pick-refresh-spinner"></span></div>';
+echo '<main id="pick-main">';
 echo $content;
+echo '</main>';
 echo <<<SCRIPT
 <script>
 (function(){
   var btn = document.getElementById('pick-menu-btn');
   var panel = document.getElementById('pick-menu-panel');
-  if (!btn || !panel) { return; }
-  btn.addEventListener('click', function(e) {
-    e.stopPropagation();
-    panel.hidden = !panel.hidden;
-  });
-  document.addEventListener('click', function(e) {
-    if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) {
-      panel.hidden = true;
-    }
-  });
+  if (btn && panel) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      panel.hidden = !panel.hidden;
+    });
+    document.addEventListener('click', function(e) {
+      if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) {
+        panel.hidden = true;
+      }
+    });
+  }
+
+  // Large-title collapse: the nav bar picks up a blurred background and
+  // fades in its small centered title once the page has scrolled roughly
+  // past where the in-flow <h1> sits, mirroring iOS's own large-title bars
+  // (Settings, Mail, ...).
+  var navbar = document.getElementById('pick-navbar');
+  var heading = document.querySelector('.pick-screen h1');
+  if (navbar && heading) {
+    var threshold = function() { return heading.offsetTop + heading.offsetHeight - navbar.offsetHeight; };
+    var onScroll = function() {
+      navbar.classList.toggle('pick-navbar-scrolled', window.scrollY > threshold());
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  } else if (navbar) {
+    navbar.classList.add('pick-navbar-scrolled');
+  }
+
+  // Pull-to-refresh, overview screen only (pickPullToRefreshEnabled) — a
+  // plain window.location.reload() rather than a fetch-and-patch refresh,
+  // matching every other action in this app (see src/pick_pages.php's own
+  // doc comment: "a plain, reliable server render... no client-side DOM
+  // patching").
+  if ($pullToRefreshEnabled) {
+    var indicator = document.getElementById('pick-refresh-indicator');
+    var startY = null;
+    var pulling = false;
+    var triggered = false;
+    var THRESHOLD = 64;
+    document.addEventListener('touchstart', function(e) {
+      if (window.scrollY <= 0) {
+        startY = e.touches[0].clientY;
+        pulling = true;
+        triggered = false;
+      } else {
+        startY = null;
+        pulling = false;
+      }
+    }, { passive: true });
+    document.addEventListener('touchmove', function(e) {
+      if (!pulling || startY === null || triggered) { return; }
+      var dy = e.touches[0].clientY - startY;
+      if (dy > 0 && window.scrollY <= 0) {
+        var height = Math.min(dy * 0.5, 56);
+        indicator.style.height = height + 'px';
+      }
+    }, { passive: true });
+    document.addEventListener('touchend', function(e) {
+      if (!pulling) { return; }
+      pulling = false;
+      var height = parseFloat(indicator.style.height) || 0;
+      if (height >= THRESHOLD * 0.5 && !triggered) {
+        triggered = true;
+        indicator.style.height = '44px';
+        indicator.classList.add('pick-refresh-loading');
+        window.location.reload();
+      } else {
+        indicator.style.height = '0px';
+      }
+    });
+  }
 })();
 </script>
 SCRIPT;
