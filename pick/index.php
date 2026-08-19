@@ -160,7 +160,14 @@ echo '<meta name="theme-color" content="#2563eb">';
 echo '<meta name="color-scheme" content="light dark">';
 echo '<script>if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js?v=' . $swVersion . '"); }); }</script>';
 echo '<link rel="stylesheet" href="style.css?v=' . $swVersion . '">';
-echo '</head><body>';
+// The login screen has no nav bar (nothing to navigate to yet), but body's
+// padding-top otherwise always reserves space for one (see pick/style.css —
+// it's a fixed-position bar, taken out of flow, so something has to push
+// content below it) — left in place here, that reserved space plus the
+// login card's own min-height: 100vh made the page just tall enough to
+// scroll despite having nothing worth scrolling to. pick-body-no-navbar
+// drops it back to just the safe-area inset.
+echo '<body' . ($currentUser === null ? ' class="pick-body-no-navbar"' : '') . '>';
 
 // Cold-launch splash only — a full-screen navigation inside /pick/ (every
 // link here is a plain server round-trip, see this file's own doc comment)

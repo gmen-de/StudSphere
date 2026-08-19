@@ -68,6 +68,18 @@ body {
   overscroll-behavior-y: contain;
 }
 
+/* Login screen only (index.php adds this class when there's no nav bar to
+   reserve space for) — without the navbar's height in the way, the login
+   card's own min-height: 100vh fits the real viewport exactly, so this also
+   pins it non-scrollable rather than just hiding an overflow that
+   shouldn't exist in the first place. */
+body.pick-body-no-navbar {
+  padding-top: env(safe-area-inset-top);
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
 /* ---------- Splash (cold-launch only, see the sessionStorage check inline
    in index.php — this is the CSS half: a solid brand screen that
    self-dismisses via animation, no JS required to hide it, so it degrades
