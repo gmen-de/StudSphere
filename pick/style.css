@@ -70,6 +70,12 @@ html.pick-html-login {
   height: 100%;
   overflow: hidden;
   overscroll-behavior-y: none;
+  /* Default before the JS below has run (or on a browser without
+     visualViewport) — overwritten live to the actual measured value, in
+     px, once available. Always referenced through the same calc() in
+     .pick-login-screen either way, so there's exactly one place that
+     accounts for the nav bar's height rather than two diverging paths. */
+  --pick-vvh: 100dvh;
 }
 
 body {
@@ -202,9 +208,15 @@ body.pick-body-no-navbar {
    avoiding scroll meant avoiding surplus height) — now that html/body's
    position:fixed (see above) locks scrolling structurally regardless of
    content height, centering is safe again and fills the space below a
-   short form instead of leaving it looking like an unfinished, empty page. */
+   short form instead of leaving it looking like an unfinished, empty page.
+
+   Centers against --pick-vvh (the nav bar's height already subtracted)
+   rather than a plain 100%: since the page can no longer scroll to bring a
+   focused field above the keyboard, this box has to actively shrink to
+   whatever's still visible instead, or a card centered against the full,
+   keyboard-including height just sits still and gets covered by it. */
 .pick-login-screen {
-  height: 100%;
+  height: calc(var(--pick-vvh) - 2.75rem - env(safe-area-inset-top));
   padding: 1.5rem;
   display: flex;
   align-items: center;

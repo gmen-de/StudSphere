@@ -231,13 +231,37 @@ if ($currentUser === null) {
     echo '<button type="submit" class="pick-btn pick-btn-primary">' . htmlspecialchars(t('login_button')) . '</button>';
     echo '</form>';
     echo '</div>';
-    // Belt-and-suspenders on top of html/body's position:fixed (see
-    // pick/style.css) — iOS's own "scroll the focused input above the
-    // keyboard/AutoFill bar" behavior moves window.scrollY directly, a
-    // separate mechanism from normal overflow-based scrolling that CSS
-    // alone doesn't reliably intercept. Snapping scroll position back to 0
-    // on every 'scroll' event undoes it the instant it happens.
-    echo '<script>window.addEventListener("scroll", function() { window.scrollTo(0, 0); });</script>';
+    echo <<<SCRIPT
+<script>
+(function(){
+  // Belt-and-suspenders on top of html/body's position:fixed (see
+  // pick/style.css) — iOS's own "scroll the focused input above the
+  // keyboard/AutoFill bar" behavior moves window.scrollY directly, a
+  // separate mechanism from normal overflow-based scrolling that CSS
+  // alone doesn't reliably intercept. Snapping scroll position back to 0
+  // on every 'scroll' event undoes it the instant it happens.
+  window.addEventListener('scroll', function() { window.scrollTo(0, 0); });
+
+  // Now that the page itself can no longer scroll to bring a focused field
+  // above the keyboard (the whole point of the fix above), the card has to
+  // stay inside whatever space is ACTUALLY visible on its own —
+  // window.innerHeight/100vh don't shrink for the keyboard on iOS, so a
+  // form centered against either of those just sits still and gets covered.
+  // visualViewport.height does shrink correctly (it excludes the keyboard
+  // and, on the login fields, iOS's own Passwords/AutoFill bar), so mirror
+  // it into a custom property .pick-login-screen centers against instead of
+  // 100%/100dvh — the card re-centers into the shrinking space live as the
+  // keyboard animates up, no scrolling involved at any point.
+  if (window.visualViewport) {
+    var syncViewportHeight = function() {
+      document.documentElement.style.setProperty('--pick-vvh', window.visualViewport.height + 'px');
+    };
+    window.visualViewport.addEventListener('resize', syncViewportHeight);
+    syncViewportHeight();
+  }
+})();
+</script>
+SCRIPT;
 } else {
     // Same brand mark as the main app's header (renderApp()/render(),
     // index.php) — the sole persistent identity anchor across every screen. Its
