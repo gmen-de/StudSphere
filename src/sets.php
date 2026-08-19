@@ -699,14 +699,32 @@ function getStickerPartIds(PDO $pdo, int $inventoryId): array
  * regardless of which inventory-version tab is active. Exclusive/rare are
  * piece counts (SUM of quantity), not distinct-part counts — a part used 4x
  * in this set and nowhere else contributes 4 to "Exklusive", not 1. Sticker
- * sheets are their own group and don't count toward exclusive/rare at all.
+ * sheets are their own group, counted by distinct part+color row (not
+ * quantity — a sticker sheet is a unit, not a piece count), and don't count
+ * toward exclusive/rare/total at all.
  *
- * @return array{exclusive:int, rare:int, stickers:int}
+ * Each bucket also gets an "_actual" counterpart: how much of that bucket is
+ * already covered by the user's LOOSE part stock (getLooseStockMap() — set-
+ * materialized storage_items rows are deliberately excluded there, same
+ * convention as the BrickLink top-100 feature). Matched per part+color pair
+ * via colors.id (item['color_id']), not Rebrickable's own color numbering —
+ * matches getLooseStockMap()'s key space directly. "_actual" is capped at
+ * "_nominal" per item (min(have, needed)) so overstock on one part can't
+ * inflate a different bucket's ring; for stickers it's a 0/1 owned-or-not
+ * per row, mirroring how "_nominal" itself counts sticker sheets.
+ *
+ * @return array{
+ *   total_nominal:int, total_actual:int,
+ *   exclusive_nominal:int, exclusive_actual:int,
+ *   rare_nominal:int, rare_actual:int,
+ *   stickers_nominal:int, stickers_actual:int
+ * }
  */
 function getSetInventorySummary(PDO $pdo, int $inventoryId, string $locale): array
 {
     $items = getSetPartsList($pdo, $inventoryId, false, $locale);
     $stickerPartIds = getStickerPartIds($pdo, $inventoryId);
+    $looseStock = getLooseStockMap($pdo);
 
     $pairs = [];
     foreach ($items as $item) {
@@ -716,25 +734,48 @@ function getSetInventorySummary(PDO $pdo, int $inventoryId, string $locale): arr
     }
     $setCounts = getPartSetCounts($pdo, $pairs);
 
-    $exclusive = 0;
-    $rare = 0;
-    $stickers = 0;
+    $totalNominal = 0;
+    $totalActual = 0;
+    $exclusiveNominal = 0;
+    $exclusiveActual = 0;
+    $rareNominal = 0;
+    $rareActual = 0;
+    $stickersNominal = 0;
+    $stickersActual = 0;
+
     foreach ($items as $item) {
+        $have = $looseStock[$item['part_id'] . ':' . $item['color_id']] ?? 0;
+
         if (isset($stickerPartIds[$item['part_id']])) {
-            $stickers++;
+            $stickersNominal++;
+            if ($have > 0) {
+                $stickersActual++;
+            }
             continue;
         }
+
+        $matched = min($have, $item['quantity']);
+        $totalNominal += $item['quantity'];
+        $totalActual += $matched;
+
         $count = $item['rebrickable_color_id'] !== null
             ? ($setCounts[$item['part_id'] . ':' . $item['rebrickable_color_id']] ?? 0)
             : 0;
         if ($count === 1) {
-            $exclusive += $item['quantity'];
+            $exclusiveNominal += $item['quantity'];
+            $exclusiveActual += $matched;
         } elseif ($count >= 2 && $count <= 3) {
-            $rare += $item['quantity'];
+            $rareNominal += $item['quantity'];
+            $rareActual += $matched;
         }
     }
 
-    return ['exclusive' => $exclusive, 'rare' => $rare, 'stickers' => $stickers];
+    return [
+        'total_nominal' => $totalNominal, 'total_actual' => $totalActual,
+        'exclusive_nominal' => $exclusiveNominal, 'exclusive_actual' => $exclusiveActual,
+        'rare_nominal' => $rareNominal, 'rare_actual' => $rareActual,
+        'stickers_nominal' => $stickersNominal, 'stickers_actual' => $stickersActual,
+    ];
 }
 
 /**

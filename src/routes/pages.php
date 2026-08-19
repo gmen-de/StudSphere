@@ -2652,7 +2652,15 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
     $adjacentSets = getAdjacentSets($pdo, $set['rebrickable_set_num']);
     $inventorySummary = $latestInventoryId !== null
         ? getSetInventorySummary($pdo, $latestInventoryId, getLocale())
-        : ['exclusive' => 0, 'rare' => 0, 'stickers' => 0];
+        : [
+            'total_nominal' => 0, 'total_actual' => 0,
+            'exclusive_nominal' => 0, 'exclusive_actual' => 0,
+            'rare_nominal' => 0, 'rare_actual' => 0,
+            'stickers_nominal' => 0, 'stickers_actual' => 0,
+        ];
+    $inventoryTotalPercent = $inventorySummary['total_nominal'] > 0
+        ? ($inventorySummary['total_actual'] / $inventorySummary['total_nominal'] * 100)
+        : 0.0;
 
     $content = '<div class="set-detail-header">';
     $content .= '<span class="set-detail-image">' . ($set['thumbnail'] !== null ? '<img src="' . htmlspecialchars($set['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
@@ -2675,12 +2683,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
     $content .= '<div class="set-detail-table-wrap">';
     $content .= '<span class="set-detail-table-heading">' . htmlspecialchars(t('set_detail_inventory_heading')) . '</span>';
     $content .= '<table class="set-detail-table">';
-    if ($set['num_parts'] !== null) {
-        $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_total')) . '</th><td>' . htmlspecialchars(t('set_detail_num_parts', ['count' => formatNumber((int) $set['num_parts'])])) . '</td></tr>';
-    }
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_exclusive')) . '</th><td>' . (int) $inventorySummary['exclusive'] . '</td></tr>';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_rare')) . '</th><td>' . (int) $inventorySummary['rare'] . '</td></tr>';
-    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_stickers')) . '</th><td>' . (int) $inventorySummary['stickers'] . '</td></tr>';
+    $content .= '<tr class="owned-set-total-row"><td colspan="2">' . renderOwnedSetTotalRing($inventoryTotalPercent, $inventorySummary['total_actual'], $inventorySummary['total_nominal']) . '</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_exclusive')) . '</th><td>' . (int) $inventorySummary['exclusive_nominal'] . ' (' . (int) $inventorySummary['exclusive_actual'] . ')</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_rare')) . '</th><td>' . (int) $inventorySummary['rare_nominal'] . ' (' . (int) $inventorySummary['rare_actual'] . ')</td></tr>';
+    $content .= '<tr><th>' . htmlspecialchars(t('set_detail_field_stickers')) . '</th><td>' . (int) $inventorySummary['stickers_nominal'] . ' (' . (int) $inventorySummary['stickers_actual'] . ')</td></tr>';
     $content .= '</table>';
     $content .= '</div>';
 
