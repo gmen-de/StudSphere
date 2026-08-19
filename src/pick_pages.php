@@ -124,11 +124,13 @@ function renderPickListOverview(PDO $pdo, int $userId): string
             $locationStmt->execute([$list['location_id']]);
             $name = $locationStmt->fetchColumn();
 
-            $targetScreen = $status === 'closed' ? 'pick' : ($status === 'completed' ? 'pick' : 'pick');
-            $html .= '<a class="pick-list-card" href="?screen=' . $targetScreen . '&id=' . (int) $list['id'] . '">';
+            $html .= '<div class="pick-list-card-wrap" data-pick-list-id="' . (int) $list['id'] . '" data-pick-list-name="' . htmlspecialchars((string) $name) . '">';
+            $html .= '<div class="pick-list-card-delete-bg"><button type="button" class="pick-list-card-delete-btn">' . htmlspecialchars(t('pick_overview_delete_button')) . '</button></div>';
+            $html .= '<a class="pick-list-card" href="?screen=pick&id=' . (int) $list['id'] . '">';
             $html .= '<span class="pick-list-card-name">' . htmlspecialchars((string) $name) . '</span>';
             $html .= renderPickProgressBadge((int) $needed, (int) $picked);
             $html .= '</a>';
+            $html .= '</div>';
         }
         $html .= '</div>';
     }
@@ -138,7 +140,108 @@ function renderPickListOverview(PDO $pdo, int $userId): string
     }
 
     $html .= '</div>';
+    $html .= renderPickListOverviewSwipeScript();
     return $html;
+}
+
+/**
+ * Swipe-left-to-reveal-delete for the overview's pick-list cards (right to
+ * left, matching the iOS Mail/native-app convention the user asked for) —
+ * plain touch-event tracking, not a library: each card's foreground layer
+ * (.pick-list-card, the actual link) slides via a CSS transform while a
+ * fixed-width delete button sits underneath (.pick-list-card-delete-bg),
+ * revealed as the foreground slides away. A horizontal swipe is
+ * distinguished from a vertical scroll by comparing |dx| vs |dy| on the
+ * first few pixels of movement — only once a gesture is confirmed
+ * horizontal does it preventDefault() the touchmove (so an accidental
+ * horizontal wobble during normal vertical scrolling never hijacks the
+ * page). Deletion itself goes through action=delete_pick_list
+ * (src/routes/pick_actions.php), which refuses (with a translated message)
+ * if anything in the list has already been picked.
+ */
+function renderPickListOverviewSwipeScript(): string
+{
+    $confirmTemplateJson = json_encode(t('pick_overview_delete_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $errorGenericJson = json_encode(t('pick_error_generic'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    return <<<SCRIPT
+<script>
+(function(){
+  var REVEAL_WIDTH = 84;
+  document.querySelectorAll('.pick-list-card-wrap').forEach(function(wrap) {
+    var card = wrap.querySelector('.pick-list-card');
+    var deleteBtn = wrap.querySelector('.pick-list-card-delete-btn');
+    var startX = 0, startY = 0, currentX = 0, dragging = false, horizontal = null, open = false;
+
+    function setOffset(px, animate) {
+      card.style.transition = animate ? 'transform 0.2s ease' : 'none';
+      card.style.transform = 'translateX(' + px + 'px)';
+    }
+
+    card.addEventListener('touchstart', function(e) {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      currentX = open ? -REVEAL_WIDTH : 0;
+      dragging = true;
+      horizontal = null;
+    }, { passive: true });
+
+    card.addEventListener('touchmove', function(e) {
+      if (!dragging) { return; }
+      var dx = e.touches[0].clientX - startX;
+      var dy = e.touches[0].clientY - startY;
+      if (horizontal === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+        horizontal = Math.abs(dx) > Math.abs(dy);
+      }
+      if (horizontal === false) { return; }
+      if (horizontal === true) { e.preventDefault(); }
+      var next = Math.max(-REVEAL_WIDTH, Math.min(0, currentX + dx));
+      setOffset(next, false);
+    }, { passive: false });
+
+    card.addEventListener('touchend', function(e) {
+      if (!dragging) { return; }
+      dragging = false;
+      if (horizontal !== true) { return; }
+      var dx = (e.changedTouches[0].clientX - startX);
+      var next = currentX + dx;
+      open = next < -REVEAL_WIDTH / 2;
+      setOffset(open ? -REVEAL_WIDTH : 0, true);
+    });
+
+    card.addEventListener('click', function(e) {
+      if (open) {
+        e.preventDefault();
+        open = false;
+        setOffset(0, true);
+      }
+    });
+
+    deleteBtn.addEventListener('click', function() {
+      var name = wrap.dataset.pickListName;
+      var confirmText = $confirmTemplateJson.replace('{name}', name);
+      if (!window.confirm(confirmText)) { return; }
+      var formData = new FormData();
+      formData.set('action', 'delete_pick_list');
+      formData.set('pick_list_id', wrap.dataset.pickListId);
+      fetch('?action=delete_pick_list', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (!res.success) {
+            alert(res.message || $errorGenericJson);
+            open = false;
+            setOffset(0, true);
+            return;
+          }
+          wrap.remove();
+        })
+        .catch(function() {
+          alert($errorGenericJson);
+        });
+    });
+  });
+})();
+</script>
+SCRIPT;
 }
 
 function renderPickListCreate(PDO $pdo, string $sourceType, string $query, ?int $ownedSetId): string

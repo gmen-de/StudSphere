@@ -697,6 +697,49 @@ function closePickListIfEmpty(PDO $pdo, int $pickListId): void
 }
 
 /**
+ * Deletes a pick list the user changed their mind about — only when nothing
+ * has been picked into it yet (every pick_list_items row still at
+ * picked_quantity 0). Once even one item's been picked, real stock is
+ * physically sitting at this list's storage_locations row; deleting it out
+ * from under that stock would either orphan it (the FK from storage_items
+ * to storage_locations is ON DELETE RESTRICT, so the location couldn't
+ * actually be removed anyway) or silently destroy it, neither of which is
+ * an acceptable "delete a list" outcome — the correct path for a
+ * partially-picked list the user wants to abandon is the put-away
+ * assistant (getPutAwaySuggestions()/putAwayItem()), not deletion.
+ *
+ * @throws RuntimeException with a user-facing message if deletion isn't safe
+ */
+function deletePickList(PDO $pdo, int $pickListId): void
+{
+    $pickList = getPickList($pdo, $pickListId);
+    if ($pickList === null) {
+        throw new RuntimeException('Pick list not found.');
+    }
+
+    $pickedStmt = $pdo->prepare('SELECT COALESCE(SUM(picked_quantity), 0) FROM pick_list_items WHERE pick_list_id = ?');
+    $pickedStmt->execute([$pickListId]);
+    if ((int) $pickedStmt->fetchColumn() > 0) {
+        // Sentinel, not a display string — the action handler
+        // (src/routes/pick_actions.php) maps this to the translated
+        // pick_delete_error_already_picked message rather than showing it
+        // directly, unlike this file's other RuntimeExceptions (those cover
+        // "shouldn't really happen" edge cases; this one is a normal,
+        // expected, user-facing outcome that needs to read properly in
+        // German, not the plain-English messages used elsewhere here).
+        throw new RuntimeException('ALREADY_PICKED');
+    }
+
+    $locationId = (int) $pickList['location_id'];
+    $pdo->prepare('DELETE FROM pick_lists WHERE id = ?')->execute([$pickListId]);
+    // The location itself is only ever populated by picking (never at
+    // creation time) — with nothing picked, it's guaranteed empty, so this
+    // is safe unconditionally rather than needing its own locationHasStock()
+    // guard on top of the picked_quantity check above.
+    $pdo->prepare('DELETE FROM storage_locations WHERE id = ?')->execute([$locationId]);
+}
+
+/**
  * Consumes as much of a set's needed parts/minifigs as a given pick list
  * currently holds, moving them into the new owned_set instance's own
  * location instead of conjuring fresh stock for that portion — called from

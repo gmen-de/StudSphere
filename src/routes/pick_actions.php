@@ -74,6 +74,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_pick_list') {
+    header('Content-Type: application/json');
+    $deletePickListId = (int) ($_POST['pick_list_id'] ?? 0);
+    $pickListToDelete = getPickList($pdo, $deletePickListId);
+    if ($pickListToDelete === null || (int) $pickListToDelete['user_id'] !== $pickUserId) {
+        pickJsonError(t('pick_error_not_found'), 404);
+    }
+
+    try {
+        deletePickList($pdo, $deletePickListId);
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (RuntimeException $e) {
+        $message = $e->getMessage() === 'ALREADY_PICKED'
+            ? t('pick_delete_error_already_picked')
+            : t('pick_error_not_found');
+        pickJsonError($message);
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'pick_item') {
     header('Content-Type: application/json');
     $pickListId = (int) ($_POST['pick_list_id'] ?? 0);

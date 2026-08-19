@@ -176,7 +176,15 @@ body {
   gap: 0.6rem;
 }
 
+.pick-list-card-wrap {
+  position: relative;
+  border-radius: 0.9rem;
+  overflow: hidden;
+}
+
 .pick-list-card {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -187,6 +195,26 @@ body {
   background: var(--pick-card);
   text-decoration: none;
   color: var(--pick-text);
+  touch-action: pan-y;
+}
+
+.pick-list-card-delete-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  background: var(--pick-danger);
+}
+
+.pick-list-card-delete-btn {
+  width: 84px;
+  border: none;
+  background: transparent;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
 }
 
 .pick-list-card-name {
