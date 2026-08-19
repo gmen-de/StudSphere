@@ -70,6 +70,12 @@ function getBooleanStatusIcon(bool $value): string
  * as 'my_sets' (the action does add it there) but a plus in the box body
  * instead of 'sets'/'my_sets' shared center divider line (removed from both
  * so the plus reads clearly and isn't mistaken for that line).
+ * 'add_to_pick_list' is the not-yet-built "put this part on the pick list"
+ * action — 'bricks' unchanged, plus placed in the brick body (which has no
+ * center divider to remove, unlike 'sets'). No top-right dot: that badge
+ * means "already owned" elsewhere (my_sets/my_bricks/my_minifigs), which
+ * isn't what queuing a part for picking means. Not wired into any page yet
+ * — the pick-list feature itself doesn't exist yet, this is just the icon.
  */
 function getActionIcon(string $key): string
 {
@@ -102,6 +108,7 @@ function getActionIcon(string $key): string
         // src/instructions.php) — a plain document glyph, no PDF branding.
         'pdf' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M13 3v5h5"/><path d="M8.5 13h7"/><path d="M8.5 16.5h7"/></svg>',
         'add_to_collection' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l8-4 8 4"/><rect x="4" y="8" width="16" height="12" rx="1"/><circle cx="18.5" cy="6" r="2.4" fill="currentColor" stroke="none"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>',
+        'add_to_pick_list' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="7" rx="1.5"/><circle cx="9" cy="9" r="1.6" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1.6" fill="currentColor" stroke="none"/><path d="M12 12.5v4"/><path d="M9 14.5h6"/></svg>',
     ];
 
     return $icons[$key] ?? '';
