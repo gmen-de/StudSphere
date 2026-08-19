@@ -64,6 +64,18 @@ session_set_cookie_params(['lifetime' => PICK_LOGIN_SESSION_LIFETIME_SECONDS, 'p
 registerDatabaseSessionHandler();
 session_start();
 
+// Own logout too — not just the main app's login form (above). Using
+// ../index.php?action=logout instead would destroy the session correctly
+// (it's shared) but then land on the MAIN app's own login page
+// (src/routes/pre_auth.php redirects to ITS OWN $_SERVER['PHP_SELF'],
+// hardcoded, no redirect-target param to point back into /pick/ with) —
+// exactly the kind of dead-end this file's login screen was built to avoid.
+if (isset($_GET['action']) && $_GET['action'] === 'logout') {
+    session_destroy();
+    header('Location: index.php');
+    exit;
+}
+
 $pdo = getPDO();
 $currentUser = getCurrentUser();
 $loginError = false;
@@ -217,9 +229,9 @@ if ($currentUser === null) {
     // rest of the list to be finished first (getPutAwaySuggestions()/
     // putAwayItem() already support a partial list, this just exposes that
     // entry point directly instead of only after full completion), "Übersicht"
-    // is how you switch to a different pick list, and "Abmelden" goes straight
-    // through the main app's own logout handler (src/routes/pre_auth.php) since
-    // the session is shared — no separate logout logic needed here.
+    // is how you switch to a different pick list, and "Abmelden" hits this
+    // file's own ?action=logout branch above, landing back on /pick/'s own
+    // login screen rather than the main app's.
     echo '<header class="pick-navbar" id="pick-navbar">';
     echo '<span class="pick-navbar-leading">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
     echo '<span class="pick-navbar-title" id="pick-navbar-title">' . htmlspecialchars($screenTitle) . '</span>';
@@ -230,7 +242,7 @@ if ($currentUser === null) {
     if ($currentPickListId !== null) {
         echo '<a href="?screen=putaway&id=' . $currentPickListId . '">' . htmlspecialchars(t('pick_menu_putaway')) . '</a>';
     }
-    echo '<a class="pick-menu-danger" href="../index.php?action=logout">' . htmlspecialchars(t('pick_menu_logout')) . '</a>';
+    echo '<a class="pick-menu-danger" href="?action=logout">' . htmlspecialchars(t('pick_menu_logout')) . '</a>';
     echo '</div>';
 
     $pullToRefreshEnabled = json_encode($screen === 'list');

@@ -69,15 +69,16 @@ body {
 }
 
 /* Login screen only (index.php adds this class when there's no nav bar to
-   reserve space for) — without the navbar's height in the way, the login
-   card's own min-height: 100vh fits the real viewport exactly, so this also
-   pins it non-scrollable rather than just hiding an overflow that
-   shouldn't exist in the first place. */
+   reserve space for) — drops that now-unneeded top space so the card sits
+   centered without an artificial scroll. Deliberately NOT height:100vh +
+   overflow:hidden (an earlier version of this rule did that): iOS shrinks
+   the visual viewport for the keyboard and, on the username/password
+   fields, its own QuickType/AutoFill suggestion bar — locking the page to a
+   fixed height then either clips the submit button behind the keyboard or
+   fights the browser's own resize. Ordinary scrolling when a keyboard eats
+   the space is normal, expected behavior, same as any native login form. */
 body.pick-body-no-navbar {
   padding-top: env(safe-area-inset-top);
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
 }
 
 /* ---------- Splash (cold-launch only, see the sessionStorage check inline
