@@ -400,15 +400,13 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
     // $shortfallCount reflects every item currently stuck, not just the
     // ones scanned before the first pickable one was found.
     $openItems = array_values(array_filter($items, fn (array $item): bool => (int) $item['picked_quantity'] < (int) $item['needed_quantity']));
-    $openItem = null;
-    $steps = null;
+    $pickableItems = []; // [['item' => ..., 'steps' => ...], ...]
     $shortfallCount = 0;
     foreach ($openItems as $item) {
         $itemSteps = getPickStepsForItem($pdo, $item);
-        if ($openItem === null && !empty($itemSteps['steps'])) {
-            $openItem = $item;
-            $steps = $itemSteps;
-        } elseif (empty($itemSteps['steps'])) {
+        if (!empty($itemSteps['steps'])) {
+            $pickableItems[] = ['item' => $item, 'steps' => $itemSteps];
+        } else {
             $shortfallCount++;
         }
     }
@@ -426,7 +424,7 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
         return $html;
     }
 
-    if ($openItem === null) {
+    if (empty($pickableItems)) {
         // Every still-needed item is a genuine shortfall — nothing left to
         // physically pick right now, but (unlike full completion above)
         // some items are still short rather than done, so this gets its own
@@ -440,64 +438,88 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
         return $html;
     }
 
-    $display = getPickItemDisplayInfo($pdo, $openItem);
+    // Sorted by each item's own first pick location — so items whose
+    // location happens to match sit next to each other in the swipe deck
+    // below, letting a user work through one shelf at a time instead of
+    // bouncing between locations on every swipe. Only a same-location
+    // grouping, not a real shortest-path route (this app has no notion of
+    // physical distance between locations to route against), but the common
+    // case — several needed parts sharing a bin — already gets meaningfully
+    // better with just this.
+    usort($pickableItems, function (array $a, array $b): int {
+        $pathCompare = strcmp($a['steps']['steps'][0]['location_path'], $b['steps']['steps'][0]['location_path']);
+        return $pathCompare !== 0 ? $pathCompare : ((int) $a['item']['id'] <=> (int) $b['item']['id']);
+    });
 
-    // Whatever LDraw angles are already cached for this part+color, in a
-    // fixed order — rendering was queued in full back when this pick list
-    // was created (enqueueLdrawAnglesForPickListItems(), src/pick_lists.php),
-    // not on demand while picking, so by the time the user actually reaches
-    // this item most/all of them are typically already done; no polling
-    // needed here, just show whatever's ready right now. Falls back to the
-    // one generic thumbnail if LDraw rendering isn't enabled or nothing has
-    // rendered yet at all.
-    $galleryImages = [];
-    if ($display['part_id'] !== null && $display['rebrickable_color_id'] !== null) {
-        $angleImages = getLdrawFourAngleImages($pdo, $display['part_id'], $display['rebrickable_color_id']);
-        foreach (LDRAW_PICK_DETAIL_ANGLES as $angle) {
-            if (!empty($angleImages[$angle])) {
-                $galleryImages[] = $angleImages[$angle];
+    $html .= '<div class="pick-active-deck" id="pick-active-deck">';
+    foreach ($pickableItems as $entry) {
+        $item = $entry['item'];
+        $steps = $entry['steps'];
+        $display = getPickItemDisplayInfo($pdo, $item);
+
+        // Whatever LDraw angles are already cached for this part+color, in a
+        // fixed order — rendering was queued in full back when this pick
+        // list was created (enqueueLdrawAnglesForPickListItems(),
+        // src/pick_lists.php), not on demand while picking, so by the time
+        // the user actually reaches this item most/all of them are
+        // typically already done; no polling needed here, just show
+        // whatever's ready right now. Falls back to the one generic
+        // thumbnail if LDraw rendering isn't enabled or nothing has
+        // rendered yet at all.
+        $galleryImages = [];
+        if ($display['part_id'] !== null && $display['rebrickable_color_id'] !== null) {
+            $angleImages = getLdrawFourAngleImages($pdo, $display['part_id'], $display['rebrickable_color_id']);
+            foreach (LDRAW_PICK_DETAIL_ANGLES as $angle) {
+                if (!empty($angleImages[$angle])) {
+                    $galleryImages[] = $angleImages[$angle];
+                }
             }
         }
-    }
-    if (empty($galleryImages) && !empty($display['thumbnail'])) {
-        $galleryImages[] = $display['thumbnail'];
-    }
-
-    $html .= '<div class="pick-item-card">';
-    if (!empty($galleryImages)) {
-        $html .= '<div class="pick-item-gallery">';
-        foreach ($galleryImages as $galleryImage) {
-            $html .= '<img src="' . htmlspecialchars(pickAssetUrl($galleryImage)) . '" alt="">';
+        if (empty($galleryImages) && !empty($display['thumbnail'])) {
+            $galleryImages[] = $display['thumbnail'];
         }
-        $html .= '</div>';
-    }
-    $html .= '<h2>' . htmlspecialchars($display['label']) . '</h2>';
-    if ($display['color_name'] !== null) {
-        $html .= '<p class="pick-item-color">' . htmlspecialchars($display['color_name']) . '</p>';
-    }
-    $html .= '<p>' . htmlspecialchars(t('pick_item_needed_label', ['needed' => (string) $openItem['needed_quantity'], 'picked' => (string) $openItem['picked_quantity']])) . '</p>';
 
-    if (!empty($steps['steps'])) {
+        $html .= '<div class="pick-item-card">';
+        if (!empty($galleryImages)) {
+            $html .= '<div class="pick-item-gallery">';
+            foreach ($galleryImages as $galleryImage) {
+                $html .= '<img src="' . htmlspecialchars(pickAssetUrl($galleryImage)) . '" alt="">';
+            }
+            $html .= '</div>';
+        }
+        $html .= '<h2>' . htmlspecialchars($display['label']) . '</h2>';
+        if ($display['color_name'] !== null) {
+            $html .= '<p class="pick-item-color">' . htmlspecialchars($display['color_name']) . '</p>';
+        }
+        $html .= '<p>' . htmlspecialchars(t('pick_item_needed_label', ['needed' => (string) $item['needed_quantity'], 'picked' => (string) $item['picked_quantity']])) . '</p>';
+
         $step = $steps['steps'][0];
         $html .= '<div class="pick-step-box">';
         $html .= '<p class="pick-step-location">' . htmlspecialchars($step['location_path']) . '</p>';
         $html .= '<p>' . htmlspecialchars(t('pick_item_available_label', ['count' => (string) $step['available']])) . '</p>';
-        if ($openItem['item_type'] === 'minifig') {
-            $html .= '<button type="button" class="pick-btn pick-btn-primary pick-confirm-btn" data-pick-list-item-id="' . (int) $openItem['id'] . '">' . htmlspecialchars(t('pick_item_confirm_button')) . '</button>';
+        if ($item['item_type'] === 'minifig') {
+            $html .= '<button type="button" class="pick-btn pick-btn-primary pick-confirm-btn" data-pick-list-item-id="' . (int) $item['id'] . '">' . htmlspecialchars(t('pick_item_confirm_button')) . '</button>';
         } else {
-            $html .= '<input type="number" id="pick-quantity-input" min="0" max="' . $step['suggested_pick'] . '" value="' . $step['suggested_pick'] . '">';
+            $html .= '<input type="number" class="pick-quantity-input" min="0" max="' . $step['suggested_pick'] . '" value="' . $step['suggested_pick'] . '">';
             $html .= '<p class="pick-quantity-hint">' . htmlspecialchars(t('pick_item_quantity_zero_hint')) . '</p>';
-            $html .= '<button type="button" class="pick-btn pick-btn-primary pick-confirm-btn" data-pick-list-item-id="' . (int) $openItem['id'] . '" data-source-location-id="' . $step['location_id'] . '">' . htmlspecialchars(t('pick_item_confirm_button')) . '</button>';
+            $html .= '<button type="button" class="pick-btn pick-btn-primary pick-confirm-btn" data-pick-list-item-id="' . (int) $item['id'] . '" data-source-location-id="' . $step['location_id'] . '">' . htmlspecialchars(t('pick_item_confirm_button')) . '</button>';
         }
-        $html .= '<button type="button" class="pick-btn pick-flag-btn" data-pick-list-item-id="' . (int) $openItem['id'] . '" data-location-id="' . $step['location_id'] . '" data-part-id="' . ($display['part_id'] ?? '') . '">' . htmlspecialchars(t('pick_item_flag_stocktake_button')) . '</button>';
+        $html .= '<button type="button" class="pick-btn pick-flag-btn" data-pick-list-item-id="' . (int) $item['id'] . '" data-location-id="' . $step['location_id'] . '" data-part-id="' . ($display['part_id'] ?? '') . '">' . htmlspecialchars(t('pick_item_flag_stocktake_button')) . '</button>';
         $html .= '</div>';
-    } else {
-        $html .= '<p class="pick-shortfall">' . htmlspecialchars(t('pick_item_shortfall', ['count' => (string) $steps['shortfall']])) . '</p>';
-        if ($openItem['item_type'] === 'minifig') {
-            $html .= '<p class="pick-empty-hint">' . htmlspecialchars(t('pick_item_minifig_unavailable_hint')) . '</p>';
-        }
+        $html .= '</div>';
     }
     $html .= '</div>';
+
+    if (count($pickableItems) > 1) {
+        $html .= '<div class="pick-active-dots" id="pick-active-dots">';
+        for ($i = 0, $n = count($pickableItems); $i < $n; $i++) {
+            $html .= '<span class="pick-active-dot' . ($i === 0 ? ' active' : '') . '"></span>';
+        }
+        $html .= '</div>';
+    }
+    if ($shortfallCount > 0) {
+        $html .= '<p class="pick-empty-hint pick-active-shortfall-hint">' . htmlspecialchars(t('pick_active_shortfall_hint', ['count' => (string) $shortfallCount])) . '</p>';
+    }
 
     $pickListIdJson = json_encode((int) $pickList['id']);
     $errorGenericJson = json_encode(t('pick_error_generic'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
@@ -506,8 +528,7 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
 (function(){
   var pickListId = $pickListIdJson;
 
-  var confirmBtn = document.querySelector('.pick-confirm-btn');
-  if (confirmBtn) {
+  document.querySelectorAll('.pick-confirm-btn').forEach(function(confirmBtn) {
     confirmBtn.addEventListener('click', function() {
       confirmBtn.disabled = true;
       var formData = new FormData();
@@ -516,7 +537,7 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
       formData.set('pick_list_item_id', confirmBtn.dataset.pickListItemId);
       if (confirmBtn.dataset.sourceLocationId) {
         formData.set('source_location_id', confirmBtn.dataset.sourceLocationId);
-        var qtyInput = document.getElementById('pick-quantity-input');
+        var qtyInput = confirmBtn.closest('.pick-item-card').querySelector('.pick-quantity-input');
         formData.set('quantity', qtyInput ? qtyInput.value : '1');
       } else {
         formData.set('quantity', '1');
@@ -536,10 +557,9 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
           confirmBtn.disabled = false;
         });
     });
-  }
+  });
 
-  var flagBtn = document.querySelector('.pick-flag-btn');
-  if (flagBtn) {
+  document.querySelectorAll('.pick-flag-btn').forEach(function(flagBtn) {
     flagBtn.addEventListener('click', function() {
       var note = window.prompt('');
       if (note === null) { return; }
@@ -556,8 +576,22 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
           if (!res.success) { alert(res.message || $errorGenericJson); }
         });
     });
-  }
+  });
 
+  // Swipe left/right through the deck (left = older browsers' native touch
+  // scrolling already gives this for free via scroll-snap; this listener
+  // just keeps the page-dot indicator in sync with whichever card is
+  // currently centered, same idea as iOS's own page control).
+  var deck = document.getElementById('pick-active-deck');
+  var dots = document.getElementById('pick-active-dots');
+  if (deck && dots) {
+    var dotEls = dots.querySelectorAll('.pick-active-dot');
+    var updateDots = function() {
+      var index = Math.round(deck.scrollLeft / deck.clientWidth);
+      dotEls.forEach(function(dot, i) { dot.classList.toggle('active', i === index); });
+    };
+    deck.addEventListener('scroll', updateDots, { passive: true });
+  }
 })();
 </script>
 SCRIPT;

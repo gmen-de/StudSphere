@@ -138,24 +138,31 @@ echo '</head><body>';
 // rather than native. The inline script right after the div runs
 // synchronously before anything else paints, so a repeat visit within the
 // same tab session never even flashes it; sessionStorage (not localStorage)
-// deliberately re-arms it on the next genuinely fresh launch.
-echo '<div class="pick-splash" id="pick-splash"><span class="pick-splash-mark">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span></div>';
+// deliberately re-arms it on the next genuinely fresh launch. Shows for a
+// full 3s (per explicit request) before its CSS fade-out animation starts.
+echo '<div class="pick-splash" id="pick-splash">';
+echo '<div class="pick-splash-content"><span class="pick-splash-mark">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
+echo '<span class="pick-splash-wordmark"><span class="pick-splash-title">StudSphere</span><span class="pick-splash-subtitle">Pick Tool</span></span></div>';
+echo '<span class="pick-splash-version">v' . $swVersion . '</span>';
+echo '</div>';
 echo '<script>(function(){var s=document.getElementById("pick-splash");if(sessionStorage.getItem("pickSplashShown")){s.style.display="none";}else{sessionStorage.setItem("pickSplashShown","1");}})();</script>';
 
 // Same brand mark as the main app's header (renderApp()/render(),
-// index.php) — the sole persistent identity anchor across every screen. The
-// large in-flow <h1> each screen renders IS the primary title (iOS
-// large-title pattern); this bar starts transparent/title-less and only
-// picks up a blurred background + the small centered title (echoed
-// server-side above as $screenTitle) once you scroll the large title out of
-// view, via the scroll listener below. The trailing "…" button is the only
-// persistent navigation /pick/ has (every screen otherwise only links
-// forward) — needed specifically so a pick session can be paused/switched
-// mid-way: "Zurücklegen" reaches the put-away flow for whatever's ALREADY
-// been picked without requiring the rest of the list to be finished first
-// (getPutAwaySuggestions()/putAwayItem() already support a partial list,
-// this just exposes that entry point directly instead of only after full
-// completion), and "Übersicht" is how you switch to a different pick list.
+// index.php) — the sole persistent identity anchor across every screen. Its
+// small title (echoed server-side above as $screenTitle) is permanently
+// visible in a blurred, translucent bar (see .pick-navbar, pick/style.css —
+// deliberately not a scroll-collapsing large title, changed on explicit
+// feedback that the compact bar alone reads better and saves vertical
+// space). The trailing "…" button is the only persistent navigation /pick/
+// has (every screen otherwise only links forward) — needed specifically so
+// a pick session can be paused/switched mid-way: "Zurücklegen" reaches the
+// put-away flow for whatever's ALREADY been picked without requiring the
+// rest of the list to be finished first (getPutAwaySuggestions()/
+// putAwayItem() already support a partial list, this just exposes that
+// entry point directly instead of only after full completion), "Übersicht"
+// is how you switch to a different pick list, and "Abmelden" goes straight
+// through the main app's own logout handler (src/routes/pre_auth.php) since
+// the session is shared — no separate logout logic needed here.
 echo '<header class="pick-navbar" id="pick-navbar">';
 echo '<span class="pick-navbar-leading">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
 echo '<span class="pick-navbar-title" id="pick-navbar-title">' . htmlspecialchars($screenTitle) . '</span>';
@@ -166,6 +173,7 @@ echo '<a href="?screen=list">' . htmlspecialchars(t('pick_menu_overview')) . '</
 if ($currentPickListId !== null) {
     echo '<a href="?screen=putaway&id=' . $currentPickListId . '">' . htmlspecialchars(t('pick_menu_putaway')) . '</a>';
 }
+echo '<a class="pick-menu-danger" href="../index.php?action=logout">' . htmlspecialchars(t('pick_menu_logout')) . '</a>';
 echo '</div>';
 
 $pullToRefreshEnabled = json_encode($screen === 'list');
