@@ -454,6 +454,7 @@ function installDatabase(): void
         'CREATE TABLE IF NOT EXISTS pick_lists (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
+            name VARCHAR(255) NOT NULL DEFAULT \'\',
             location_id INT NOT NULL,
             source_type ENUM(\'set\', \'minifig\') NOT NULL,
             set_id INT DEFAULT NULL,

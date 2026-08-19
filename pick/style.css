@@ -217,8 +217,26 @@ body {
   font-size: 0.9rem;
 }
 
+.pick-list-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
 .pick-list-card-name {
   font-weight: 600;
+}
+
+.pick-list-card-container {
+  font-size: 0.8rem;
+  color: var(--pick-muted);
+}
+
+.pick-container-hint {
+  margin: -0.4rem 0 0.75rem;
+  color: var(--pick-muted);
+  font-size: 0.9rem;
 }
 
 .pick-progress-badge {

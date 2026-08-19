@@ -122,12 +122,20 @@ function renderPickListOverview(PDO $pdo, int $userId): string
             $picked = array_sum(array_column($items, 'picked_quantity'));
             $locationStmt = $pdo->prepare('SELECT name FROM storage_locations WHERE id = ?');
             $locationStmt->execute([$list['location_id']]);
-            $name = $locationStmt->fetchColumn();
+            $containerName = (string) $locationStmt->fetchColumn();
+            // Legacy rows created before pick_lists.name existed have '' —
+            // fall back to the container name so nothing renders blank.
+            $displayName = $list['name'] !== '' ? $list['name'] : $containerName;
 
-            $html .= '<div class="pick-list-card-wrap" data-pick-list-id="' . (int) $list['id'] . '" data-pick-list-name="' . htmlspecialchars((string) $name) . '">';
+            $html .= '<div class="pick-list-card-wrap" data-pick-list-id="' . (int) $list['id'] . '" data-pick-list-name="' . htmlspecialchars($displayName) . '">';
             $html .= '<div class="pick-list-card-delete-bg"><button type="button" class="pick-list-card-delete-btn">' . htmlspecialchars(t('pick_overview_delete_button')) . '</button></div>';
             $html .= '<a class="pick-list-card" href="?screen=pick&id=' . (int) $list['id'] . '">';
-            $html .= '<span class="pick-list-card-name">' . htmlspecialchars((string) $name) . '</span>';
+            $html .= '<span class="pick-list-card-text">';
+            $html .= '<span class="pick-list-card-name">' . htmlspecialchars($displayName) . '</span>';
+            if ($containerName !== '' && $containerName !== $displayName) {
+                $html .= '<span class="pick-list-card-container">' . htmlspecialchars($containerName) . '</span>';
+            }
+            $html .= '</span>';
             $html .= renderPickProgressBadge((int) $needed, (int) $picked);
             $html .= '</a>';
             $html .= '</div>';
@@ -289,6 +297,8 @@ function renderPickListCreate(PDO $pdo, string $sourceType, string $query, ?int 
 
     $html .= '<div class="pick-create-confirm" id="pick-create-confirm" style="display:none;">';
     $html .= '<p id="pick-create-selected-label"></p>';
+    $html .= '<label>' . htmlspecialchars(t('pick_create_name_label'));
+    $html .= '<input type="text" id="pick-create-name"></label>';
     $html .= '<label>' . htmlspecialchars(t('pick_create_description_label'));
     $html .= '<input type="text" id="pick-create-description" placeholder="' . htmlspecialchars(t('pick_create_description_placeholder')) . '"></label>';
     $html .= '<p class="pick-error" id="pick-create-error"></p>';
@@ -305,6 +315,7 @@ function renderPickListCreate(PDO $pdo, string $sourceType, string $query, ?int 
   var selectedCatalogId = null;
   var confirmBox = document.getElementById('pick-create-confirm');
   var selectedLabel = document.getElementById('pick-create-selected-label');
+  var nameInput = document.getElementById('pick-create-name');
   var descInput = document.getElementById('pick-create-description');
   var errorEl = document.getElementById('pick-create-error');
   var submitBtn = document.getElementById('pick-create-submit');
@@ -313,6 +324,7 @@ function renderPickListCreate(PDO $pdo, string $sourceType, string $query, ?int 
     btn.addEventListener('click', function() {
       selectedCatalogId = parseInt(btn.dataset.catalogId, 10);
       selectedLabel.textContent = btn.dataset.label;
+      nameInput.value = btn.dataset.label;
       confirmBox.style.display = 'block';
       confirmBox.scrollIntoView({ behavior: 'smooth' });
     });
@@ -320,7 +332,7 @@ function renderPickListCreate(PDO $pdo, string $sourceType, string $query, ?int 
 
   submitBtn.addEventListener('click', function() {
     errorEl.textContent = '';
-    if (!selectedCatalogId || !descInput.value.trim()) {
+    if (!selectedCatalogId || !nameInput.value.trim() || !descInput.value.trim()) {
       errorEl.textContent = $errorRetryJson;
       return;
     }
@@ -329,6 +341,7 @@ function renderPickListCreate(PDO $pdo, string $sourceType, string $query, ?int 
     formData.set('action', 'create_pick_list');
     formData.set('source_type', $sourceTypeJson);
     formData.set('catalog_id', String(selectedCatalogId));
+    formData.set('name', nameInput.value.trim());
     formData.set('description', descInput.value.trim());
     var ownedSetId = $ownedSetIdJson;
     if (ownedSetId) { formData.set('owned_set_id', String(ownedSetId)); }
@@ -364,7 +377,12 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
     $html = '<div class="pick-screen">';
     $locationStmt = $pdo->prepare('SELECT name FROM storage_locations WHERE id = ?');
     $locationStmt->execute([$pickList['location_id']]);
-    $html .= '<h1>' . htmlspecialchars((string) $locationStmt->fetchColumn()) . '</h1>';
+    $containerName = (string) $locationStmt->fetchColumn();
+    $displayName = $pickList['name'] !== '' ? $pickList['name'] : $containerName;
+    $html .= '<h1>' . htmlspecialchars($displayName) . '</h1>';
+    if ($containerName !== '' && $containerName !== $displayName) {
+        $html .= '<p class="pick-container-hint">' . htmlspecialchars(t('pick_active_container_hint', ['container' => $containerName])) . '</p>';
+    }
     $html .= renderPickProgressBadge((int) $needed, (int) $picked);
 
     if ($pickList['status'] === 'closed') {

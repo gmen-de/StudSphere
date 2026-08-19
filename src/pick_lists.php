@@ -157,12 +157,14 @@ function computePickListNeededItems(PDO $pdo, string $sourceType, int $inventory
 
 /**
  * Creates a new pick list: its own storage_locations row (named
- * $description, nested under the Pick Lager root), the pick_lists row, and
- * one pick_list_items row per needed part/minifig (computePickListNeededItems()).
- * $inventoryId is snapshotted onto the pick_lists row so a later Rebrickable
- * re-import can't retroactively change an already-in-progress list.
+ * $description — the physical container, e.g. "Tupper Box #1", nested under
+ * the Pick Lager root), the pick_lists row (named $name — the pick list's own
+ * display identity, independent of the container), and one pick_list_items
+ * row per needed part/minifig (computePickListNeededItems()). $inventoryId is
+ * snapshotted onto the pick_lists row so a later Rebrickable re-import can't
+ * retroactively change an already-in-progress list.
  */
-function createPickList(PDO $pdo, int $userId, string $sourceType, int $catalogId, string $description, ?int $ownedSetId = null, array $missingOnly = []): ?int
+function createPickList(PDO $pdo, int $userId, string $sourceType, int $catalogId, string $name, string $description, ?int $ownedSetId = null, array $missingOnly = []): ?int
 {
     $inventoryId = $sourceType === 'set'
         ? getSetInventoryId($pdo, getCatalogSetNum($pdo, $catalogId) ?? '')
@@ -179,11 +181,11 @@ function createPickList(PDO $pdo, int $userId, string $sourceType, int $catalogI
     $locationId = createStorageLocation($pickLagerRootId, $description, 'pick_list');
 
     $insertListStmt = $pdo->prepare(
-        'INSERT INTO pick_lists (user_id, location_id, source_type, set_id, minifig_id, inventory_id, owned_set_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO pick_lists (user_id, name, location_id, source_type, set_id, minifig_id, inventory_id, owned_set_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $insertListStmt->execute([
-        $userId, $locationId, $sourceType,
+        $userId, $name, $locationId, $sourceType,
         $sourceType === 'set' ? $catalogId : null,
         $sourceType === 'minifig' ? $catalogId : null,
         $inventoryId, $ownedSetId,
@@ -310,7 +312,7 @@ function getSetAvailablePartsForPickList(PDO $pdo, int $inventoryId, string $loc
  *
  * @return ?array{pickListId:int, totalQuantity:int}
  */
-function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, string $description, array $requestedQuantities): ?array
+function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, string $name, string $description, array $requestedQuantities): ?array
 {
     $setNum = getCatalogSetNum($pdo, $setId);
     $inventoryId = $setNum !== null ? getSetInventoryId($pdo, $setNum) : null;
@@ -343,9 +345,9 @@ function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, str
     $locationId = createStorageLocation($pickLagerRootId, $description, 'pick_list');
 
     $insertListStmt = $pdo->prepare(
-        'INSERT INTO pick_lists (user_id, location_id, source_type, set_id, inventory_id) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO pick_lists (user_id, name, location_id, source_type, set_id, inventory_id) VALUES (?, ?, ?, ?, ?, ?)'
     );
-    $insertListStmt->execute([$userId, $locationId, 'set', $setId, $inventoryId]);
+    $insertListStmt->execute([$userId, $name, $locationId, 'set', $setId, $inventoryId]);
     $pickListId = (int) $pdo->lastInsertId();
 
     $insertItemStmt = $pdo->prepare(
@@ -404,7 +406,7 @@ function getPickListsForUser(PDO $pdo, int $userId): array
 function getPickListsForSet(PDO $pdo, int $userId, int $setId): array
 {
     $stmt = $pdo->prepare(
-        "SELECT pl.id, sl.name, pl.created_at
+        "SELECT pl.id, COALESCE(NULLIF(pl.name, ''), sl.name) AS name, sl.name AS container_name, pl.created_at
          FROM pick_lists pl
          INNER JOIN storage_locations sl ON sl.id = pl.location_id
          WHERE pl.user_id = ? AND pl.set_id = ? AND pl.source_type = 'set' AND pl.status IN ('active', 'completed')
@@ -850,8 +852,10 @@ function renderCreatePickListFromSetModal(int $setId): string
     $html .= '<button type="button" class="modal-close" id="set-pick-list-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
     $html .= '</div>';
     $html .= '<div id="set-pick-list-form">';
-    $html .= '<label class="set-pick-list-name-label">' . htmlspecialchars(t('set_pick_list_name_label'));
-    $html .= '<input type="text" id="set-pick-list-name-input"></label>';
+    $html .= '<label class="set-pick-list-name-label">' . htmlspecialchars(t('set_pick_list_list_name_label'));
+    $html .= '<input type="text" id="set-pick-list-list-name-input"></label>';
+    $html .= '<label class="set-pick-list-name-label">' . htmlspecialchars(t('set_pick_list_container_label'));
+    $html .= '<input type="text" id="set-pick-list-name-input" placeholder="' . htmlspecialchars(t('set_pick_list_container_placeholder')) . '"></label>';
     $html .= '<div id="set-pick-list-parts" class="set-pick-list-parts">' . htmlspecialchars(t('set_pick_list_loading')) . '</div>';
     $html .= '<p class="owned-set-wizard-error" id="set-pick-list-error"></p>';
     $html .= '<div class="owned-set-wizard-nav">';
@@ -881,6 +885,7 @@ function renderCreatePickListFromSetModal(int $setId): string
   var openBtn = document.getElementById('set-pick-list-open');
   var modal = document.getElementById('set-pick-list-modal');
   var closeBtn = document.getElementById('set-pick-list-modal-close');
+  var listNameInput = document.getElementById('set-pick-list-list-name-input');
   var nameInput = document.getElementById('set-pick-list-name-input');
   var partsBox = document.getElementById('set-pick-list-parts');
   var errorEl = document.getElementById('set-pick-list-error');
@@ -910,12 +915,13 @@ function renderCreatePickListFromSetModal(int $setId): string
           partsBox.textContent = res.message || $errorGenericJson;
           return;
         }
-        // Deliberately NOT pre-filled into .value: this field becomes the
-        // pick list's actual storage_locations.name (its physical
-        // container), so leaving it truly empty forces the user to
-        // consciously name a real container instead of silently accepting
-        // the set name as a location name. The set name is still offered
-        // as a placeholder hint for anyone happy to reuse it.
+        // The pick list's own display name defaults to (and is pre-filled
+        // with) the set's own label, editable same as the PWA's own create
+        // screen — but the container field stays genuinely empty (a
+        // placeholder hint only) since that's a distinct, physical answer
+        // ("which box are you collecting into") that must not silently
+        // default to the set name.
+        listNameInput.value = res.defaultDescription || '';
         nameInput.placeholder = res.defaultDescription || '';
         if (!res.parts.length) {
           partsBox.textContent = $emptyJson;
@@ -972,9 +978,10 @@ function renderCreatePickListFromSetModal(int $setId): string
 
   submitBtn.addEventListener('click', function() {
     errorEl.textContent = '';
+    var listName = listNameInput.value.trim();
     var description = nameInput.value.trim();
     var checkedBoxes = Array.prototype.slice.call(partsBox.querySelectorAll('input[type=checkbox]:checked'));
-    if (!description || !checkedBoxes.length) {
+    if (!listName || !description || !checkedBoxes.length) {
       errorEl.textContent = $errorGenericJson;
       return;
     }
@@ -982,6 +989,7 @@ function renderCreatePickListFromSetModal(int $setId): string
     var formData = new FormData();
     formData.set('action', 'create_pick_list_from_set_available');
     formData.set('set_id', String(setId));
+    formData.set('name', listName);
     formData.set('description', description);
     checkedBoxes.forEach(function(cb) {
       var qtyInput = partsBox.querySelector('input.set-pick-list-part-qty[data-key="' + cb.dataset.key + '"]');

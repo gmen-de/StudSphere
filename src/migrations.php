@@ -791,6 +791,19 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'ldraw_render_queue', 'angle', "VARCHAR(20) NOT NULL DEFAULT 'home'");
             widenUniqueKeyOverForeignKey($pdo, 'ldraw_render_queue', 'ldraw_render_queue_pair', ['part_id', 'color_id', 'angle']);
         },
+        41 => function (PDO $pdo): void {
+            // Pick lists were only ever identified by their storage_locations
+            // name — the physical container (e.g. "Tupper Box #1") — which
+            // conflated "what am I picking for" with "where am I collecting
+            // it." Splits those into two independently editable strings: this
+            // column is the pick list's own display name (defaults to the
+            // set/minifig label, e.g. "75192 - Millennium Falcon"), while the
+            // storage_locations row it already owns stays the container name.
+            // Existing rows get '' — display code falls back to the location
+            // name for those (COALESCE(NULLIF(name,''), ...)), so nothing
+            // already created goes unlabeled.
+            addColumnIfMissing($pdo, 'pick_lists', 'name', "VARCHAR(255) NOT NULL DEFAULT ''");
+        },
     ];
 }
 
@@ -906,7 +919,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 40;
+const CURRENT_SCHEMA_VERSION = 41;
 
 function getInstalledSchemaVersion(): int
 {

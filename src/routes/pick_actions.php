@@ -29,11 +29,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     header('Content-Type: application/json');
     $sourceType = ($_POST['source_type'] ?? '') === 'minifig' ? 'minifig' : 'set';
     $catalogId = (int) ($_POST['catalog_id'] ?? 0);
+    $name = trim((string) ($_POST['name'] ?? ''));
     $description = trim((string) ($_POST['description'] ?? ''));
     $ownedSetIdRaw = trim((string) ($_POST['owned_set_id'] ?? ''));
     $ownedSetId = $ownedSetIdRaw !== '' ? (int) $ownedSetIdRaw : null;
 
-    if ($catalogId <= 0 || $description === '') {
+    if ($catalogId <= 0 || $name === '' || $description === '') {
         pickJsonError(t('pick_error_invalid_request'));
     }
 
@@ -63,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
             $missingOnly = ['parts' => $missingParts, 'minifigs' => $missingMinifigs];
         }
 
-        $pickListId = createPickList($pdo, $pickUserId, $sourceType, $catalogId, $description, $ownedSetId, $missingOnly);
+        $pickListId = createPickList($pdo, $pickUserId, $sourceType, $catalogId, $name, $description, $ownedSetId, $missingOnly);
         if ($pickListId === null) {
             pickJsonError(t('pick_error_no_inventory'));
         }

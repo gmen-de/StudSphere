@@ -3234,6 +3234,7 @@ SCRIPT;
     $content .= '<form method="post" id="owned-set-pick-list-form" class="owned-set-action-pill-form">';
     $content .= '<input type="hidden" name="action" value="create_pick_list_from_owned_set">';
     $content .= '<input type="hidden" name="owned_set_id" value="' . $ownedSet['id'] . '">';
+    $content .= '<input type="hidden" name="name" id="owned-set-pick-list-name">';
     $content .= '<input type="hidden" name="description" id="owned-set-pick-list-description">';
     $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-pick-list-open" title="' . htmlspecialchars(t('owned_set_pick_list_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_pick_list_label')) . '">' . getActionIcon('pick_list') . '</button>';
     $content .= '</form>';
@@ -3253,17 +3254,29 @@ SCRIPT;
 </script>
 SCRIPT;
 
-    $pickListPromptJson = json_encode(t('owned_set_pick_list_prompt'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    // Two lightweight sequential window.prompt() calls rather than a full
+    // modal (same deliberate choice as before, see the comment above this
+    // button) — one for the pick list's own display name (defaults to this
+    // set's own label, editable), one for the physical container it's being
+    // collected into (blank; a container name must never silently default to
+    // the set name, same reasoning as the catalog set_detail dialog).
+    $pickListNamePromptJson = json_encode(t('owned_set_pick_list_name_prompt'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $pickListNameDefaultJson = json_encode($ownedSet['rebrickable_set_num'] . ' - ' . $ownedSet['name'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $pickListContainerPromptJson = json_encode(t('owned_set_pick_list_container_prompt'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $content .= <<<SCRIPT
 <script>
 (function(){
   var openBtn = document.getElementById("owned-set-pick-list-open");
   var form = document.getElementById("owned-set-pick-list-form");
+  var nameField = document.getElementById("owned-set-pick-list-name");
   var descField = document.getElementById("owned-set-pick-list-description");
-  if (!openBtn || !form || !descField) { return; }
+  if (!openBtn || !form || !nameField || !descField) { return; }
   openBtn.addEventListener("click", function() {
-    var description = window.prompt($pickListPromptJson);
+    var name = window.prompt($pickListNamePromptJson, $pickListNameDefaultJson);
+    if (!name || !name.trim()) { return; }
+    var description = window.prompt($pickListContainerPromptJson);
     if (!description || !description.trim()) { return; }
+    nameField.value = name.trim();
     descField.value = description.trim();
     form.submit();
   });

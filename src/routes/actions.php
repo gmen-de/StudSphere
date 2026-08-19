@@ -439,9 +439,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_o
 // specific owned set as its target.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_pick_list_from_owned_set') {
     $ownedSetIdForPickList = (int) ($_POST['owned_set_id'] ?? 0);
+    $pickListName = trim((string) ($_POST['name'] ?? ''));
     $pickListDescription = trim((string) ($_POST['description'] ?? ''));
     $ownedSetForPickList = $ownedSetIdForPickList > 0 ? getOwnedSetById($pdo, $ownedSetIdForPickList) : null;
-    if ($ownedSetForPickList === null || $pickListDescription === '') {
+    if ($ownedSetForPickList === null || $pickListName === '' || $pickListDescription === '') {
         http_response_code(400);
         exit;
     }
@@ -462,7 +463,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     }
 
     $newPickListId = createPickList(
-        $pdo, (int) $_SESSION['user_id'], 'set', (int) $ownedSetForPickList['set_id'], $pickListDescription,
+        $pdo, (int) $_SESSION['user_id'], 'set', (int) $ownedSetForPickList['set_id'], $pickListName, $pickListDescription,
         $ownedSetIdForPickList, ['parts' => $missingParts, 'minifigs' => $missingMinifigs]
     );
     if ($newPickListId === null) {
@@ -501,6 +502,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'set_available_parts_for_pick_
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_pick_list_from_set_available') {
     header('Content-Type: application/json');
     $availSetId = (int) ($_POST['set_id'] ?? 0);
+    $availListName = trim((string) ($_POST['name'] ?? ''));
     $availDescription = trim((string) ($_POST['description'] ?? ''));
     // "part_id:color_id" => requested quantity — createPickListFromAvailableParts()
     // clamps each to the freshly-recomputed available amount itself, this
@@ -513,14 +515,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
         }
     }
 
-    if ($availSetId <= 0 || $availDescription === '' || empty($availQuantities)) {
+    if ($availSetId <= 0 || $availListName === '' || $availDescription === '' || empty($availQuantities)) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => t('pick_error_invalid_request')], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     try {
-        $newAvailPickListResult = createPickListFromAvailableParts($pdo, (int) $_SESSION['user_id'], $availSetId, $availDescription, $availQuantities);
+        $newAvailPickListResult = createPickListFromAvailableParts($pdo, (int) $_SESSION['user_id'], $availSetId, $availListName, $availDescription, $availQuantities);
         if ($newAvailPickListResult === null) {
             http_response_code(400);
             echo json_encode(['success' => false, 'message' => t('pick_error_no_inventory')], JSON_UNESCAPED_UNICODE);
@@ -531,7 +533,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
             'pickListId' => $newAvailPickListResult['pickListId'],
             'description' => $availDescription,
             'message' => t('set_pick_list_success', [
-                'name' => $availDescription,
+                'name' => $availListName,
                 'count' => (string) $newAvailPickListResult['totalQuantity'],
             ]),
         ], JSON_UNESCAPED_UNICODE);

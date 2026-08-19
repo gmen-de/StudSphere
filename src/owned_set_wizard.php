@@ -94,7 +94,11 @@ function renderAddOwnedSetWizardModal(PDO $pdo, int $setId): string
         $html .= '<select id="owned-set-wizard-pick-list-select">';
         $html .= '<option value="">' . htmlspecialchars(t('owned_set_wizard_pick_list_none')) . '</option>';
         foreach ($pickListsForSet as $pl) {
-            $html .= '<option value="' . (int) $pl['id'] . '">' . htmlspecialchars($pl['name']) . '</option>';
+            $optionLabel = $pl['name'];
+            if ($pl['container_name'] !== '' && $pl['container_name'] !== $pl['name']) {
+                $optionLabel .= ' (' . $pl['container_name'] . ')';
+            }
+            $html .= '<option value="' . (int) $pl['id'] . '">' . htmlspecialchars($optionLabel) . '</option>';
         }
         $html .= '</select></label>';
     }
