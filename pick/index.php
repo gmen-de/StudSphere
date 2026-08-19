@@ -190,41 +190,31 @@ echo <<<SCRIPT
     });
   }
 
-  // Large-title collapse: the nav bar picks up a blurred background and
-  // fades in its small centered title once the page has scrolled roughly
-  // past where the in-flow <h1> sits, mirroring iOS's own large-title bars
-  // (Settings, Mail, ...).
-  var navbar = document.getElementById('pick-navbar');
-  var heading = document.querySelector('.pick-screen h1');
-  if (navbar && heading) {
-    var threshold = function() { return heading.offsetTop + heading.offsetHeight - navbar.offsetHeight; };
-    var onScroll = function() {
-      navbar.classList.toggle('pick-navbar-scrolled', window.scrollY > threshold());
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-
-    // Auto-shrink the large title to fit on one line rather than wrapping
-    // or truncating — pick list names/set labels vary a lot in length and
-    // this app has no layout budget to reserve for a worst case. Mirrors
-    // iOS's own "adjustsFontSizeToFitWidth" large-title behavior: reset to
-    // the CSS baseline, then step the font-size down in whole pixels until
-    // scrollWidth (the text's real width) fits within clientWidth (the
-    // available box), down to a hard floor where the CSS ellipsis (see
-    // .pick-screen h1, pick/style.css) takes over as a last resort.
-    var MIN_TITLE_PX = 20;
+  // The nav bar's small title (echoed server-side as $screenTitle) is
+  // always visible now — no more scroll-triggered collapse, per explicit
+  // feedback that the compact bar alone reads better and saves a lot of
+  // vertical space on a phone screen. Auto-shrink still applies to IT
+  // instead of the (now hidden) large <h1>: pick list names/set labels vary
+  // a lot in length and the bar has no layout budget to reserve for a worst
+  // case. Mirrors iOS's own "adjustsFontSizeToFitWidth" nav-bar title
+  // behavior: reset to the CSS baseline, then step the font-size down in
+  // whole pixels until scrollWidth (the text's real width) fits within
+  // clientWidth (the available box), down to a hard floor where the CSS
+  // ellipsis (see .pick-navbar-title, pick/style.css) takes over as a last
+  // resort.
+  var navTitle = document.getElementById('pick-navbar-title');
+  if (navTitle) {
+    var MIN_TITLE_PX = 13;
     var fitTitle = function() {
-      heading.style.fontSize = '';
-      var size = parseFloat(window.getComputedStyle(heading).fontSize);
-      while (heading.scrollWidth > heading.clientWidth && size > MIN_TITLE_PX) {
+      navTitle.style.fontSize = '';
+      var size = parseFloat(window.getComputedStyle(navTitle).fontSize);
+      while (navTitle.scrollWidth > navTitle.clientWidth && size > MIN_TITLE_PX) {
         size -= 1;
-        heading.style.fontSize = size + 'px';
+        navTitle.style.fontSize = size + 'px';
       }
     };
     fitTitle();
     window.addEventListener('resize', fitTitle);
-  } else if (navbar) {
-    navbar.classList.add('pick-navbar-scrolled');
   }
 
   // Pull-to-refresh, overview screen only (pickPullToRefreshEnabled) — a
