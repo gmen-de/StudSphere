@@ -462,7 +462,7 @@ return [
     'set_detail_add_to_collection_button' => 'Add set to collection',
     'set_detail_pick_list_button' => 'Put parts on a pick list',
     'set_pick_list_modal_heading' => 'Put parts on a pick list',
-    'set_pick_list_name_label' => 'What do you want to call this pick list?',
+    'set_pick_list_name_label' => 'Which container are you collecting the parts in (e.g. Tupper box #1)?',
     'set_pick_list_loading' => 'Loading…',
     'set_pick_list_empty' => 'None of this set\'s parts are in loose storage.',
     'set_pick_list_submit_button' => 'Create pick list',

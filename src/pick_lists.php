@@ -910,7 +910,13 @@ function renderCreatePickListFromSetModal(int $setId): string
           partsBox.textContent = res.message || $errorGenericJson;
           return;
         }
-        nameInput.value = res.defaultDescription || '';
+        // Deliberately NOT pre-filled into .value: this field becomes the
+        // pick list's actual storage_locations.name (its physical
+        // container), so leaving it truly empty forces the user to
+        // consciously name a real container instead of silently accepting
+        // the set name as a location name. The set name is still offered
+        // as a placeholder hint for anyone happy to reuse it.
+        nameInput.placeholder = res.defaultDescription || '';
         if (!res.parts.length) {
           partsBox.textContent = $emptyJson;
           return;

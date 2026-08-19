@@ -462,7 +462,7 @@ return [
     'set_detail_add_to_collection_button' => 'Set zur Sammlung hinzufügen',
     'set_detail_pick_list_button' => 'Bauteile auf Pickliste setzen',
     'set_pick_list_modal_heading' => 'Bauteile auf Pickliste setzen',
-    'set_pick_list_name_label' => 'Wie nennst du die Pickliste?',
+    'set_pick_list_name_label' => 'In welchem Behälter sammelst du die Bauteile (z.B. Tupper Box #1)?',
     'set_pick_list_loading' => 'Wird geladen…',
     'set_pick_list_empty' => 'Keine Bauteile dieses Sets sind lose im Lager vorhanden.',
     'set_pick_list_submit_button' => 'Pickliste erstellen',
