@@ -212,8 +212,8 @@ function createPickList(PDO $pdo, int $userId, string $sourceType, int $catalogI
 
 /**
  * Queues all of LDRAW_PICK_DETAIL_ANGLES for every 'part' item in a
- * newly-created pick list — per explicit feedback, rendering the extra 3
- * angles on demand while actively picking took too long to feel useful (a
+ * newly-created pick list — per explicit feedback, rendering the extra
+ * angle on demand while actively picking took too long to feel useful (a
  * leocad render is 60-120s each, see renderLdrawPartImage()'s own doc
  * comment); queuing them all right away, while the user is still on
  * set_detail/creating the list rather than standing at a shelf waiting,

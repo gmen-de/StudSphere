@@ -468,7 +468,7 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
         // rendered yet at all.
         $galleryImages = [];
         if ($display['part_id'] !== null && $display['rebrickable_color_id'] !== null) {
-            $angleImages = getLdrawFourAngleImages($pdo, $display['part_id'], $display['rebrickable_color_id']);
+            $angleImages = getLdrawPickAngleImages($pdo, $display['part_id'], $display['rebrickable_color_id']);
             foreach (LDRAW_PICK_DETAIL_ANGLES as $angle) {
                 if (!empty($angleImages[$angle])) {
                     $galleryImages[] = $angleImages[$angle];

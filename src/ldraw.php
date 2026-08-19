@@ -57,14 +57,20 @@ const LDRAW_RENDER_NICE_LEVEL = 19;
 // the render worker only ever needs to pace the calls that actually hit it.
 const LDRAW_API_CALL_DELAY_MICROSECONDS = 350_000; // ~2.8 req/s
 
-// The 4 angles the Pickliste's per-part detail view offers (src/pick_lists.php,
-// /pick/). 'home' is LeoCAD's own default isometric view and also the ONLY
-// angle every part_color_images/ldraw_render_queue row predates this feature
-// with (migration 40 defaults the new 'angle' column to 'home') — keeping it
-// first in this list means most parts only ever need 3 *new* renders, not 4.
-// front/left/back are valid LeoCAD --viewpoint keywords giving a reasonable
-// 3-flat-side spread alongside the isometric default.
-const LDRAW_PICK_DETAIL_ANGLES = ['home', 'front', 'left', 'back'];
+// The 2 angles the Pickliste's per-part detail view offers (src/pick_lists.php,
+// /pick/): 'home' (LeoCAD's own default isometric view, and the ONLY angle
+// every part_color_images/ldraw_render_queue row predates this feature with
+// — migration 40 defaults the new 'angle' column to 'home', so keeping it
+// first here means every part only ever needs 1 *new* render, not 2) plus
+// 'back' — deliberately NOT LeoCAD's own --viewpoint=back preset (that gave
+// a materially different framing/perspective from 'home', not a clean
+// turntable flip of it) but the exact same 'home' camera with the MODEL
+// itself rotated 180° around its vertical axis instead, done in
+// renderLdrawPartImage()'s snippet matrix — per explicit request, "an der
+// Kamera-Einstellung des primären Bildes orientiert, nur um 180° gedreht".
+// Was 4 angles (front/left/back too) until the same explicit request asked
+// for it cut back down to this one extra.
+const LDRAW_PICK_DETAIL_ANGLES = ['home', 'back'];
 
 /**
  * storage/ldraw — protected from direct web access via storage/.htaccess,
@@ -238,11 +244,12 @@ function matchLdrawColorCode(string $rgbHex, bool $isTrans): ?int
 }
 
 /**
- * Builds a minimal single-part LDraw scene (line type 1: color + identity
- * position/rotation + the part file) and renders it headless. LeoCAD needs a
- * real (virtual) GL context to render — Qt's "offscreen" platform alone
- * wasn't enough in testing ("Error creating OpenGL context"), xvfb-run +
- * software Mesa was required.
+ * Builds a minimal single-part LDraw scene (line type 1: color + position +
+ * rotation matrix + the part file — identity for 'home', a 180°-around-Y
+ * flip for 'back') and renders it headless. LeoCAD needs a real (virtual)
+ * GL context to render — Qt's "offscreen" platform alone wasn't enough in
+ * testing ("Error creating OpenGL context"), xvfb-run + software Mesa was
+ * required.
  *
  * @return ?bool true on success, false on a genuine/permanent render failure
  *   (caller marks the pair unavailable), null if the render had to be killed
@@ -250,32 +257,43 @@ function matchLdrawColorCode(string $rgbHex, bool $isTrans): ?int
  *   condition, not proof the part can never render, so the caller must leave
  *   it unresolved (no DB row) rather than permanently blacklisting it.
  */
-function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outputPath, string $viewpoint = 'home'): ?bool
+function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outputPath, string $angle = 'home'): ?bool
 {
     $partFile = $ldrawId . '.dat';
     if (!is_file(getLdrawPartFilePath($ldrawId))) {
         return false;
     }
-    // Whitelisted, not just escapeshellarg()'d — this value can originate
-    // from a DB queue row (ldraw_render_queue.angle), so it must be
-    // constrained to known-good LeoCAD --viewpoint keywords before ever
-    // reaching exec(), not just shell-escaped.
-    if (!in_array($viewpoint, LDRAW_PICK_DETAIL_ANGLES, true)) {
-        $viewpoint = 'home';
+    // Constrained to LDRAW_PICK_DETAIL_ANGLES — this can originate from a DB
+    // queue row (ldraw_render_queue.angle). Not a shell-injection concern
+    // here (neither branch below ever puts $angle itself into the snippet
+    // or the exec() command, only one of two hardcoded matrix literals
+    // selected by an === check), just so an unrecognized value falls back
+    // to the same 'home' identity-matrix render rather than silently
+    // producing something unintended.
+    if (!in_array($angle, LDRAW_PICK_DETAIL_ANGLES, true)) {
+        $angle = 'home';
     }
 
     $tmpDir = getLdrawRenderTmpDir();
     $snippetPath = $tmpDir . '/' . bin2hex(random_bytes(8)) . '.ldr';
+    // Both angles use the exact same LeoCAD camera (--viewpoint home,
+    // always, below) — 'back' rotates the MODEL 180° around its vertical
+    // axis in this transform matrix instead of switching to LeoCAD's own
+    // --viewpoint=back preset (that gave a materially different framing,
+    // not a clean flip of 'home'). Same framing/perspective/lighting for
+    // both renders, only the side facing the camera differs — a turntable
+    // flip rather than a different shot, per explicit request.
+    $matrix = $angle === 'back' ? '-1 0 0 0 1 0 0 0 -1' : '1 0 0 0 1 0 0 0 1';
     $written = file_put_contents(
         $snippetPath,
-        sprintf("1 %d 0 0 0 1 0 0 0 1 0 0 0 1 %s\n", $ldrawColorCode, $partFile)
+        sprintf("1 %d 0 0 0 %s %s\n", $ldrawColorCode, $matrix, $partFile)
     );
     if ($written === false) {
         return false;
     }
 
     $cmd = sprintf(
-        'nice -n %d timeout %d xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --aa-samples %d --viewpoint %s %s 2>&1',
+        'nice -n %d timeout %d xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 leocad -l %s -i %s -w %d -h %d --stud-style %d --aa-samples %d --viewpoint home %s 2>&1',
         LDRAW_RENDER_NICE_LEVEL,
         LDRAW_RENDER_EXEC_TIMEOUT_SECONDS,
         escapeshellarg(getLdrawLibraryRootDir()),
@@ -284,7 +302,6 @@ function renderLdrawPartImage(string $ldrawId, int $ldrawColorCode, string $outp
         LDRAW_RENDER_IMAGE_SIZE,
         LDRAW_STUD_STYLE,
         LDRAW_AA_SAMPLES,
-        escapeshellarg($viewpoint),
         escapeshellarg($snippetPath)
     );
     exec($cmd, $outputLines, $exitCode);
@@ -574,8 +591,8 @@ function getLdrawSetRenderProgress(PDO $pdo, array $items): array
 }
 
 /**
- * The 4 cached angle images for one part+color, whichever already exist —
- * one query, keyed by angle. A NULL local_image_path (a permanently
+ * The cached LDRAW_PICK_DETAIL_ANGLES images for one part+color, whichever
+ * already exist — one query, keyed by angle. A NULL local_image_path (a permanently
  * unrenderable pair, e.g. a sticker) shows up the same as any other
  * settled/non-missing angle, distinguished from "not yet rendered" (key
  * absent entirely). Used directly by the Pickliste's active-picking screen
@@ -587,7 +604,7 @@ function getLdrawSetRenderProgress(PDO $pdo, array $items): array
  *
  * @return array<string, ?string> angle => local_image_path, only for angles that already have a row
  */
-function getLdrawFourAngleImages(PDO $pdo, int $partId, int $rebrickableColorId): array
+function getLdrawPickAngleImages(PDO $pdo, int $partId, int $rebrickableColorId): array
 {
     $stmt = $pdo->prepare(
         'SELECT angle, local_image_path FROM part_color_images WHERE part_id = ? AND color_id = ? AND angle IN (' .
