@@ -49,6 +49,12 @@ function getPickItemDisplayInfo(PDO $pdo, array $item): array
     $stmt = $pdo->prepare('SELECT part_num, name FROM parts WHERE id = ?');
     $stmt->execute([$item['part_id']]);
     $part = $stmt->fetch();
+    if ($part !== false && getLocale() !== 'en') {
+        $translated = getPartTranslation($pdo, (int) $item['part_id'], getLocale());
+        if ($translated !== null) {
+            $part['name'] = $translated;
+        }
+    }
     $thumbnails = getPartThumbnails($pdo, [(int) $item['part_id']]);
     $thumbnail = $thumbnails[(int) $item['part_id']] ?? null;
 
