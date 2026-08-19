@@ -7,10 +7,10 @@ function getNavIcon(string $key): string
     $icons = [
         'dashboard' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 15a7.5 7.5 0 0 1 15 0"/><path d="M12 15l3.5-4.5"/><circle cx="12" cy="15" r="1.2" fill="currentColor" stroke="none"/></svg>',
         'build' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/><path d="M10 19v-5h4v5"/></svg>',
-        'sets' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l8-4 8 4"/><rect x="4" y="8" width="16" height="12" rx="1"/><path d="M12 4v16"/></svg>',
+        'sets' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l8-4 8 4"/><rect x="4" y="8" width="16" height="12" rx="1"/></svg>',
         'bricks' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="7" rx="1.5"/><circle cx="9" cy="9" r="1.6" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1.6" fill="currentColor" stroke="none"/></svg>',
         'minifigs' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5.5" r="2.5"/><path d="M8 10h8v5H8z"/><path d="M9 15v5"/><path d="M15 15v5"/><path d="M6 11l2 2"/><path d="M18 11l-2 2"/></svg>',
-        'my_sets' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l8-4 8 4"/><rect x="4" y="8" width="16" height="12" rx="1"/><path d="M12 4v16"/><circle cx="18.5" cy="6" r="2.4" fill="currentColor" stroke="none"/></svg>',
+        'my_sets' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l8-4 8 4"/><rect x="4" y="8" width="16" height="12" rx="1"/><circle cx="18.5" cy="6" r="2.4" fill="currentColor" stroke="none"/></svg>',
         'my_bricks' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="7" rx="1.5"/><circle cx="9" cy="9" r="1.6" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="2.4" fill="currentColor" stroke="none"/></svg>',
         'my_minifigs' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="5.5" r="2.5"/><path d="M7 10h8v5H7z"/><path d="M8 15v5"/><path d="M14 15v5"/><path d="M5 11l2 2"/><path d="M17 11l-2 2"/><circle cx="19" cy="6" r="2.4" fill="currentColor" stroke="none"/></svg>',
         'locations' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10h16"/><path d="M4 16h16"/></svg>',
@@ -65,6 +65,11 @@ function getBooleanStatusIcon(bool $value): string
  * checking loose stock against what's missing) — no functionality behind it
  * yet, see that button's own doc comment in src/routes/pages.php. 'add' is
  * the dashboard's per-zone "add a widget" button (src/dashboard.php).
+ * 'add_to_collection' is the catalog set_detail page's "Set zur Sammlung
+ * hinzufügen" link — getNavIcon()'s 'sets' box with the same top-right dot
+ * as 'my_sets' (the action does add it there) but a plus in the box body
+ * instead of 'sets'/'my_sets' shared center divider line (removed from both
+ * so the plus reads clearly and isn't mistaken for that line).
  */
 function getActionIcon(string $key): string
 {
@@ -96,6 +101,7 @@ function getActionIcon(string $key): string
         // The instructions tab's tile fallback (renderSetInstructionsTab(),
         // src/instructions.php) — a plain document glyph, no PDF branding.
         'pdf' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M13 3v5h5"/><path d="M8.5 13h7"/><path d="M8.5 16.5h7"/></svg>',
+        'add_to_collection' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l8-4 8 4"/><rect x="4" y="8" width="16" height="12" rx="1"/><circle cx="18.5" cy="6" r="2.4" fill="currentColor" stroke="none"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>',
     ];
 
     return $icons[$key] ?? '';

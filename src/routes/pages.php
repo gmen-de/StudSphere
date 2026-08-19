@@ -2711,7 +2711,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
         $content .= '</table>';
     }
 
-    $content .= '<a href="#" id="add-owned-set-open">' . htmlspecialchars(t('set_detail_add_to_collection_button')) . '</a>';
+    $content .= '<div class="owned-set-actionbar">';
+    $content .= '<a class="owned-set-action-pill" href="#" id="add-owned-set-open" title="' . htmlspecialchars(t('set_detail_add_to_collection_button')) . '" aria-label="' . htmlspecialchars(t('set_detail_add_to_collection_button')) . '">' . getActionIcon('add_to_collection') . '</a>';
+    $content .= '</div>';
     $content .= renderAddOwnedSetWizardModal($pdo, $setId);
 
     $content .= '</div>';
