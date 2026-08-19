@@ -253,6 +253,13 @@ body {
   border: 1px solid var(--pick-border);
 }
 
+.pick-quantity-hint {
+  margin: -0.3rem 0 0;
+  font-size: 0.8rem;
+  color: var(--pick-muted);
+  text-align: center;
+}
+
 .pick-shortfall {
   color: var(--pick-danger);
   font-weight: 600;

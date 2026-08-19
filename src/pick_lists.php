@@ -259,8 +259,10 @@ function getSetAvailablePartsForPickList(PDO $pdo, int $inventoryId, string $loc
  * a stale dialog snapshot (stock moved between opening the dialog and
  * submitting, or a client trying to request more than was ever offered)
  * can't be used to end up with more than is genuinely available right now.
+ *
+ * @return ?array{pickListId:int, totalQuantity:int}
  */
-function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, string $description, array $requestedQuantities): ?int
+function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, string $description, array $requestedQuantities): ?array
 {
     $setNum = getCatalogSetNum($pdo, $setId);
     $inventoryId = $setNum !== null ? getSetInventoryId($pdo, $setNum) : null;
@@ -301,11 +303,13 @@ function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, str
     $insertItemStmt = $pdo->prepare(
         'INSERT INTO pick_list_items (pick_list_id, item_type, part_id, color_id, needed_quantity) VALUES (?, \'part\', ?, ?, ?)'
     );
+    $totalQuantity = 0;
     foreach ($itemsToInsert as $part) {
         $insertItemStmt->execute([$pickListId, $part['part_id'], $part['color_id'], $part['needed_quantity']]);
+        $totalQuantity += $part['needed_quantity'];
     }
 
-    return $pickListId;
+    return ['pickListId' => $pickListId, 'totalQuantity' => $totalQuantity];
 }
 
 function getCatalogSetNum(PDO $pdo, int $setId): ?string
@@ -479,7 +483,7 @@ function pickItem(PDO $pdo, int $pickListId, int $pickListItemId, ?int $sourceLo
         return ['pickedQuantity' => (int) $item['needed_quantity'], 'remaining' => 0];
     }
 
-    if ($sourceLocationId === null || $quantity <= 0) {
+    if ($sourceLocationId === null || $quantity < 0) {
         throw new RuntimeException('Invalid pick request.');
     }
 
@@ -494,6 +498,24 @@ function pickItem(PDO $pdo, int $pickListId, int $pickListItemId, ?int $sourceLo
     if ($freshRow === null) {
         throw new RuntimeException('That location no longer has this part in stock.');
     }
+
+    if ($quantity === 0) {
+        // The record says stock is here, but it physically isn't (a real
+        // discrepancy — see the "Inventur vorschlagen" flag for the same
+        // situation) — correct this location's record to empty rather than
+        // erroring out. Logged as the setStorageItemQuantity() default
+        // 'correction' movement (not a move_out/move_in pair — nothing is
+        // relocating, this is fixing a wrong number), and nothing here
+        // touches pick_list_items.picked_quantity since nothing was picked.
+        // getPartStock() only ever returns quantity>0 rows, so this location
+        // simply stops being offered for this part+color afterward —
+        // getPickStepsForItem()'s next call naturally moves on to whichever
+        // location comes next, or a shortfall if none remain.
+        setStorageItemQuantity($sourceLocationId, (int) $item['part_id'], (int) $item['color_id'], $freshRow['condition_type'], 0, $userId, 0);
+        $remaining = (int) $item['needed_quantity'] - (int) $item['picked_quantity'];
+        return ['pickedQuantity' => (int) $item['picked_quantity'], 'remaining' => $remaining];
+    }
+
     $usable = $freshRow['quantity'] - $freshRow['damaged_quantity'];
     $remaining = (int) $item['needed_quantity'] - (int) $item['picked_quantity'];
     $consume = min($quantity, $usable, max(0, $remaining));
@@ -713,12 +735,25 @@ function renderCreatePickListFromSetModal(int $setId): string
     $html .= '<h2>' . htmlspecialchars(t('set_pick_list_modal_heading')) . '</h2>';
     $html .= '<button type="button" class="modal-close" id="set-pick-list-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
     $html .= '</div>';
+    $html .= '<div id="set-pick-list-form">';
     $html .= '<label class="set-pick-list-name-label">' . htmlspecialchars(t('set_pick_list_name_label'));
     $html .= '<input type="text" id="set-pick-list-name-input"></label>';
     $html .= '<div id="set-pick-list-parts" class="set-pick-list-parts">' . htmlspecialchars(t('set_pick_list_loading')) . '</div>';
     $html .= '<p class="owned-set-wizard-error" id="set-pick-list-error"></p>';
     $html .= '<div class="owned-set-wizard-nav">';
     $html .= '<button type="button" id="set-pick-list-submit">' . htmlspecialchars(t('set_pick_list_submit_button')) . '</button>';
+    $html .= '</div>';
+    $html .= '</div>';
+    // Shown in place of the form after a successful create — no more
+    // automatic navigation into /pick/ (per explicit feedback: the user
+    // stays on set_detail and decides for themselves whether/when to go
+    // start picking).
+    $html .= '<div id="set-pick-list-success" style="display:none;">';
+    $html .= '<p id="set-pick-list-success-message"></p>';
+    $html .= '<div class="owned-set-wizard-nav">';
+    $html .= '<a class="owned-set-action-pill" id="set-pick-list-success-open" href="#">' . htmlspecialchars(t('set_pick_list_go_to_button')) . '</a>';
+    $html .= '<button type="button" id="set-pick-list-success-close">' . htmlspecialchars(t('close_button')) . '</button>';
+    $html .= '</div>';
     $html .= '</div>';
     $html .= '</div></div>';
 
@@ -736,7 +771,18 @@ function renderCreatePickListFromSetModal(int $setId): string
   var partsBox = document.getElementById('set-pick-list-parts');
   var errorEl = document.getElementById('set-pick-list-error');
   var submitBtn = document.getElementById('set-pick-list-submit');
+  var formBox = document.getElementById('set-pick-list-form');
+  var successBox = document.getElementById('set-pick-list-success');
+  var successMessage = document.getElementById('set-pick-list-success-message');
+  var successOpenLink = document.getElementById('set-pick-list-success-open');
+  var successCloseBtn = document.getElementById('set-pick-list-success-close');
   if (!openBtn || !modal) { return; }
+
+  function showForm() {
+    formBox.style.display = 'block';
+    successBox.style.display = 'none';
+    submitBtn.disabled = false;
+  }
 
   function loadParts() {
     partsBox.textContent = $emptyJson;
@@ -793,11 +839,15 @@ function renderCreatePickListFromSetModal(int $setId): string
   openBtn.addEventListener('click', function(e) {
     e.preventDefault();
     errorEl.textContent = '';
+    showForm();
     modal.style.display = 'flex';
     loadParts();
   });
   if (closeBtn) {
     closeBtn.addEventListener('click', function() { modal.style.display = 'none'; });
+  }
+  if (successCloseBtn) {
+    successCloseBtn.addEventListener('click', function() { modal.style.display = 'none'; });
   }
 
   submitBtn.addEventListener('click', function() {
@@ -828,7 +878,10 @@ function renderCreatePickListFromSetModal(int $setId): string
           errorEl.textContent = res.message || $errorGenericJson;
           return;
         }
-        window.location.href = 'pick/index.php?screen=pick&id=' + res.pickListId;
+        successMessage.textContent = res.message;
+        successOpenLink.href = 'pick/index.php?screen=pick&id=' + res.pickListId;
+        formBox.style.display = 'none';
+        successBox.style.display = 'block';
       })
       .catch(function() {
         submitBtn.disabled = false;

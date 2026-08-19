@@ -520,13 +520,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     }
 
     try {
-        $newAvailPickListId = createPickListFromAvailableParts($pdo, (int) $_SESSION['user_id'], $availSetId, $availDescription, $availQuantities);
-        if ($newAvailPickListId === null) {
+        $newAvailPickListResult = createPickListFromAvailableParts($pdo, (int) $_SESSION['user_id'], $availSetId, $availDescription, $availQuantities);
+        if ($newAvailPickListResult === null) {
             http_response_code(400);
             echo json_encode(['success' => false, 'message' => t('pick_error_no_inventory')], JSON_UNESCAPED_UNICODE);
             exit;
         }
-        echo json_encode(['success' => true, 'pickListId' => $newAvailPickListId], JSON_UNESCAPED_UNICODE);
+        echo json_encode([
+            'success' => true,
+            'pickListId' => $newAvailPickListResult['pickListId'],
+            'description' => $availDescription,
+            'message' => t('set_pick_list_success', [
+                'name' => $availDescription,
+                'count' => (string) $newAvailPickListResult['totalQuantity'],
+            ]),
+        ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);

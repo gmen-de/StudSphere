@@ -182,6 +182,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'pick_ld
         echo json_encode(['success' => true, 'status' => 'unavailable', 'images' => []], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    echo json_encode(['success' => true] + getLdrawFourAngleProgress($pdo, $partId, $rebrickableColorId), JSON_UNESCAPED_UNICODE);
+    $angleProgress = getLdrawFourAngleProgress($pdo, $partId, $rebrickableColorId);
+    // local_image_path values are webroot-relative ("public/images/...") —
+    // correct from any main-app page, but this JSON is consumed by
+    // /pick/index.php's own inline script, one directory below the
+    // webroot, so every path needs the same "../" prefix
+    // src/pick_pages.php's pickAssetUrl() applies to server-rendered <img>
+    // tags elsewhere in /pick/.
+    foreach ($angleProgress['images'] as $angle => $imagePath) {
+        $angleProgress['images'][$angle] = $imagePath !== null ? '../' . $imagePath : null;
+    }
+    echo json_encode(['success' => true] + $angleProgress, JSON_UNESCAPED_UNICODE);
     exit;
 }

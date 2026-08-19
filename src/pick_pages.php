@@ -26,6 +26,23 @@ require_once __DIR__ . '/sets.php';
 require_once __DIR__ . '/minifigs.php';
 
 /**
+ * Every image path this app stores (local_image_path columns, thumbnails,
+ * LDraw renders, ...) is webroot-relative ("public/images/..."), correct as
+ * a plain <img src> from any page served at the webroot — but /pick/'s own
+ * pages are one directory down from there, so the exact same relative path
+ * resolves to the wrong place (/pick/public/images/...) unless prefixed.
+ * Root-absolute (a leading "/") isn't used instead because this app makes
+ * no assumption about being deployed at a domain root (see index.php's own
+ * doc comments on manifest.json/sw.js paths) — "../" stays correct at any
+ * install depth, matching how the rest of the app only ever uses relative
+ * paths too.
+ */
+function pickAssetUrl(?string $path): ?string
+{
+    return $path !== null && $path !== '' ? '../' . $path : null;
+}
+
+/**
  * Display info (name/color/thumbnail) for one pick_list_items row — resolves
  * the surrogate colors.id it's keyed on to Rebrickable's own color_id only
  * where getCachedPartColorImage() actually needs that numbering, same
@@ -157,7 +174,7 @@ function renderPickListCreate(PDO $pdo, string $sourceType, string $query, ?int 
                 : htmlspecialchars($result['fig_num'] . ' — ' . $result['name']);
             $html .= '<button type="button" class="pick-search-result" data-catalog-id="' . $catalogId . '" data-label="' . $label . '">';
             if (!empty($result['thumbnail'])) {
-                $html .= '<img src="' . htmlspecialchars($result['thumbnail']) . '" alt="">';
+                $html .= '<img src="' . htmlspecialchars(pickAssetUrl($result['thumbnail'])) . '" alt="">';
             }
             $html .= '<span>' . $label . '</span>';
             $html .= '</button>';
@@ -281,7 +298,7 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
 
     $html .= '<div class="pick-item-card">';
     if (!empty($display['thumbnail'])) {
-        $html .= '<img class="pick-item-thumb" src="' . htmlspecialchars($display['thumbnail']) . '" alt="">';
+        $html .= '<img class="pick-item-thumb" src="' . htmlspecialchars(pickAssetUrl($display['thumbnail'])) . '" alt="">';
     }
     $html .= '<h2>' . htmlspecialchars($display['label']) . '</h2>';
     if ($display['color_name'] !== null) {
@@ -302,7 +319,8 @@ function renderPickListActive(PDO $pdo, array $pickList, int $userId): string
         if ($openItem['item_type'] === 'minifig') {
             $html .= '<button type="button" class="pick-btn pick-btn-primary pick-confirm-btn" data-pick-list-item-id="' . (int) $openItem['id'] . '">' . htmlspecialchars(t('pick_item_confirm_button')) . '</button>';
         } else {
-            $html .= '<input type="number" id="pick-quantity-input" min="1" max="' . $step['suggested_pick'] . '" value="' . $step['suggested_pick'] . '">';
+            $html .= '<input type="number" id="pick-quantity-input" min="0" max="' . $step['suggested_pick'] . '" value="' . $step['suggested_pick'] . '">';
+            $html .= '<p class="pick-quantity-hint">' . htmlspecialchars(t('pick_item_quantity_zero_hint')) . '</p>';
             $html .= '<button type="button" class="pick-btn pick-btn-primary pick-confirm-btn" data-pick-list-item-id="' . (int) $openItem['id'] . '" data-source-location-id="' . $step['location_id'] . '">' . htmlspecialchars(t('pick_item_confirm_button')) . '</button>';
         }
         $html .= '<button type="button" class="pick-btn pick-flag-btn" data-pick-list-item-id="' . (int) $openItem['id'] . '" data-location-id="' . $step['location_id'] . '" data-part-id="' . ($display['part_id'] ?? '') . '">' . htmlspecialchars(t('pick_item_flag_stocktake_button')) . '</button>';
