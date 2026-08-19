@@ -397,23 +397,24 @@ function pickItem(PDO $pdo, int $pickListId, int $pickListItemId, ?int $sourceLo
         throw new RuntimeException('Nothing left to pick here.');
     }
 
-    $pdo->beginTransaction();
-    try {
-        $movementId = setStorageItemQuantity(
-            $sourceLocationId, (int) $item['part_id'], (int) $item['color_id'], $freshRow['condition_type'],
-            $freshRow['quantity'] - $consume, $userId, $freshRow['damaged_quantity'], 'move_out'
-        );
-        addStorageStock(
-            (int) $pickList['location_id'], (int) $item['part_id'], (int) $item['color_id'], $freshRow['condition_type'],
-            $consume, $userId, 'move_in', $movementId
-        );
-        $pdo->prepare('UPDATE pick_list_items SET picked_quantity = picked_quantity + ? WHERE id = ?')
-            ->execute([$consume, $pickListItemId]);
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
+    // No outer transaction here: setStorageItemQuantity()/addStorageStock()
+    // each already wrap their own body in a beginTransaction()/commit() pair
+    // (src/storage.php) — PDO doesn't support nesting those, a second
+    // beginTransaction() while one is active throws "There is already an
+    // active transaction". Each call is already its own atomically-committed
+    // step, matching this app's existing convention for multi-step stock
+    // operations (see buildMinifigFromStock() in src/build.php, which has no
+    // enclosing transaction either, for the same reason).
+    $movementId = setStorageItemQuantity(
+        $sourceLocationId, (int) $item['part_id'], (int) $item['color_id'], $freshRow['condition_type'],
+        $freshRow['quantity'] - $consume, $userId, $freshRow['damaged_quantity'], 'move_out'
+    );
+    addStorageStock(
+        (int) $pickList['location_id'], (int) $item['part_id'], (int) $item['color_id'], $freshRow['condition_type'],
+        $consume, $userId, 'move_in', $movementId
+    );
+    $pdo->prepare('UPDATE pick_list_items SET picked_quantity = picked_quantity + ? WHERE id = ?')
+        ->execute([$consume, $pickListItemId]);
 
     maybeCompletePickList($pdo, $pickListId);
     return ['pickedQuantity' => (int) $item['picked_quantity'] + $consume, 'remaining' => max(0, $remaining - $consume)];
@@ -484,18 +485,12 @@ function putAwayItem(PDO $pdo, int $pickListId, int $partId, int $colorId, strin
         throw new RuntimeException('Not enough stock at the pick list to put away.');
     }
 
-    $pdo->beginTransaction();
-    try {
-        $movementId = setStorageItemQuantity(
-            (int) $pickList['location_id'], $partId, $colorId, $conditionType,
-            $current['quantity'] - $quantity, $userId, null, 'move_out'
-        );
-        addStorageStock($destinationLocationId, $partId, $colorId, $conditionType, $quantity, $userId, 'move_in', $movementId);
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
+    // No outer transaction — same reasoning as pickItem() above.
+    $movementId = setStorageItemQuantity(
+        (int) $pickList['location_id'], $partId, $colorId, $conditionType,
+        $current['quantity'] - $quantity, $userId, null, 'move_out'
+    );
+    addStorageStock($destinationLocationId, $partId, $colorId, $conditionType, $quantity, $userId, 'move_in', $movementId);
 
     closePickListIfEmpty($pdo, $pickListId);
 }
