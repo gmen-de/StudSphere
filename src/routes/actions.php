@@ -473,6 +473,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
     exit;
 }
 
+// Catalog set_detail's "Bauteile auf Pickliste setzen" dialog
+// (src/routes/pages.php) — lists exactly which of this set's needed
+// part+colors already have loose stock, so the dialog can pre-check them
+// (getSetAvailablePartsForPickList(), src/pick_lists.php).
+if (isset($_GET['action']) && $_GET['action'] === 'set_available_parts_for_pick_list') {
+    header('Content-Type: application/json');
+    $availPartsSetId = (int) ($_GET['set_id'] ?? 0);
+    $availPartsSet = $availPartsSetId > 0 ? getSetById($pdo, $availPartsSetId) : null;
+    if ($availPartsSet === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('pick_error_not_found')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $availPartsInventoryId = getSetInventoryId($pdo, $availPartsSet['rebrickable_set_num']);
+    $availableParts = $availPartsInventoryId !== null
+        ? getSetAvailablePartsForPickList($pdo, $availPartsInventoryId, getLocale())
+        : [];
+    echo json_encode([
+        'success' => true,
+        'parts' => $availableParts,
+        'defaultDescription' => $availPartsSet['rebrickable_set_num'] . ' - ' . $availPartsSet['name'],
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_pick_list_from_set_available') {
+    header('Content-Type: application/json');
+    $availSetId = (int) ($_POST['set_id'] ?? 0);
+    $availDescription = trim((string) ($_POST['description'] ?? ''));
+    $availSelectedKeys = array_filter(array_map('trim', (array) ($_POST['selected_keys'] ?? [])), fn (string $k): bool => $k !== '');
+
+    if ($availSetId <= 0 || $availDescription === '' || empty($availSelectedKeys)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => t('pick_error_invalid_request')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    try {
+        $newAvailPickListId = createPickListFromAvailableParts($pdo, (int) $_SESSION['user_id'], $availSetId, $availDescription, $availSelectedKeys);
+        if ($newAvailPickListId === null) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'message' => t('pick_error_no_inventory')], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        echo json_encode(['success' => true, 'pickListId' => $newAvailPickListId], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'rename_location') {
     $locationId = (int) ($_POST['location_id'] ?? 0);
     $name = trim($_POST['name'] ?? '');

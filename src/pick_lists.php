@@ -6,6 +6,8 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/sets.php';
 require_once __DIR__ . '/minifigs.php';
+require_once __DIR__ . '/icons.php';
+require_once __DIR__ . '/i18n.php';
 
 /**
  * Pickliste domain logic (/pick/, see the project plan) — a pick list walks
@@ -199,6 +201,100 @@ function createPickList(PDO $pdo, int $userId, string $sourceType, int $catalogI
                 $item['minifig_id'], $item['source_minifig_storage_item_id'], $item['needed_quantity'],
             ]);
         }
+    }
+
+    return $pickListId;
+}
+
+/**
+ * The catalog set_detail page's "Bauteile auf Pickliste setzen" dialog
+ * (src/routes/pages.php) — unlike computePickListNeededItems(), which lists
+ * EVERY needed part+color (including ones with zero stock, surfaced as a
+ * shortfall once picking starts), this lists only the ones that actually
+ * have loose stock available right now, since the whole point of this entry
+ * point is "quickly grab what I already have for this set." Deliberately
+ * parts-only (no minifigs) — matches the user's own framing of this
+ * specific dialog. needed_quantity is capped at whatever's actually
+ * available (min(bom quantity, loose stock)), so a pick list built from this
+ * dialog never itself shows a shortfall for something that was already
+ * short before picking even started.
+ *
+ * @return array<int, array{part_id:int, color_id:int, needed_quantity:int, available_quantity:int, part_num:string, name:string, color_name:?string, thumbnail:?string}>
+ */
+function getSetAvailablePartsForPickList(PDO $pdo, int $inventoryId, string $locale = 'en'): array
+{
+    $looseStock = getLooseStockMap($pdo);
+    $result = [];
+    foreach (getSetPartsList($pdo, $inventoryId, false, $locale) as $part) {
+        if ($part['color_id'] === null || $part['quantity'] <= 0) {
+            continue;
+        }
+        $available = $looseStock[$part['part_id'] . ':' . $part['color_id']] ?? 0;
+        if ($available <= 0) {
+            continue;
+        }
+        $result[] = [
+            'part_id' => $part['part_id'],
+            'color_id' => $part['color_id'],
+            'needed_quantity' => min($part['quantity'], $available),
+            'available_quantity' => $available,
+            'part_num' => $part['part_num'],
+            'name' => $part['name'],
+            'color_name' => $part['color_name'],
+            'thumbnail' => $part['ldraw_thumbnail'] ?? $part['thumbnail'] ?? $part['remote_thumbnail'] ?? null,
+        ];
+    }
+    return $result;
+}
+
+/**
+ * Creates a pick list from exactly the rows the user left checked in the
+ * "Bauteile auf Pickliste setzen" dialog — $selectedKeys is a set of
+ * "part_id:color_id" strings from the client (which parts to include), but
+ * the quantities themselves are always taken fresh from
+ * getSetAvailablePartsForPickList() at submit time, never from client input,
+ * so a stale dialog snapshot (stock moved between opening the dialog and
+ * submitting) can't be used to request more than is genuinely available
+ * right now.
+ */
+function createPickListFromAvailableParts(PDO $pdo, int $userId, int $setId, string $description, array $selectedKeys): ?int
+{
+    $setNum = getCatalogSetNum($pdo, $setId);
+    $inventoryId = $setNum !== null ? getSetInventoryId($pdo, $setNum) : null;
+    if ($inventoryId === null) {
+        return null;
+    }
+
+    $available = getSetAvailablePartsForPickList($pdo, $inventoryId);
+    $selectedKeys = array_flip($selectedKeys);
+    $itemsToInsert = [];
+    foreach ($available as $part) {
+        $key = $part['part_id'] . ':' . $part['color_id'];
+        if (isset($selectedKeys[$key])) {
+            $itemsToInsert[] = $part;
+        }
+    }
+    if (empty($itemsToInsert)) {
+        return null;
+    }
+
+    $pickLagerRootId = getPickLagerRootId($pdo);
+    if ($pickLagerRootId === null) {
+        throw new RuntimeException('Pick Lager root location is missing — was migration 40 applied?');
+    }
+    $locationId = createStorageLocation($pickLagerRootId, $description, 'pick_list');
+
+    $insertListStmt = $pdo->prepare(
+        'INSERT INTO pick_lists (user_id, location_id, source_type, set_id, inventory_id) VALUES (?, ?, ?, ?, ?)'
+    );
+    $insertListStmt->execute([$userId, $locationId, 'set', $setId, $inventoryId]);
+    $pickListId = (int) $pdo->lastInsertId();
+
+    $insertItemStmt = $pdo->prepare(
+        'INSERT INTO pick_list_items (pick_list_id, item_type, part_id, color_id, needed_quantity) VALUES (?, \'part\', ?, ?, ?)'
+    );
+    foreach ($itemsToInsert as $part) {
+        $insertItemStmt->execute([$pickListId, $part['part_id'], $part['color_id'], $part['needed_quantity']]);
     }
 
     return $pickListId;
@@ -587,4 +683,137 @@ function fulfillOwnedSetFromPickList(PDO $pdo, int $pickListId, int $inventoryId
 
     closePickListIfEmpty($pdo, $pickListId);
     return $fulfilled;
+}
+
+/**
+ * Catalog set_detail's "Bauteile auf Pickliste setzen" dialog
+ * (?page=set_detail, src/routes/pages.php) — a single-step modal (own
+ * fetch()-driven checklist, not a page reload) that loads
+ * getSetAvailablePartsForPickList()'s result on open, pre-checks every row,
+ * and lets the user uncheck specific parts before submitting to
+ * action=create_pick_list_from_set_available (src/routes/actions.php),
+ * which re-validates quantities server-side rather than trusting this
+ * dialog's snapshot. Same .modal-overlay/.modal-box shell as
+ * renderAddOwnedSetWizardModal()/renderPartDetailModal() — the caller just
+ * embeds the returned HTML.
+ */
+function renderCreatePickListFromSetModal(int $setId): string
+{
+    $html = '<div class="modal-overlay" id="set-pick-list-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<div class="owned-set-wizard-header">';
+    $html .= '<h2>' . htmlspecialchars(t('set_pick_list_modal_heading')) . '</h2>';
+    $html .= '<button type="button" class="modal-close" id="set-pick-list-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '</div>';
+    $html .= '<label class="set-pick-list-name-label">' . htmlspecialchars(t('set_pick_list_name_label'));
+    $html .= '<input type="text" id="set-pick-list-name-input"></label>';
+    $html .= '<div id="set-pick-list-parts" class="set-pick-list-parts">' . htmlspecialchars(t('set_pick_list_loading')) . '</div>';
+    $html .= '<p class="owned-set-wizard-error" id="set-pick-list-error"></p>';
+    $html .= '<div class="owned-set-wizard-nav">';
+    $html .= '<button type="button" id="set-pick-list-submit">' . htmlspecialchars(t('set_pick_list_submit_button')) . '</button>';
+    $html .= '</div>';
+    $html .= '</div></div>';
+
+    $setIdJson = json_encode($setId);
+    $errorGenericJson = json_encode(t('pick_error_generic'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $emptyJson = json_encode(t('set_pick_list_empty'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var setId = $setIdJson;
+  var openBtn = document.getElementById('set-pick-list-open');
+  var modal = document.getElementById('set-pick-list-modal');
+  var closeBtn = document.getElementById('set-pick-list-modal-close');
+  var nameInput = document.getElementById('set-pick-list-name-input');
+  var partsBox = document.getElementById('set-pick-list-parts');
+  var errorEl = document.getElementById('set-pick-list-error');
+  var submitBtn = document.getElementById('set-pick-list-submit');
+  if (!openBtn || !modal) { return; }
+
+  function loadParts() {
+    partsBox.textContent = $emptyJson;
+    var params = new URLSearchParams();
+    params.set('action', 'set_available_parts_for_pick_list');
+    params.set('set_id', String(setId));
+    fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (!res.success) {
+          partsBox.textContent = res.message || $errorGenericJson;
+          return;
+        }
+        nameInput.value = res.defaultDescription || '';
+        if (!res.parts.length) {
+          partsBox.textContent = $emptyJson;
+          return;
+        }
+        partsBox.innerHTML = '';
+        res.parts.forEach(function(part) {
+          var row = document.createElement('label');
+          row.className = 'set-pick-list-part-row';
+          var checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = true;
+          checkbox.dataset.key = part.part_id + ':' + part.color_id;
+          row.appendChild(checkbox);
+          if (part.thumbnail) {
+            var img = document.createElement('img');
+            img.src = part.thumbnail;
+            row.appendChild(img);
+          }
+          var text = document.createElement('span');
+          text.textContent = part.part_num + ' ' + part.name + (part.color_name ? ' \\u00b7 ' + part.color_name : '') + ' (' + part.needed_quantity + ')';
+          row.appendChild(text);
+          partsBox.appendChild(row);
+        });
+      })
+      .catch(function() {
+        partsBox.textContent = $errorGenericJson;
+      });
+  }
+
+  openBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    errorEl.textContent = '';
+    modal.style.display = 'flex';
+    loadParts();
+  });
+  if (closeBtn) {
+    closeBtn.addEventListener('click', function() { modal.style.display = 'none'; });
+  }
+
+  submitBtn.addEventListener('click', function() {
+    errorEl.textContent = '';
+    var description = nameInput.value.trim();
+    var selectedKeys = Array.prototype.slice.call(partsBox.querySelectorAll('input[type=checkbox]:checked')).map(function(cb) { return cb.dataset.key; });
+    if (!description || !selectedKeys.length) {
+      errorEl.textContent = $errorGenericJson;
+      return;
+    }
+    submitBtn.disabled = true;
+    var formData = new FormData();
+    formData.set('action', 'create_pick_list_from_set_available');
+    formData.set('set_id', String(setId));
+    formData.set('description', description);
+    selectedKeys.forEach(function(key) { formData.append('selected_keys[]', key); });
+    fetch('?action=create_pick_list_from_set_available', { method: 'POST', body: formData, credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (!res.success) {
+          submitBtn.disabled = false;
+          errorEl.textContent = res.message || $errorGenericJson;
+          return;
+        }
+        window.location.href = 'pick/index.php?screen=pick&id=' + res.pickListId;
+      })
+      .catch(function() {
+        submitBtn.disabled = false;
+        errorEl.textContent = $errorGenericJson;
+      });
+  });
+})();
+</script>
+SCRIPT;
+
+    return $html;
 }

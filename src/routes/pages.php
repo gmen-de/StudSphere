@@ -2723,8 +2723,10 @@ if (isset($_GET['page']) && $_GET['page'] === 'set_detail') {
 
     $content .= '<div class="owned-set-actionbar">';
     $content .= '<a class="owned-set-action-pill" href="#" id="add-owned-set-open" title="' . htmlspecialchars(t('set_detail_add_to_collection_button')) . '" aria-label="' . htmlspecialchars(t('set_detail_add_to_collection_button')) . '">' . getActionIcon('add_to_collection') . '</a>';
+    $content .= '<a class="owned-set-action-pill" href="#" id="set-pick-list-open" title="' . htmlspecialchars(t('set_detail_pick_list_button')) . '" aria-label="' . htmlspecialchars(t('set_detail_pick_list_button')) . '">' . getActionIcon('add_to_pick_list') . '</a>';
     $content .= '</div>';
     $content .= renderAddOwnedSetWizardModal($pdo, $setId);
+    $content .= renderCreatePickListFromSetModal($setId);
 
     $content .= '</div>';
 
