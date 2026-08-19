@@ -172,7 +172,15 @@ echo '<meta name="theme-color" content="#2563eb">';
 echo '<meta name="color-scheme" content="light dark">';
 echo '<script>if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js?v=' . $swVersion . '"); }); }</script>';
 echo '<link rel="stylesheet" href="style.css?v=' . $swVersion . '">';
-echo '<body>';
+// pick-body-login hard-locks scrolling on the login screen (see
+// body.pick-body-login, pick/style.css) — plain overflow:hidden alone
+// isn't reliable on iOS Safari once a focused input's AutoFill/Passwords
+// suggestion bar is showing above the keyboard: Safari still scrolls the
+// page to keep the focused field visible above it regardless, leaving
+// everything below scrolled into view as empty space. position:fixed
+// actually removes the page from the scrollable flow instead of just
+// hiding an overflow, which is what makes it hold this time.
+echo '<body' . ($currentUser === null ? ' class="pick-body-login"' : '') . '>';
 
 // Cold-launch splash only — a full-screen navigation inside /pick/ (every
 // link here is a plain server round-trip, see this file's own doc comment)

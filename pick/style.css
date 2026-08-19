@@ -68,6 +68,21 @@ body {
   overscroll-behavior-y: contain;
 }
 
+/* Login screen only (index.php adds this class) — hard scroll lock. Plain
+   overflow:hidden isn't enough on iOS Safari: focusing the password field
+   shows its own Passwords/AutoFill suggestion bar above the keyboard, and
+   Safari scrolls the page to keep the focused input above THAT regardless
+   of overflow, leaving a screen's worth of empty space revealed below (see
+   the reported screenshots). position:fixed pins the whole page to the
+   viewport instead of merely clipping an overflow, which is what actually
+   holds under that behavior. */
+body.pick-body-login {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
 /* Login screen only (index.php adds this class when there's no nav bar to
    reserve space for) — drops that now-unneeded top space so the card sits
    centered without an artificial scroll. Deliberately NOT height:100vh +
