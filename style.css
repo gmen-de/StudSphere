@@ -4153,6 +4153,24 @@ footer {
   color: #0f172a;
 }
 
+.owned-set-total-ring-label-with-percent {
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.owned-set-total-ring-percent {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.owned-set-total-ring-fraction {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #64748b;
+  line-height: 1;
+}
+
 .owned-set-tab-loading {
   display: flex;
   flex-direction: column;

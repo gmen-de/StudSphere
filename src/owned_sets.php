@@ -2060,12 +2060,17 @@ function ownedSetCompletenessRingClass(float $percent): string
  * by the set_detail catalog page's "Gesamt vs. lose im Lager" ring, which
  * reads more naturally as "how many does the set need, how many do I already
  * have" than owned_set_detail's own "how many do I have, out of how many".
+ * $showPercent adds a bold percentage line above the fraction — also
+ * set_detail-only for now, since owned_set_detail/the minifig instance ring
+ * have their own live-updating JS keyed to the plain single-line label
+ * ($ringLabel.textContent = ... in owned_sets.php/owned_minifigs.php) that
+ * would need updating too if it also grew a percent line.
  */
-function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal, bool $nominalFirst = false): string
+function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal, bool $nominalFirst = false, bool $showPercent = false): string
 {
     $circumference = 2 * M_PI * 45;
     $offset = $circumference * (1 - min(100.0, $percent) / 100);
-    $label = $nominalFirst
+    $fraction = $nominalFirst
         ? formatNumber($nominal) . ' / ' . formatNumber($actual)
         : formatNumber($actual) . ' / ' . formatNumber($nominal);
     $ringClass = ownedSetCompletenessRingClass($percent);
@@ -2075,7 +2080,15 @@ function renderOwnedSetTotalRing(float $percent, int $actual, int $nominal, bool
     $html .= '<circle class="owned-set-total-ring-bg" cx="50" cy="50" r="45"></circle>';
     $html .= '<circle class="owned-set-total-ring-fg ' . $ringClass . '" id="owned-set-total-ring-fg" cx="50" cy="50" r="45" style="stroke-dasharray: ' . sprintf('%.2f', $circumference) . '; stroke-dashoffset: ' . sprintf('%.2f', $offset) . ';"></circle>';
     $html .= '</svg>';
-    $html .= '<span class="owned-set-total-ring-label" id="owned-set-total-ring-label">' . htmlspecialchars($label) . '</span>';
+    if ($showPercent) {
+        $percentText = (string) (int) round(min(100.0, $percent)) . '%';
+        $html .= '<span class="owned-set-total-ring-label owned-set-total-ring-label-with-percent" id="owned-set-total-ring-label">';
+        $html .= '<span class="owned-set-total-ring-percent">' . htmlspecialchars($percentText) . '</span>';
+        $html .= '<span class="owned-set-total-ring-fraction">' . htmlspecialchars($fraction) . '</span>';
+        $html .= '</span>';
+    } else {
+        $html .= '<span class="owned-set-total-ring-label" id="owned-set-total-ring-label">' . htmlspecialchars($fraction) . '</span>';
+    }
     $html .= '</div>';
 
     return $html;
