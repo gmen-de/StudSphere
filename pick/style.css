@@ -57,12 +57,19 @@ html {
    body.pick-body-login below) — locking body alone turned out not to be
    enough on iOS: the document/html level can still carry its own scroll
    position independently while Safari auto-scrolls a focused input above
-   the keyboard/AutoFill bar, so both levels need pinning together. */
+   the keyboard/AutoFill bar, so both levels need pinning together.
+   overscroll-behavior-y specifically has to sit on :root (this exact
+   gotcha turned up independently elsewhere: iOS honors it here even in
+   cases where the same value on body alone does nothing) — none rather
+   than contain, since unlike the overview screen's own deliberate
+   pull-to-refresh (scoped there, not here), this screen has nothing that
+   should react to an overscroll gesture at all. */
 html.pick-html-login {
   position: fixed;
   inset: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior-y: none;
 }
 
 body {
