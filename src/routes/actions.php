@@ -2058,7 +2058,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'search_sets_for_instructions'
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_instruction_manual') {
     header('Content-Type: application/json');
     try {
-        $newManualLocationId = (int) ($_POST['location_id'] ?? 0);
         $newManualSetId = (int) ($_POST['set_id'] ?? 0);
         $newManualIsNew = ($_POST['is_new'] ?? '') === '1';
         $newManualCriteria = [];
@@ -2068,16 +2067,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_i
         $newManualNotesRaw = trim((string) ($_POST['notes'] ?? ''));
         $newManualNotes = $newManualNotesRaw !== '' ? $newManualNotesRaw : null;
 
-        $newManualLocation = $newManualLocationId > 0 ? getStorageLocation($newManualLocationId) : null;
-        if ($newManualLocation === null || !isLocationInInstructionsSubtree($pdo, $newManualLocationId)) {
-            throw new RuntimeException(t('add_stock_invalid_input'));
-        }
         $newManualSet = $newManualSetId > 0 ? getSetById($pdo, $newManualSetId) : null;
         if ($newManualSet === null) {
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
 
-        $newManualId = addInstructionManual($newManualLocationId, $newManualSetId, $newManualIsNew, $newManualCriteria, $newManualNotes);
+        // Location is auto-derived from the set's own theme (auto-creating
+        // that virtual theme location on first use) — no location_id from
+        // the client anymore, see addInstructionManual()'s own doc comment.
+        $newManualId = addInstructionManual($newManualSet, $newManualIsNew, $newManualCriteria, $newManualNotes);
 
         try {
             if ($newManualSet['bricklink_item_id'] === null && $newManualSet['bricklink_price_checked_at'] === null) {
@@ -2119,32 +2117,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         }
 
         updateInstructionManual($updateManualId, $updateManualIsNew, $updateManualCriteria, $updateManualNotes);
-
-        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
-    } catch (Throwable $e) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
-    }
-    exit;
-}
-
-// Rejects a target outside the instructions subtree — a manual filed there
-// would become invisible, since action=location_content's response branches
-// entirely on isLocationInInstructionsSubtree().
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'move_instruction_manual') {
-    header('Content-Type: application/json');
-    try {
-        $moveManualId = (int) ($_POST['instance_id'] ?? 0);
-        $moveManualNewLocationId = (int) ($_POST['new_location_id'] ?? 0);
-
-        if ($moveManualId <= 0 || getInstructionManualById($pdo, $moveManualId) === null) {
-            throw new RuntimeException(t('instruction_manual_not_found'));
-        }
-        if ($moveManualNewLocationId <= 0 || !isLocationInInstructionsSubtree($pdo, $moveManualNewLocationId)) {
-            throw new RuntimeException(t('instruction_manual_move_outside_subtree'));
-        }
-
-        moveInstructionManual($moveManualId, $moveManualNewLocationId);
 
         echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {

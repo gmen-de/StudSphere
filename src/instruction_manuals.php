@@ -10,13 +10,19 @@ require_once __DIR__ . '/sets.php';
  * "Bauanleitungen" domain logic — a dedicated storage subtree
  * (location_type='instructions_root', migration 43) for cataloging physical
  * LEGO instruction booklets, separate from loose-parts/minifig storage.
- * Unlike Pick Lager (location_type='pick_lager_root'), whose children are
- * only ever created programmatically, this root's children are freely
- * created by the user through the normal Location Explorer UI and behave as
- * fully ordinary locations — every location inside the subtree is dedicated
- * exclusively to instruction manuals (enforced app-side via
- * isLocationInInstructionsSubtree(), never mixed with storage_items/
- * minifig_storage_items).
+ * Every location inside the subtree is dedicated exclusively to instruction
+ * manuals (enforced app-side via isLocationInInstructionsSubtree(), never
+ * mixed with storage_items/minifig_storage_items).
+ *
+ * Unlike the feature's first iteration, the root's children are no longer
+ * freely user-created — per explicit follow-up request, they're fully
+ * auto-managed "virtual" locations, one per distinct set theme
+ * (location_type='instructions_theme', migration 45), auto-created on first
+ * use (getOrCreateInstructionsThemeLocation()) and auto-deleted once empty
+ * (pruneEmptyInstructionsThemeLocation()). A manual's location is always
+ * derived from its own set's theme — there is deliberately no "move to a
+ * different location" operation anymore (a manual can only ever "move" by
+ * being deleted and re-added under a different set).
  *
  * instruction_manuals mirrors minifig_storage_items' shape: one row per
  * physical booklet copy (no quantity column to upsert onto), since two
@@ -86,6 +92,62 @@ function isLocationInInstructionsSubtree(PDO $pdo, int $locationId): bool
     return false;
 }
 
+// Sentinel theme_id (real Rebrickable theme ids start at 1) for sets with no
+// theme at all (s.theme IS NULL) — grouped into one fallback location rather
+// than one-off per set. Name is a hardcoded German literal, not i18n'd, same
+// convention as 'Bauanleitungen'/'Pick Lager' themselves — unlike real theme
+// names (sourced from Rebrickable, always English), this one's app-authored.
+const INSTRUCTIONS_THEME_FALLBACK_ID = 0;
+const INSTRUCTIONS_THEME_FALLBACK_NAME = 'Ohne Thema';
+
+/**
+ * Finds (or creates, on first use) the "virtual" per-theme location under
+ * "Bauanleitungen" that a manual with the given theme belongs in —
+ * find-by-marker on (location_type, theme_id), same idiom as
+ * getInstructionsRootId()/getPickLagerRootId(). $themeId/$themeName should
+ * be INSTRUCTIONS_THEME_FALLBACK_ID/_NAME for a set with no theme at all.
+ */
+function getOrCreateInstructionsThemeLocation(PDO $pdo, int $themeId, string $themeName): int
+{
+    $stmt = $pdo->prepare("SELECT id FROM storage_locations WHERE location_type = 'instructions_theme' AND theme_id = ? LIMIT 1");
+    $stmt->execute([$themeId]);
+    $id = $stmt->fetchColumn();
+    if ($id !== false) {
+        return (int) $id;
+    }
+
+    $rootId = getInstructionsRootId($pdo);
+    if ($rootId === null) {
+        throw new RuntimeException('Instructions root location is missing — was migration 43 applied?');
+    }
+    $insert = $pdo->prepare(
+        "INSERT INTO storage_locations (parent_id, name, location_type, theme_id) VALUES (?, ?, 'instructions_theme', ?)"
+    );
+    $insert->execute([$rootId, $themeName, $themeId]);
+    return (int) $pdo->lastInsertId();
+}
+
+/**
+ * Deletes $locationId if (and only if) it's an instructions_theme location
+ * that no longer holds any manuals — called after every delete (and, in
+ * migration 45, every reassignment) so the tree only ever shows themes that
+ * currently have something in them. Safe to call on any location id: the
+ * location_type/NOT EXISTS guard means this is a silent no-op for anything
+ * else (a still-occupied theme, the root, or a non-instructions location).
+ */
+function pruneEmptyInstructionsThemeLocation(PDO $pdo, int $locationId): void
+{
+    $stmt = $pdo->prepare(
+        "SELECT sl.id FROM storage_locations sl
+         WHERE sl.id = ? AND sl.location_type = 'instructions_theme'
+           AND NOT EXISTS (SELECT 1 FROM instruction_manuals im WHERE im.location_id = sl.id)"
+    );
+    $stmt->execute([$locationId]);
+    if ($stmt->fetchColumn() !== false) {
+        $pdo->prepare('DELETE FROM storage_locations WHERE id = ?')->execute([$locationId]);
+    }
+}
+
 /**
  * $isNew, when true, forces all 6 criteria to false regardless of what's
  * passed in $criteria — server-side enforcement (not just the add/edit
@@ -104,20 +166,29 @@ function normalizeInstructionManualCriteria(bool $isNew, array $criteria): array
 }
 
 /**
- * Adds one physical booklet copy. No storage_movements audit row — same
- * reasoning as addMinifigStock(): that log's schema is part-specific
- * (part_id/color_id), and instance-based storage doesn't write there either.
+ * Adds one physical booklet copy, filed automatically into its set's own
+ * theme location (auto-created on first use — see
+ * getOrCreateInstructionsThemeLocation()). $set is the getSetById() row for
+ * $setId's catalog set — the caller already has it (to validate the set
+ * exists before calling this), so it's passed in rather than re-fetched.
+ * No storage_movements audit row — same reasoning as addMinifigStock():
+ * that log's schema is part-specific (part_id/color_id), and instance-based
+ * storage doesn't write there either.
  */
-function addInstructionManual(int $locationId, int $setId, bool $isNew, array $criteria, ?string $notes): int
+function addInstructionManual(array $set, bool $isNew, array $criteria, ?string $notes): int
 {
     $pdo = getPDO();
+    $themeId = $set['theme_id'] ?? INSTRUCTIONS_THEME_FALLBACK_ID;
+    $themeName = $set['theme_id'] !== null ? $set['theme_name'] : INSTRUCTIONS_THEME_FALLBACK_NAME;
+    $locationId = getOrCreateInstructionsThemeLocation($pdo, $themeId, $themeName);
+
     $c = normalizeInstructionManualCriteria($isNew, $criteria);
     $stmt = $pdo->prepare(
         'INSERT INTO instruction_manuals (location_id, set_id, is_new, is_holed, has_tears, is_painted, has_stickers, is_glued, binding_broken, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
-        $locationId, $setId, $isNew ? 1 : 0,
+        $locationId, $set['id'], $isNew ? 1 : 0,
         $c['is_holed'] ? 1 : 0, $c['has_tears'] ? 1 : 0, $c['is_painted'] ? 1 : 0,
         $c['has_stickers'] ? 1 : 0, $c['is_glued'] ? 1 : 0, $c['binding_broken'] ? 1 : 0,
         $notes,
@@ -140,23 +211,22 @@ function updateInstructionManual(int $id, bool $isNew, array $criteria, ?string 
 }
 
 /**
- * Moves one specific manual instance to a different location — plain
- * UPDATE by id, mirrors moveMinifigStorageItemInstance(). Callers are
- * responsible for validating the target is inside the instructions
- * subtree first (see action=move_instruction_manual, src/routes/actions.php)
- * — a manual filed outside it would become invisible, since the
- * location_content response branches on isLocationInInstructionsSubtree().
+ * Removes one manual instance and, if that was the last one filed under its
+ * theme location, that now-empty virtual location too (see
+ * pruneEmptyInstructionsThemeLocation()).
  */
-function moveInstructionManual(int $id, int $toLocationId): void
-{
-    $pdo = getPDO();
-    $pdo->prepare('UPDATE instruction_manuals SET location_id = ? WHERE id = ?')->execute([$toLocationId, $id]);
-}
-
 function deleteInstructionManual(int $id): void
 {
     $pdo = getPDO();
+    $stmt = $pdo->prepare('SELECT location_id FROM instruction_manuals WHERE id = ?');
+    $stmt->execute([$id]);
+    $locationId = $stmt->fetchColumn();
+
     $pdo->prepare('DELETE FROM instruction_manuals WHERE id = ?')->execute([$id]);
+
+    if ($locationId !== false) {
+        pruneEmptyInstructionsThemeLocation($pdo, (int) $locationId);
+    }
 }
 
 /**

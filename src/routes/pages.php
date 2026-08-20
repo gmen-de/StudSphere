@@ -712,9 +712,8 @@ SCRIPT;
 
     // "Bauanleitungen" detail modal — implemented inline here (not via
     // part_modal.php's shared instance) since manuals only ever surface from
-    // this one screen; its "move" picker reuses the tree already sitting in
-    // memory as treeRoot instead of a server round trip (see
-    // buildInstructionsSubtreeOptions()).
+    // this one screen. No "move" affordance: a manual's location is always
+    // auto-derived from its set's theme (addInstructionManual()).
     $content .= '<div class="modal-overlay" id="location-instruction-detail-modal" style="display:none;">';
     $content .= '<div class="modal-box"><button type="button" class="modal-close" id="location-instruction-detail-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
     $content .= '<div id="location-instruction-detail-content"></div>';
@@ -796,8 +795,6 @@ SCRIPT;
         'instructionDetailTabPrices' => t('instruction_manual_tab_prices'),
         'instructionOpenSetLink' => t('instruction_manual_open_set_link'),
         'instructionSaveButton' => t('location_save_button'),
-        'instructionMoveButton' => t('instruction_manual_move_button'),
-        'instructionMoveHeading' => t('instruction_manual_move_heading'),
         'instructionDeleteButton' => t('instruction_manual_delete_button'),
         'instructionDeleteConfirm' => t('instruction_manual_delete_confirm'),
         'instructionFieldTotal' => t('instruction_manual_field_total'),
@@ -1453,7 +1450,7 @@ SCRIPT;
     return card;
   }
 
-  function buildInstructionManualAddTile(locationId) {
+  function buildInstructionManualAddTile() {
     var card = document.createElement('div');
     card.className = 'location-detail-card instruction-manual-tile-add';
     card.tabIndex = 0;
@@ -1466,12 +1463,11 @@ SCRIPT;
     label.className = 'instruction-manual-tile-add-label';
     label.textContent = texts.instructionsAddTileLabel;
     card.appendChild(label);
-    var open = function() { openInstructionManualAddModal(locationId); };
-    card.addEventListener('click', open);
+    card.addEventListener('click', openInstructionManualAddModal);
     card.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        open();
+        openInstructionManualAddModal();
       }
     });
     return card;
@@ -1479,15 +1475,16 @@ SCRIPT;
 
   // Same grouping-by-actual-location idea as buildLocationGroupedGrid(), but
   // the add tile only ever goes into the group that IS the currently viewed
-  // location (location_label null/empty) — adding always targets exactly
-  // what's open, never a descendant, matching every other "add" affordance
-  // in this Explorer.
-  function buildInstructionManualsGrid(locationId, manuals) {
+  // location (location_label null/empty) — where exactly it's clicked from
+  // no longer matters for filing purposes (a manual's location is always
+  // auto-derived from its set's theme, see addInstructionManual()), this
+  // just keeps it from appearing redundantly once per subgroup.
+  function buildInstructionManualsGrid(manuals) {
     var groups = groupByLocationLabel(manuals);
     if (groups.length <= 1) {
       var grid = document.createElement('div');
       grid.className = 'location-detail-grid instruction-manual-grid';
-      grid.appendChild(buildInstructionManualAddTile(locationId));
+      grid.appendChild(buildInstructionManualAddTile());
       manuals.forEach(function(manual) {
         grid.appendChild(buildInstructionManualTile(manual));
       });
@@ -1507,7 +1504,7 @@ SCRIPT;
       grid.className = 'location-detail-grid instruction-manual-grid';
       var isHereGroup = group.items.length > 0 && (group.items[0].location_label === null || group.items[0].location_label === undefined);
       if (isHereGroup) {
-        grid.appendChild(buildInstructionManualAddTile(locationId));
+        grid.appendChild(buildInstructionManualAddTile());
       }
       group.items.forEach(function(manual) {
         grid.appendChild(buildInstructionManualTile(manual));
@@ -1600,7 +1597,7 @@ SCRIPT;
     });
   }
 
-  function openInstructionManualAddModal(locationId) {
+  function openInstructionManualAddModal() {
     if (!instructionAddModal || !instructionAddForm) {
       return;
     }
@@ -1632,7 +1629,6 @@ SCRIPT;
       var criteriaState = instructionAddCriteriaFieldset ? instructionAddCriteriaFieldset.getState() : {};
       var formData = new FormData();
       formData.set('action', 'add_instruction_manual');
-      formData.set('location_id', locationId);
       formData.set('set_id', instructionAddSelectedSetId);
       formData.set('is_new', criteriaState.is_new ? '1' : '0');
       texts.instructionCriteriaLabels.forEach(function(c) {
@@ -1664,39 +1660,6 @@ SCRIPT;
   }
 
   // ---- Detail modal ----
-
-  // Walks the in-memory treeRoot for the 'instructions_root' node, then
-  // every descendant beneath it, building {id, label} pairs with a full
-  // breadcrumb — the scoped "move" picker's option list. No server round
-  // trip needed: getChildLocations() (the generic picker's own source)
-  // deliberately excludes this whole subtree (src/storage.php), so it can't
-  // be reused here anyway, and the tree is already sitting in memory.
-  function buildInstructionsSubtreeOptions() {
-    var options = [];
-    function findRoot(node) {
-      if (node.location_type === 'instructions_root') {
-        return node;
-      }
-      for (var i = 0; i < (node.children || []).length; i++) {
-        var found = findRoot(node.children[i]);
-        if (found) {
-          return found;
-        }
-      }
-      return null;
-    }
-    function walk(node, trail) {
-      options.push({ id: node.id, label: trail.join(' \\u203a ') });
-      (node.children || []).forEach(function(child) {
-        walk(child, trail.concat([child.name]));
-      });
-    }
-    var root = findRoot(treeRoot);
-    if (root) {
-      walk(root, [root.name]);
-    }
-    return options;
-  }
 
   function formatBricklinkPriceBlock(priceNew, priceUsed, currency, checkedAt) {
     if (!checkedAt) {
@@ -1816,48 +1779,6 @@ SCRIPT;
 
     var actionsRow = document.createElement('div');
     actionsRow.className = 'instruction-manual-detail-actions';
-
-    var movePicker = document.createElement('select');
-    movePicker.className = 'instruction-manual-move-picker';
-    buildInstructionsSubtreeOptions().forEach(function(opt) {
-      var optEl = document.createElement('option');
-      optEl.value = opt.id;
-      optEl.textContent = opt.label;
-      if (opt.id === manual.location_id) {
-        optEl.selected = true;
-      }
-      movePicker.appendChild(optEl);
-    });
-    actionsRow.appendChild(movePicker);
-
-    var moveBtn = document.createElement('button');
-    moveBtn.type = 'button';
-    moveBtn.textContent = texts.instructionMoveButton;
-    moveBtn.addEventListener('click', function() {
-      var newLocationId = movePicker.value;
-      if (!newLocationId || Number(newLocationId) === manual.location_id) {
-        return;
-      }
-      var formData = new FormData();
-      formData.set('action', 'move_instruction_manual');
-      formData.set('instance_id', manual.id);
-      formData.set('new_location_id', newLocationId);
-      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-          if (res.success) {
-            if (instructionDetailModal) {
-              instructionDetailModal.style.display = 'none';
-            }
-            refreshContent();
-          } else {
-            editMessage.textContent = res.message || texts.errorRetry;
-            editMessage.className = 'add-stock-message error';
-          }
-        })
-        .catch(function() {});
-    });
-    actionsRow.appendChild(moveBtn);
 
     var deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -2164,7 +2085,7 @@ SCRIPT;
     contentEl.appendChild(heading);
 
     if (data.isInstructionsLocation) {
-      contentEl.appendChild(buildInstructionManualsGrid(id, data.instructionManuals || []));
+      contentEl.appendChild(buildInstructionManualsGrid(data.instructionManuals || []));
       updateBulkBar();
       return;
     }
@@ -2301,12 +2222,18 @@ SCRIPT;
     var isPickList = node.location_type === 'pick_list';
     var isPickLagerRoot = node.location_type === 'pick_lager_root';
     // "Bauanleitungen" (src/instruction_manuals.php) — same no-rename/no-
-    // delete treatment as Pick Lager (a singleton root), but it DOES keep
-    // its expand arrow and its children behave as fully ordinary, freely
-    // user-created locations (isLeafOnly stays false for it).
+    // delete treatment as Pick Lager (a singleton root); it DOES keep its
+    // expand arrow (to browse the auto-created theme folders inside), but —
+    // unlike the feature's first iteration — no longer lets the user create
+    // children of their own (see the buildNewChildRow() skip below).
     var isInstructionsRoot = node.location_type === 'instructions_root';
-    var isLeafOnly = isOwnedSet || isPickList;
-    var isSpecialIcon = isOwnedSet || isPickList || isPickLagerRoot || isInstructionsRoot;
+    // The auto-managed, per-theme "virtual" folders themselves
+    // (getOrCreateInstructionsThemeLocation()) — fully leaf, same no-rename/
+    // no-delete/no-further-nesting treatment as owned_set/pick_list, since
+    // they're created and pruned entirely by the app, never by the user.
+    var isInstructionsTheme = node.location_type === 'instructions_theme';
+    var isLeafOnly = isOwnedSet || isPickList || isInstructionsTheme;
+    var isSpecialIcon = isOwnedSet || isPickList || isPickLagerRoot || isInstructionsRoot || isInstructionsTheme;
 
     if (isLeafOnly) {
       var spacer = document.createElement('span');
@@ -2327,13 +2254,13 @@ SCRIPT;
     if (isSpecialIcon) {
       var setIconEl = document.createElement('span');
       setIconEl.className = 'location-tree-set-icon';
-      setIconEl.innerHTML = isOwnedSet ? texts.setIcon : (isInstructionsRoot ? texts.instructionsIcon : texts.pickListIcon);
+      setIconEl.innerHTML = isOwnedSet ? texts.setIcon : ((isInstructionsRoot || isInstructionsTheme) ? texts.instructionsIcon : texts.pickListIcon);
       nameBtn.appendChild(setIconEl);
     }
     nameBtn.appendChild(document.createTextNode(node.name));
     row.appendChild(nameBtn);
 
-    if (!isRoot && !isOwnedSet && !isPickList && !isPickLagerRoot && !isInstructionsRoot) {
+    if (!isRoot && !isOwnedSet && !isPickList && !isPickLagerRoot && !isInstructionsRoot && !isInstructionsTheme) {
       var actions = document.createElement('span');
       actions.className = 'location-tree-row-actions';
 
@@ -2383,7 +2310,12 @@ SCRIPT;
     (node.children || []).forEach(function(child) {
       childrenWrap.appendChild(buildRow(child, depth + 1));
     });
-    childrenWrap.appendChild(buildNewChildRow(node.id, node.name, depth));
+    // "Bauanleitungen" no longer takes manually-created children (its theme
+    // folders are entirely auto-managed) — no "(Neu)" row for it, unlike
+    // every other expandable node.
+    if (!isInstructionsRoot) {
+      childrenWrap.appendChild(buildNewChildRow(node.id, node.name, depth));
+    }
     wrap.appendChild(childrenWrap);
 
     function toggleExpand() {

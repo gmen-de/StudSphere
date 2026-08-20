@@ -180,8 +180,10 @@ function installDatabase(): void
             parent_id INT DEFAULT NULL,
             name VARCHAR(255) NOT NULL,
             location_type VARCHAR(50) DEFAULT NULL,
+            theme_id INT DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            CONSTRAINT fk_location_parent FOREIGN KEY (parent_id) REFERENCES storage_locations(id) ON DELETE RESTRICT
+            CONSTRAINT fk_location_parent FOREIGN KEY (parent_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
+            INDEX idx_storage_locations_theme (theme_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
         'CREATE TABLE IF NOT EXISTS storage_items (
             id INT AUTO_INCREMENT PRIMARY KEY,

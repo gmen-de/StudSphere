@@ -226,21 +226,23 @@ function getStorageLocationTree(): array
 function getChildLocations(?int $parentId): array
 {
     $pdo = getPDO();
-    // Excludes 'owned_set', 'pick_list', AND 'instructions_root' nodes —
-    // none is a valid manual move/organize target: owned-set instances have
-    // always been managed only through their own set flow, pick lists
-    // (src/pick_lists.php) only through /pick/'s own dedicated UI, and the
-    // instructions root (src/instruction_manuals.php) is dedicated
-    // exclusively to instruction manuals — normal stock must never be filed
-    // into it. Since 'instructions_root' can only ever exist on the one
-    // singleton root row (parent_id IS NULL), excluding it here already
-    // makes its whole subtree unreachable through this picker (only ever
-    // reached by first navigating through its parent); still excluded in
-    // both branches for symmetry with the other two types.
+    // Excludes 'owned_set', 'pick_list', 'instructions_root', AND
+    // 'instructions_theme' nodes — none is a valid manual move/organize
+    // target: owned-set instances have always been managed only through
+    // their own set flow, pick lists (src/pick_lists.php) only through
+    // /pick/'s own dedicated UI, and the whole "Bauanleitungen" subtree
+    // (src/instruction_manuals.php) is dedicated exclusively to instruction
+    // manuals, fully auto-managed (no manual move/organize op exists for it
+    // at all) — normal stock must never be filed into it. Since
+    // 'instructions_root' can only ever exist on the one singleton root row
+    // (parent_id IS NULL), excluding it here already makes its whole subtree
+    // unreachable through this picker (only ever reached by first navigating
+    // through its parent); 'instructions_theme' is excluded too for the same
+    // defense-in-depth reasoning the other types already get.
     if ($parentId === null) {
-        $stmt = $pdo->query("SELECT id, name, location_type FROM storage_locations WHERE parent_id IS NULL AND (location_type IS NULL OR location_type NOT IN ('owned_set', 'pick_list', 'instructions_root'))");
+        $stmt = $pdo->query("SELECT id, name, location_type FROM storage_locations WHERE parent_id IS NULL AND (location_type IS NULL OR location_type NOT IN ('owned_set', 'pick_list', 'instructions_root', 'instructions_theme'))");
     } else {
-        $stmt = $pdo->prepare("SELECT id, name, location_type FROM storage_locations WHERE parent_id = ? AND (location_type IS NULL OR location_type NOT IN ('owned_set', 'pick_list', 'instructions_root'))");
+        $stmt = $pdo->prepare("SELECT id, name, location_type FROM storage_locations WHERE parent_id = ? AND (location_type IS NULL OR location_type NOT IN ('owned_set', 'pick_list', 'instructions_root', 'instructions_theme'))");
         $stmt->execute([$parentId]);
     }
     $rows = $stmt->fetchAll();

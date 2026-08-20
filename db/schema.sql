@@ -182,13 +182,19 @@ CREATE TABLE IF NOT EXISTS inventory_minifigs (
     UNIQUE KEY inventory_minifig_unique (inventory_id, minifig_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- theme_id links a location back to a Rebrickable theme (themes.theme_id) —
+-- only ever populated for location_type='instructions_theme' rows, the
+-- auto-managed "virtual" per-theme folders under "Bauanleitungen" (see
+-- getOrCreateInstructionsThemeLocation(), src/instruction_manuals.php).
 CREATE TABLE IF NOT EXISTS storage_locations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     parent_id INT DEFAULT NULL,
     name VARCHAR(255) NOT NULL,
     location_type VARCHAR(50) DEFAULT NULL,
+    theme_id INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_location_parent FOREIGN KEY (parent_id) REFERENCES storage_locations(id) ON DELETE RESTRICT
+    CONSTRAINT fk_location_parent FOREIGN KEY (parent_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
+    INDEX idx_storage_locations_theme (theme_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS storage_items (

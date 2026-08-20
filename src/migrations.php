@@ -893,6 +893,45 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'instruction_manuals', 'is_glued', 'TINYINT(1) NOT NULL DEFAULT 0');
             addColumnIfMissing($pdo, 'instruction_manuals', 'binding_broken', 'TINYINT(1) NOT NULL DEFAULT 0');
         },
+        45 => function (PDO $pdo): void {
+            // "Bauanleitungen" locations are no longer freely user-created —
+            // per explicit follow-up request, the root now auto-fills with
+            // one virtual per-theme location per distinct set theme
+            // (location_type='instructions_theme'), auto-created on demand
+            // by getOrCreateInstructionsThemeLocation() (src/instruction_manuals.php).
+            // theme_id links such a location back to its theme; NULL for
+            // every other location type.
+            addColumnIfMissing($pdo, 'storage_locations', 'theme_id', 'INT DEFAULT NULL');
+            addIndexIfMissing($pdo, 'storage_locations', 'idx_storage_locations_theme', 'theme_id');
+
+            // Every manual added under the old free-form model sits directly
+            // at the instructions_root — real user data by now (not wiped
+            // like migration 44's condition_grade cutover), so each one is
+            // reassigned to its own set's theme location instead of being
+            // dropped.
+            $manuals = $pdo->query(
+                'SELECT im.id, im.location_id AS old_location_id, s.theme, th.name AS theme_name
+                 FROM instruction_manuals im
+                 INNER JOIN sets s ON s.id = im.set_id
+                 LEFT JOIN themes th ON th.theme_id = s.theme'
+            )->fetchAll();
+            $oldLocationIds = [];
+            $updateStmt = $pdo->prepare('UPDATE instruction_manuals SET location_id = ? WHERE id = ?');
+            foreach ($manuals as $manual) {
+                $oldLocationIds[(int) $manual['old_location_id']] = true;
+                $themeId = $manual['theme'] !== null ? (int) $manual['theme'] : INSTRUCTIONS_THEME_FALLBACK_ID;
+                $themeName = $manual['theme_name'] ?? INSTRUCTIONS_THEME_FALLBACK_NAME;
+                $newLocationId = getOrCreateInstructionsThemeLocation($pdo, $themeId, $themeName);
+                $updateStmt->execute([$newLocationId, $manual['id']]);
+            }
+            // The old locations manuals used to sit at — typically just the
+            // instructions_root itself — pruned if they happen to now be an
+            // empty instructions_theme location (a no-op for the root, whose
+            // location_type isn't 'instructions_theme').
+            foreach (array_keys($oldLocationIds) as $oldLocationId) {
+                pruneEmptyInstructionsThemeLocation($pdo, $oldLocationId);
+            }
+        },
     ];
 }
 
@@ -1008,7 +1047,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 44;
+const CURRENT_SCHEMA_VERSION = 45;
 
 function getInstalledSchemaVersion(): int
 {

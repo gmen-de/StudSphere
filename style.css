@@ -1187,11 +1187,6 @@ button[type='submit'] {
   margin-top: 0.8rem;
 }
 
-.instruction-manual-move-picker {
-  flex: 1 1 auto;
-  min-width: 10rem;
-}
-
 .instruction-manual-delete-btn {
   background: #dc2626;
   color: #ffffff;
