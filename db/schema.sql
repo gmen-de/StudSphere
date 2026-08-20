@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS sets (
     bricklink_price_used DECIMAL(10,2) DEFAULT NULL,
     bricklink_price_currency VARCHAR(10) DEFAULT NULL,
     bricklink_price_checked_at TIMESTAMP NULL DEFAULT NULL,
+    bricklink_instructions_item_id INT DEFAULT NULL,
+    bricklink_instructions_price_new DECIMAL(10,2) DEFAULT NULL,
+    bricklink_instructions_price_used DECIMAL(10,2) DEFAULT NULL,
+    bricklink_instructions_price_currency VARCHAR(10) DEFAULT NULL,
+    bricklink_instructions_price_checked_at TIMESTAMP NULL DEFAULT NULL,
     INDEX idx_sets_theme (theme)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -262,6 +267,27 @@ CREATE TABLE IF NOT EXISTS minifig_storage_item_sales (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_minifigsale_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE SET NULL,
     CONSTRAINT fk_minifigsale_user FOREIGN KEY (sold_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per physical instruction-manual booklet (src/instruction_manuals.php)
+-- — mirrors minifig_storage_items (one row per physical instance, no
+-- quantity column), not storage_items (aggregated by quantity). location_id
+-- is always either the fixed 'instructions_root' location or one of its
+-- descendants — enforced in the application layer
+-- (isLocationInInstructionsSubtree()), not by this FK, since a plain FK
+-- can't express "must be inside a subtree".
+CREATE TABLE IF NOT EXISTS instruction_manuals (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    location_id INT NOT NULL,
+    set_id INT NOT NULL,
+    condition_grade ENUM('mint','near_mint','good','fair','poor') NOT NULL DEFAULT 'good',
+    notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_instructionmanual_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_instructionmanual_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE RESTRICT,
+    INDEX idx_instructionmanual_location (location_id),
+    INDEX idx_instructionmanual_set (set_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS storage_movements (

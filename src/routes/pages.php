@@ -690,6 +690,36 @@ SCRIPT;
     $content .= '<button type="submit">' . htmlspecialchars(t('location_bulk_relocate_confirm_button')) . '</button>';
     $content .= '</form></div></div>';
 
+    // "Bauanleitungen" (src/instruction_manuals.php) — the add-tile's mini
+    // form. One shared instance, populated with whichever location's add
+    // tile was clicked; set selection is a small live search (no existing
+    // AJAX set-search endpoint to reuse, see action=search_sets_for_instructions,
+    // src/routes/actions.php) rather than a full picker page, since this is
+    // meant to stay a quick popover.
+    $content .= '<div class="modal-overlay" id="location-instruction-add-modal" style="display:none;">';
+    $content .= '<div class="modal-box"><button type="button" class="modal-close" id="location-instruction-add-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $content .= '<h2>' . htmlspecialchars(t('instruction_manual_add_heading')) . '</h2>';
+    $content .= '<form id="location-instruction-add-form">';
+    $content .= '<div id="location-instruction-add-message" class="add-stock-message"></div>';
+    $content .= '<label>' . htmlspecialchars(t('instruction_manual_add_set_search_label')) . '<input type="text" id="location-instruction-add-set-search" autocomplete="off" placeholder="' . htmlspecialchars(t('instruction_manual_add_set_search_placeholder')) . '"></label>';
+    $content .= '<div id="location-instruction-add-set-results" class="instruction-manual-set-results"></div>';
+    $content .= '<div id="location-instruction-add-selected-set" class="instruction-manual-selected-set" style="display:none;"></div>';
+    $content .= '<label>' . htmlspecialchars(t('instruction_manual_field_condition')) . '<select id="location-instruction-add-condition"></select></label>';
+    $content .= '<p class="hint" id="location-instruction-add-condition-desc"></p>';
+    $content .= '<label>' . htmlspecialchars(t('instruction_manual_field_notes')) . '<textarea id="location-instruction-add-notes" rows="2"></textarea></label>';
+    $content .= '<button type="submit" id="location-instruction-add-submit" disabled>' . htmlspecialchars(t('instruction_manual_add_button')) . '</button>';
+    $content .= '</form></div></div>';
+
+    // "Bauanleitungen" detail modal — implemented inline here (not via
+    // part_modal.php's shared instance) since manuals only ever surface from
+    // this one screen; its "move" picker reuses the tree already sitting in
+    // memory as treeRoot instead of a server round trip (see
+    // buildInstructionsSubtreeOptions()).
+    $content .= '<div class="modal-overlay" id="location-instruction-detail-modal" style="display:none;">';
+    $content .= '<div class="modal-box"><button type="button" class="modal-close" id="location-instruction-detail-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $content .= '<div id="location-instruction-detail-content"></div>';
+    $content .= '</div></div>';
+
     // Floating bar shown whenever the loaded location has any selectable
     // card (not just once something's actually selected — "Alle auswählen"
     // needs to be reachable before any single item is picked) — count plus
@@ -712,6 +742,7 @@ SCRIPT;
         'minifigIcon' => getNavIcon('minifigs'),
         'setIcon' => getNavIcon('sets'),
         'pickListIcon' => getActionIcon('pick_list'),
+        'instructionsIcon' => getActionIcon('instructions'),
         'expandLabel' => t('locations_tree_expand_label'),
         'editLabel' => t('location_edit_link'),
         'deleteLabel' => t('location_delete_link'),
@@ -747,6 +778,35 @@ SCRIPT;
         'hereLabel' => t('location_content_here_label'),
         'setReadOnlyNote' => t('location_content_set_readonly'),
         'openSetDetailsLink' => t('location_content_open_set_details'),
+        'instructionsAddTileLabel' => t('instruction_manual_add_tile_label'),
+        'instructionPercentTooltip' => t('instruction_manual_percent_tooltip'),
+        'instructionAddHeading' => t('instruction_manual_add_heading'),
+        'instructionSetSearchNoResults' => t('instruction_manual_add_set_search_no_results'),
+        'instructionAddSubmitFailed' => t('instruction_manual_add_failed'),
+        'instructionConditionGrades' => array_map(
+            fn (string $grade): array => ['value' => $grade, 'label' => t('instruction_manual_condition_' . $grade), 'desc' => t('instruction_manual_condition_' . $grade . '_desc')],
+            INSTRUCTION_MANUAL_CONDITION_GRADES
+        ),
+        'instructionDetailTabDetails' => t('instruction_manual_tab_details'),
+        'instructionDetailTabParts' => t('instruction_manual_tab_parts'),
+        'instructionDetailTabPrices' => t('instruction_manual_tab_prices'),
+        'instructionOpenSetLink' => t('instruction_manual_open_set_link'),
+        'instructionSaveButton' => t('location_save_button'),
+        'instructionMoveButton' => t('instruction_manual_move_button'),
+        'instructionMoveHeading' => t('instruction_manual_move_heading'),
+        'instructionDeleteButton' => t('instruction_manual_delete_button'),
+        'instructionDeleteConfirm' => t('instruction_manual_delete_confirm'),
+        'instructionPartsEmpty' => t('instruction_manual_parts_empty'),
+        'instructionPartsNominalLabel' => t('instruction_manual_parts_nominal_label'),
+        'instructionPartsAvailableLabel' => t('instruction_manual_parts_available_label'),
+        'instructionPriceSetLabel' => t('instruction_manual_price_set_label'),
+        'instructionPriceInstructionsLabel' => t('instruction_manual_price_instructions_label'),
+        'instructionPriceNewLabel' => t('instruction_manual_price_new_label'),
+        'instructionPriceUsedLabel' => t('instruction_manual_price_used_label'),
+        'bricklinkPriceNever' => t('owned_set_bricklink_price_never'),
+        'bricklinkPriceUpdatedTitle' => t('owned_set_bricklink_price_updated_title'),
+        'bricklinkPriceRefreshLabel' => t('owned_set_bricklink_price_refresh_label'),
+        'bricklinkPriceRefreshFailed' => t('owned_set_bricklink_price_refresh_failed'),
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $content .= <<<SCRIPT
@@ -785,6 +845,20 @@ SCRIPT;
   var bulkBarSelectAllBtn = document.getElementById('location-bulk-bar-select-all');
   var bulkBarRelocateBtn = document.getElementById('location-bulk-bar-relocate');
   var bulkBarClearBtn = document.getElementById('location-bulk-bar-clear');
+  var instructionAddModal = document.getElementById('location-instruction-add-modal');
+  var instructionAddModalClose = document.getElementById('location-instruction-add-modal-close');
+  var instructionAddForm = document.getElementById('location-instruction-add-form');
+  var instructionAddMessage = document.getElementById('location-instruction-add-message');
+  var instructionAddSetSearch = document.getElementById('location-instruction-add-set-search');
+  var instructionAddSetResults = document.getElementById('location-instruction-add-set-results');
+  var instructionAddSelectedSet = document.getElementById('location-instruction-add-selected-set');
+  var instructionAddCondition = document.getElementById('location-instruction-add-condition');
+  var instructionAddConditionDesc = document.getElementById('location-instruction-add-condition-desc');
+  var instructionAddNotes = document.getElementById('location-instruction-add-notes');
+  var instructionAddSubmit = document.getElementById('location-instruction-add-submit');
+  var instructionDetailModal = document.getElementById('location-instruction-detail-modal');
+  var instructionDetailModalClose = document.getElementById('location-instruction-detail-modal-close');
+  var instructionDetailContent = document.getElementById('location-instruction-detail-content');
   if (!contentEl) {
     return;
   }
@@ -1199,6 +1273,671 @@ SCRIPT;
     return buildLocationGroupedGrid(minifigs, buildOneMinifigCard);
   }
 
+  // ---- "Bauanleitungen" (src/instruction_manuals.php) --------------------
+
+  // Same traffic-light thresholds as ownedSetCompletenessRingClass()
+  // (src/owned_sets.php) — mirrored client-side, same as owned_sets.php's
+  // own ringColorClass() JS copies, since there's no live PHP render for
+  // this badge (it's built fresh from the location_content JSON response).
+  function instructionRingColorClass(percent) {
+    if (percent >= 100) {
+      return 'owned-set-total-ring-fg-complete';
+    }
+    if (percent >= 75) {
+      return 'owned-set-total-ring-fg-partial';
+    }
+    return 'owned-set-total-ring-fg-low';
+  }
+
+  function buildPercentBadge(percent) {
+    var wrap = document.createElement('span');
+    wrap.className = 'instruction-manual-badge';
+    var clamped = Math.min(100, Math.max(0, percent));
+    var circumference = 2 * Math.PI * 42;
+    var offset = circumference * (1 - clamped / 100);
+    var ringClass = instructionRingColorClass(clamped);
+    wrap.innerHTML =
+      '<svg class="instruction-manual-badge-ring" viewBox="0 0 100 100" aria-hidden="true">' +
+      '<circle class="instruction-manual-badge-bg" cx="50" cy="50" r="42"></circle>' +
+      '<circle class="instruction-manual-badge-fg ' + ringClass + '" cx="50" cy="50" r="42" style="stroke-dasharray: ' + circumference.toFixed(2) + '; stroke-dashoffset: ' + offset.toFixed(2) + ';"></circle>' +
+      '</svg>' +
+      '<span class="instruction-manual-badge-label">' + Math.round(percent) + '%</span>';
+    wrap.title = texts.instructionPercentTooltip.replace('{percent}', String(Math.round(percent)));
+    return wrap;
+  }
+
+  function buildInstructionManualTile(manual) {
+    var card = document.createElement('div');
+    card.className = 'location-detail-card instruction-manual-tile';
+
+    if (manual.percent_complete !== null && manual.percent_complete !== undefined) {
+      card.appendChild(buildPercentBadge(manual.percent_complete));
+    }
+
+    var thumb = document.createElement('span');
+    thumb.className = 'location-detail-card-thumb instruction-manual-tile-thumb';
+    thumb.innerHTML = manual.thumbnail ? ('<img src="' + manual.thumbnail + '" alt="">') : texts.instructionsIcon;
+    card.appendChild(thumb);
+
+    var num = document.createElement('span');
+    num.className = 'location-detail-card-num';
+    num.textContent = manual.set_num;
+    card.appendChild(num);
+
+    var name = document.createElement('span');
+    name.className = 'location-detail-card-name';
+    name.title = manual.set_name;
+    name.textContent = manual.set_name;
+    card.appendChild(name);
+
+    var meta = document.createElement('span');
+    meta.className = 'location-detail-card-meta';
+    var gradeInfo = null;
+    texts.instructionConditionGrades.forEach(function(g) {
+      if (g.value === manual.condition_grade) {
+        gradeInfo = g;
+      }
+    });
+    meta.textContent = gradeInfo ? gradeInfo.label : manual.condition_grade;
+    card.appendChild(meta);
+
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    var open = function() { openInstructionManualDetailModal(manual.id); };
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+
+    return card;
+  }
+
+  function buildInstructionManualAddTile(locationId) {
+    var card = document.createElement('div');
+    card.className = 'location-detail-card instruction-manual-tile-add';
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    var icon = document.createElement('span');
+    icon.className = 'instruction-manual-tile-add-icon';
+    icon.innerHTML = texts.addIcon;
+    card.appendChild(icon);
+    var label = document.createElement('span');
+    label.className = 'instruction-manual-tile-add-label';
+    label.textContent = texts.instructionsAddTileLabel;
+    card.appendChild(label);
+    var open = function() { openInstructionManualAddModal(locationId); };
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+    return card;
+  }
+
+  // Same grouping-by-actual-location idea as buildLocationGroupedGrid(), but
+  // the add tile only ever goes into the group that IS the currently viewed
+  // location (location_label null/empty) — adding always targets exactly
+  // what's open, never a descendant, matching every other "add" affordance
+  // in this Explorer.
+  function buildInstructionManualsGrid(locationId, manuals) {
+    var groups = groupByLocationLabel(manuals);
+    if (groups.length <= 1) {
+      var grid = document.createElement('div');
+      grid.className = 'location-detail-grid';
+      grid.appendChild(buildInstructionManualAddTile(locationId));
+      manuals.forEach(function(manual) {
+        grid.appendChild(buildInstructionManualTile(manual));
+      });
+      return grid;
+    }
+
+    var wrap = document.createElement('div');
+    wrap.className = 'location-content-subgroups';
+    groups.forEach(function(group) {
+      var section = document.createElement('div');
+      section.className = 'location-content-subgroup';
+      var heading = document.createElement('h4');
+      heading.className = 'location-content-subgroup-heading';
+      heading.textContent = group.label;
+      section.appendChild(heading);
+      var grid = document.createElement('div');
+      grid.className = 'location-detail-grid';
+      var isHereGroup = group.items.length > 0 && (group.items[0].location_label === null || group.items[0].location_label === undefined);
+      if (isHereGroup) {
+        grid.appendChild(buildInstructionManualAddTile(locationId));
+      }
+      group.items.forEach(function(manual) {
+        grid.appendChild(buildInstructionManualTile(manual));
+      });
+      section.appendChild(grid);
+      wrap.appendChild(section);
+    });
+    return wrap;
+  }
+
+  // ---- Add-manual mini-form ----
+
+  var instructionAddSelectedSetId = null;
+  var instructionSetSearchToken = 0;
+
+  function closeInstructionAddModal() {
+    if (instructionAddModal) {
+      instructionAddModal.style.display = 'none';
+    }
+  }
+
+  function renderInstructionAddSelectedSet(set) {
+    instructionAddSelectedSetId = set ? set.id : null;
+    if (instructionAddSubmit) {
+      instructionAddSubmit.disabled = !instructionAddSelectedSetId;
+    }
+    if (!instructionAddSelectedSet) {
+      return;
+    }
+    if (!set) {
+      instructionAddSelectedSet.style.display = 'none';
+      instructionAddSelectedSet.innerHTML = '';
+      return;
+    }
+    instructionAddSelectedSet.style.display = '';
+    instructionAddSelectedSet.innerHTML = '';
+    var thumb = document.createElement('span');
+    thumb.className = 'instruction-manual-selected-set-thumb';
+    thumb.innerHTML = set.thumbnail ? ('<img src="' + set.thumbnail + '" alt="">') : texts.instructionsIcon;
+    instructionAddSelectedSet.appendChild(thumb);
+    var label = document.createElement('span');
+    label.textContent = set.rebrickable_set_num + ' \\u00b7 ' + set.name;
+    instructionAddSelectedSet.appendChild(label);
+  }
+
+  if (instructionAddSetSearch && instructionAddSetResults) {
+    instructionAddSetSearch.addEventListener('input', function() {
+      var query = instructionAddSetSearch.value.trim();
+      instructionSetSearchToken++;
+      var myToken = instructionSetSearchToken;
+      if (query.length < 2) {
+        instructionAddSetResults.innerHTML = '';
+        return;
+      }
+      fetch('?action=search_sets_for_instructions&q=' + encodeURIComponent(query), { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (myToken !== instructionSetSearchToken) {
+            return;
+          }
+          instructionAddSetResults.innerHTML = '';
+          var items = data.items || [];
+          if (items.length === 0) {
+            var empty = document.createElement('p');
+            empty.className = 'hint';
+            empty.textContent = texts.instructionSetSearchNoResults;
+            instructionAddSetResults.appendChild(empty);
+            return;
+          }
+          items.forEach(function(set) {
+            var row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'instruction-manual-set-result-row';
+            var thumb = document.createElement('span');
+            thumb.className = 'instruction-manual-set-result-thumb';
+            thumb.innerHTML = set.thumbnail ? ('<img src="' + set.thumbnail + '" alt="">') : texts.instructionsIcon;
+            row.appendChild(thumb);
+            var label = document.createElement('span');
+            label.textContent = set.rebrickable_set_num + ' \\u00b7 ' + set.name;
+            row.appendChild(label);
+            row.addEventListener('click', function() {
+              renderInstructionAddSelectedSet(set);
+              instructionAddSetResults.innerHTML = '';
+              instructionAddSetSearch.value = '';
+            });
+            instructionAddSetResults.appendChild(row);
+          });
+        })
+        .catch(function() {});
+    });
+  }
+
+  function openInstructionManualAddModal(locationId) {
+    if (!instructionAddModal || !instructionAddForm) {
+      return;
+    }
+    instructionAddMessage.textContent = '';
+    instructionAddMessage.className = 'add-stock-message';
+    if (instructionAddSetSearch) {
+      instructionAddSetSearch.value = '';
+    }
+    if (instructionAddSetResults) {
+      instructionAddSetResults.innerHTML = '';
+    }
+    if (instructionAddNotes) {
+      instructionAddNotes.value = '';
+    }
+    renderInstructionAddSelectedSet(null);
+
+    if (instructionAddCondition) {
+      instructionAddCondition.innerHTML = '';
+      texts.instructionConditionGrades.forEach(function(g) {
+        var opt = document.createElement('option');
+        opt.value = g.value;
+        opt.textContent = g.label;
+        instructionAddCondition.appendChild(opt);
+      });
+      instructionAddCondition.value = 'good';
+      var updateDesc = function() {
+        var selected = null;
+        texts.instructionConditionGrades.forEach(function(g) {
+          if (g.value === instructionAddCondition.value) {
+            selected = g;
+          }
+        });
+        if (instructionAddConditionDesc) {
+          instructionAddConditionDesc.textContent = selected ? selected.desc : '';
+        }
+      };
+      instructionAddCondition.onchange = updateDesc;
+      updateDesc();
+    }
+
+    instructionAddForm.onsubmit = function(e) {
+      e.preventDefault();
+      if (!instructionAddSelectedSetId) {
+        return;
+      }
+      var formData = new FormData();
+      formData.set('action', 'add_instruction_manual');
+      formData.set('location_id', locationId);
+      formData.set('set_id', instructionAddSelectedSetId);
+      formData.set('condition_grade', instructionAddCondition ? instructionAddCondition.value : 'good');
+      formData.set('notes', instructionAddNotes ? instructionAddNotes.value : '');
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            closeInstructionAddModal();
+            refreshContent();
+          } else {
+            instructionAddMessage.textContent = res.message || texts.instructionAddSubmitFailed;
+            instructionAddMessage.className = 'add-stock-message error';
+          }
+        })
+        .catch(function() {
+          instructionAddMessage.textContent = texts.errorRetry;
+          instructionAddMessage.className = 'add-stock-message error';
+        });
+    };
+
+    instructionAddModal.style.display = 'flex';
+  }
+
+  if (instructionAddModalClose) {
+    instructionAddModalClose.addEventListener('click', closeInstructionAddModal);
+  }
+
+  // ---- Detail modal ----
+
+  // Walks the in-memory treeRoot for the 'instructions_root' node, then
+  // every descendant beneath it, building {id, label} pairs with a full
+  // breadcrumb — the scoped "move" picker's option list. No server round
+  // trip needed: getChildLocations() (the generic picker's own source)
+  // deliberately excludes this whole subtree (src/storage.php), so it can't
+  // be reused here anyway, and the tree is already sitting in memory.
+  function buildInstructionsSubtreeOptions() {
+    var options = [];
+    function findRoot(node) {
+      if (node.location_type === 'instructions_root') {
+        return node;
+      }
+      for (var i = 0; i < (node.children || []).length; i++) {
+        var found = findRoot(node.children[i]);
+        if (found) {
+          return found;
+        }
+      }
+      return null;
+    }
+    function walk(node, trail) {
+      options.push({ id: node.id, label: trail.join(' \\u203a ') });
+      (node.children || []).forEach(function(child) {
+        walk(child, trail.concat([child.name]));
+      });
+    }
+    var root = findRoot(treeRoot);
+    if (root) {
+      walk(root, [root.name]);
+    }
+    return options;
+  }
+
+  function formatBricklinkPriceBlock(priceNew, priceUsed, currency, checkedAt) {
+    if (!checkedAt) {
+      return texts.bricklinkPriceNever;
+    }
+    var symbol = currency === 'EUR' ? '\\u20ac' : (currency === 'USD' ? '$' : (currency === 'GBP' ? '\\u00a3' : (currency || '')));
+    var newText = priceNew !== null && priceNew !== undefined ? Number(priceNew).toFixed(2) + ' ' + symbol : '\\u2013';
+    var usedText = priceUsed !== null && priceUsed !== undefined ? Number(priceUsed).toFixed(2) + ' ' + symbol : '\\u2013';
+    return texts.instructionPriceNewLabel + ': ' + newText + '  \\u00b7  ' + texts.instructionPriceUsedLabel + ': ' + usedText;
+  }
+
+  function buildInstructionDetailTabs(data) {
+    var manual = data.manual;
+    var wrap = document.createElement('div');
+
+    var tabBar = document.createElement('div');
+    tabBar.className = 'part-modal-tabs';
+    var tabPanels = document.createElement('div');
+    tabPanels.className = 'part-modal-tab-panels';
+
+    var panelDetails = document.createElement('div');
+    panelDetails.className = 'part-modal-tab-panel';
+    var panelParts = document.createElement('div');
+    panelParts.className = 'part-modal-tab-panel';
+    var panelPrices = document.createElement('div');
+    panelPrices.className = 'part-modal-tab-panel';
+
+    var tabs = [
+      { label: texts.instructionDetailTabDetails, panel: panelDetails },
+      { label: texts.instructionDetailTabParts, panel: panelParts },
+      { label: texts.instructionDetailTabPrices, panel: panelPrices }
+    ];
+    var tabButtons = [];
+    function activateTab(index) {
+      tabs.forEach(function(tab, i) {
+        tab.panel.classList.toggle('active', i === index);
+        tabButtons[i].classList.toggle('active', i === index);
+      });
+    }
+    tabs.forEach(function(tab, i) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'part-modal-tab-btn';
+      btn.textContent = tab.label;
+      btn.addEventListener('click', function() { activateTab(i); });
+      tabBar.appendChild(btn);
+      tabButtons.push(btn);
+      tabPanels.appendChild(tab.panel);
+    });
+
+    // ---- Details tab ----
+    var detailsImg = document.createElement('div');
+    detailsImg.className = 'part-modal-image';
+    detailsImg.innerHTML = manual.thumbnail ? ('<img src="' + manual.thumbnail + '" alt="">') : texts.instructionsIcon;
+    panelDetails.appendChild(detailsImg);
+
+    var setLink = document.createElement('a');
+    setLink.href = '?page=set_detail&id=' + manual.set_id;
+    setLink.className = 'instruction-manual-detail-set-link';
+    setLink.textContent = manual.set_num + ' \\u00b7 ' + manual.set_name;
+    panelDetails.appendChild(setLink);
+
+    var editForm = document.createElement('form');
+    editForm.className = 'instruction-manual-detail-edit-form';
+    var editMessage = document.createElement('div');
+    editMessage.className = 'add-stock-message';
+    editForm.appendChild(editMessage);
+
+    var conditionLabel = document.createElement('label');
+    var condSelect = document.createElement('select');
+    texts.instructionConditionGrades.forEach(function(g) {
+      var opt = document.createElement('option');
+      opt.value = g.value;
+      opt.textContent = g.label;
+      condSelect.appendChild(opt);
+    });
+    condSelect.value = manual.condition_grade;
+    conditionLabel.appendChild(condSelect);
+    editForm.appendChild(conditionLabel);
+
+    var notesLabel = document.createElement('label');
+    var notesTextarea = document.createElement('textarea');
+    notesTextarea.rows = 2;
+    notesTextarea.value = manual.notes || '';
+    notesLabel.appendChild(notesTextarea);
+    editForm.appendChild(notesLabel);
+
+    var saveBtn = document.createElement('button');
+    saveBtn.type = 'submit';
+    saveBtn.textContent = texts.instructionSaveButton;
+    editForm.appendChild(saveBtn);
+
+    editForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      var formData = new FormData();
+      formData.set('action', 'update_instruction_manual');
+      formData.set('instance_id', manual.id);
+      formData.set('condition_grade', condSelect.value);
+      formData.set('notes', notesTextarea.value);
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            editMessage.textContent = '';
+            editMessage.className = 'add-stock-message';
+            refreshContent();
+          } else {
+            editMessage.textContent = res.message || texts.errorRetry;
+            editMessage.className = 'add-stock-message error';
+          }
+        })
+        .catch(function() {
+          editMessage.textContent = texts.errorRetry;
+          editMessage.className = 'add-stock-message error';
+        });
+    });
+    panelDetails.appendChild(editForm);
+
+    var actionsRow = document.createElement('div');
+    actionsRow.className = 'instruction-manual-detail-actions';
+
+    var movePicker = document.createElement('select');
+    movePicker.className = 'instruction-manual-move-picker';
+    buildInstructionsSubtreeOptions().forEach(function(opt) {
+      var optEl = document.createElement('option');
+      optEl.value = opt.id;
+      optEl.textContent = opt.label;
+      if (opt.id === manual.location_id) {
+        optEl.selected = true;
+      }
+      movePicker.appendChild(optEl);
+    });
+    actionsRow.appendChild(movePicker);
+
+    var moveBtn = document.createElement('button');
+    moveBtn.type = 'button';
+    moveBtn.textContent = texts.instructionMoveButton;
+    moveBtn.addEventListener('click', function() {
+      var newLocationId = movePicker.value;
+      if (!newLocationId || Number(newLocationId) === manual.location_id) {
+        return;
+      }
+      var formData = new FormData();
+      formData.set('action', 'move_instruction_manual');
+      formData.set('instance_id', manual.id);
+      formData.set('new_location_id', newLocationId);
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            if (instructionDetailModal) {
+              instructionDetailModal.style.display = 'none';
+            }
+            refreshContent();
+          } else {
+            editMessage.textContent = res.message || texts.errorRetry;
+            editMessage.className = 'add-stock-message error';
+          }
+        })
+        .catch(function() {});
+    });
+    actionsRow.appendChild(moveBtn);
+
+    var deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'instruction-manual-delete-btn';
+    deleteBtn.textContent = texts.instructionDeleteButton;
+    deleteBtn.addEventListener('click', function() {
+      if (!window.confirm(texts.instructionDeleteConfirm)) {
+        return;
+      }
+      var formData = new FormData();
+      formData.set('action', 'delete_instruction_manual');
+      formData.set('instance_id', manual.id);
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            if (instructionDetailModal) {
+              instructionDetailModal.style.display = 'none';
+            }
+            refreshContent();
+          }
+        })
+        .catch(function() {});
+    });
+    actionsRow.appendChild(deleteBtn);
+
+    panelDetails.appendChild(actionsRow);
+
+    // ---- Bauteile im Lager tab ----
+    if (data.summary && data.summary.total_nominal > 0) {
+      var percent = Math.round(data.summary.total_actual / data.summary.total_nominal * 100);
+      var ringWrap = document.createElement('div');
+      ringWrap.className = 'owned-set-total-ring-wrap';
+      var ringClass = instructionRingColorClass(percent);
+      var circumference = 2 * Math.PI * 45;
+      var offset = circumference * (1 - Math.min(100, percent) / 100);
+      ringWrap.innerHTML =
+        '<svg class="owned-set-total-ring" viewBox="0 0 100 100" aria-hidden="true">' +
+        '<circle class="owned-set-total-ring-bg" cx="50" cy="50" r="45"></circle>' +
+        '<circle class="owned-set-total-ring-fg ' + ringClass + '" cx="50" cy="50" r="45" style="stroke-dasharray: ' + circumference.toFixed(2) + '; stroke-dashoffset: ' + offset.toFixed(2) + ';"></circle>' +
+        '</svg>' +
+        '<span class="owned-set-total-ring-label">' + data.summary.total_actual + ' / ' + data.summary.total_nominal + '</span>';
+      panelParts.appendChild(ringWrap);
+    }
+
+    var parts = data.parts || [];
+    if (parts.length === 0) {
+      var partsEmpty = document.createElement('p');
+      partsEmpty.className = 'hint';
+      partsEmpty.textContent = texts.instructionPartsEmpty;
+      panelParts.appendChild(partsEmpty);
+    } else {
+      var partsGrid = document.createElement('div');
+      partsGrid.className = 'location-detail-grid';
+      parts.forEach(function(part) {
+        var card = document.createElement('div');
+        card.className = 'location-detail-card';
+        if (part.available_quantity < part.nominal_quantity) {
+          card.className += ' instruction-manual-part-short';
+        }
+        var thumb = document.createElement('span');
+        thumb.className = 'location-detail-card-thumb';
+        thumb.innerHTML = part.thumbnail ? ('<img src="' + part.thumbnail + '" alt="">') : texts.brickIcon;
+        card.appendChild(thumb);
+        var num = document.createElement('span');
+        num.className = 'location-detail-card-num';
+        num.textContent = part.part_num;
+        card.appendChild(num);
+        var name = document.createElement('span');
+        name.className = 'location-detail-card-name';
+        name.title = part.name;
+        name.textContent = part.name;
+        card.appendChild(name);
+        var meta = document.createElement('span');
+        meta.className = 'location-detail-card-meta';
+        meta.textContent = texts.instructionPartsAvailableLabel.replace('{available}', part.available_quantity).replace('{nominal}', part.nominal_quantity);
+        card.appendChild(meta);
+        partsGrid.appendChild(card);
+      });
+      panelParts.appendChild(partsGrid);
+    }
+
+    // ---- Preise tab ----
+    [
+      { label: texts.instructionPriceSetLabel, priceNew: data.set.bricklink_price_new, priceUsed: data.set.bricklink_price_used, currency: data.set.bricklink_price_currency, checkedAt: data.set.bricklink_price_checked_at, url: data.bricklinkSetUrl, action: 'refresh_bricklink_price' },
+      { label: texts.instructionPriceInstructionsLabel, priceNew: data.set.bricklink_instructions_price_new, priceUsed: data.set.bricklink_instructions_price_used, currency: data.set.bricklink_instructions_price_currency, checkedAt: data.set.bricklink_instructions_price_checked_at, url: data.bricklinkInstructionsUrl, action: 'refresh_bricklink_instructions_price' }
+    ].forEach(function(row) {
+      var rowEl = document.createElement('div');
+      rowEl.className = 'instruction-manual-price-row';
+      var heading = document.createElement('h4');
+      heading.textContent = row.label;
+      rowEl.appendChild(heading);
+      var priceLine = document.createElement('p');
+      priceLine.textContent = formatBricklinkPriceBlock(row.priceNew, row.priceUsed, row.currency, row.checkedAt);
+      if (row.checkedAt) {
+        priceLine.title = texts.bricklinkPriceUpdatedTitle.replace('{date}', row.checkedAt);
+      }
+      rowEl.appendChild(priceLine);
+      var link = document.createElement('a');
+      link.href = row.url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = 'BrickLink';
+      rowEl.appendChild(link);
+      var refreshBtn = document.createElement('button');
+      refreshBtn.type = 'button';
+      refreshBtn.textContent = texts.bricklinkPriceRefreshLabel;
+      refreshBtn.addEventListener('click', function() {
+        refreshBtn.disabled = true;
+        var formData = new FormData();
+        formData.set('action', row.action);
+        formData.set('set_id', manual.set_id);
+        fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+          .then(function(r) { return r.json(); })
+          .then(function(res) {
+            refreshBtn.disabled = false;
+            if (res.success) {
+              priceLine.textContent = formatBricklinkPriceBlock(res.priceNew, res.priceUsed, res.currency, res.checkedAt);
+              priceLine.title = texts.bricklinkPriceUpdatedTitle.replace('{date}', res.checkedAt || '');
+            } else {
+              priceLine.textContent = texts.bricklinkPriceRefreshFailed.replace('{message}', res.message || '');
+            }
+          })
+          .catch(function() {
+            refreshBtn.disabled = false;
+          });
+      });
+      rowEl.appendChild(refreshBtn);
+      panelPrices.appendChild(rowEl);
+    });
+
+    activateTab(0);
+    wrap.appendChild(tabBar);
+    wrap.appendChild(tabPanels);
+    return wrap;
+  }
+
+  function openInstructionManualDetailModal(instanceId) {
+    if (!instructionDetailModal || !instructionDetailContent) {
+      return;
+    }
+    instructionDetailContent.innerHTML = '<p class="hint">' + texts.loading + '</p>';
+    instructionDetailModal.style.display = 'flex';
+    fetch('?action=instruction_manual_detail&instance_id=' + instanceId, { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.success) {
+          instructionDetailContent.innerHTML = '<p class="hint">' + texts.errorRetry + '</p>';
+          return;
+        }
+        instructionDetailContent.innerHTML = '';
+        instructionDetailContent.appendChild(buildInstructionDetailTabs(data));
+      })
+      .catch(function() {
+        instructionDetailContent.innerHTML = '<p class="hint">' + texts.errorRetry + '</p>';
+      });
+  }
+
+  if (instructionDetailModalClose) {
+    instructionDetailModalClose.addEventListener('click', function() {
+      instructionDetailModal.style.display = 'none';
+    });
+  }
+
   // Shared by every submit path openItemEditModal() can trigger (move a
   // part, delete a minifig instance, move a minifig instance) — same
   // success/failure handling each time, just a different FormData.
@@ -1359,6 +2098,12 @@ SCRIPT;
     heading.textContent = name;
     contentEl.appendChild(heading);
 
+    if (data.isInstructionsLocation) {
+      contentEl.appendChild(buildInstructionManualsGrid(id, data.instructionManuals || []));
+      updateBulkBar();
+      return;
+    }
+
     if (currentReadOnly) {
       var readOnlyNote = document.createElement('p');
       readOnlyNote.className = 'hint location-content-readonly-note';
@@ -1490,8 +2235,13 @@ SCRIPT;
     var isOwnedSet = node.location_type === 'owned_set';
     var isPickList = node.location_type === 'pick_list';
     var isPickLagerRoot = node.location_type === 'pick_lager_root';
+    // "Bauanleitungen" (src/instruction_manuals.php) — same no-rename/no-
+    // delete treatment as Pick Lager (a singleton root), but it DOES keep
+    // its expand arrow and its children behave as fully ordinary, freely
+    // user-created locations (isLeafOnly stays false for it).
+    var isInstructionsRoot = node.location_type === 'instructions_root';
     var isLeafOnly = isOwnedSet || isPickList;
-    var isSpecialIcon = isOwnedSet || isPickList || isPickLagerRoot;
+    var isSpecialIcon = isOwnedSet || isPickList || isPickLagerRoot || isInstructionsRoot;
 
     if (isLeafOnly) {
       var spacer = document.createElement('span');
@@ -1512,13 +2262,13 @@ SCRIPT;
     if (isSpecialIcon) {
       var setIconEl = document.createElement('span');
       setIconEl.className = 'location-tree-set-icon';
-      setIconEl.innerHTML = isOwnedSet ? texts.setIcon : texts.pickListIcon;
+      setIconEl.innerHTML = isOwnedSet ? texts.setIcon : (isInstructionsRoot ? texts.instructionsIcon : texts.pickListIcon);
       nameBtn.appendChild(setIconEl);
     }
     nameBtn.appendChild(document.createTextNode(node.name));
     row.appendChild(nameBtn);
 
-    if (!isRoot && !isOwnedSet && !isPickList && !isPickLagerRoot) {
+    if (!isRoot && !isOwnedSet && !isPickList && !isPickLagerRoot && !isInstructionsRoot) {
       var actions = document.createElement('span');
       actions.className = 'location-tree-row-actions';
 

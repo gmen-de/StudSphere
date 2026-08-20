@@ -37,6 +37,11 @@ function installDatabase(): void
             bricklink_price_used DECIMAL(10,2) DEFAULT NULL,
             bricklink_price_currency VARCHAR(10) DEFAULT NULL,
             bricklink_price_checked_at TIMESTAMP NULL DEFAULT NULL,
+            bricklink_instructions_item_id INT DEFAULT NULL,
+            bricklink_instructions_price_new DECIMAL(10,2) DEFAULT NULL,
+            bricklink_instructions_price_used DECIMAL(10,2) DEFAULT NULL,
+            bricklink_instructions_price_currency VARCHAR(10) DEFAULT NULL,
+            bricklink_instructions_price_checked_at TIMESTAMP NULL DEFAULT NULL,
             INDEX idx_sets_theme (theme)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
 
@@ -257,6 +262,21 @@ function installDatabase(): void
             CONSTRAINT fk_minifigsale_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE SET NULL,
             CONSTRAINT fk_minifigsale_user FOREIGN KEY (sold_by) REFERENCES users(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS instruction_manuals (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            location_id INT NOT NULL,
+            set_id INT NOT NULL,
+            condition_grade ENUM(\'mint\',\'near_mint\',\'good\',\'fair\',\'poor\') NOT NULL DEFAULT \'good\',
+            notes TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            CONSTRAINT fk_instructionmanual_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
+            CONSTRAINT fk_instructionmanual_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE RESTRICT,
+            INDEX idx_instructionmanual_location (location_id),
+            INDEX idx_instructionmanual_set (set_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
         'CREATE TABLE IF NOT EXISTS storage_movements (
             id INT AUTO_INCREMENT PRIMARY KEY,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -560,6 +580,18 @@ function installDatabase(): void
     // stored id, so it never needs an app_settings key that could drift.
     $pdo->prepare(
         "INSERT INTO storage_locations (parent_id, name, location_type) VALUES (NULL, 'Pick Lager', 'pick_lager_root')"
+    )->execute();
+
+    // "Bauanleitungen" is the single top-level root every user-created
+    // instruction-manual location nests under (src/instruction_manuals.php)
+    // — same self-identifying-marker idiom as 'pick_lager_root' above.
+    // Unlike Pick Lager, whose children are only ever created
+    // programmatically, this root's children are freely created by the user
+    // through the normal Location Explorer UI; the root itself just marks
+    // "everything under here is instruction-manual-only storage" for
+    // isLocationInInstructionsSubtree()'s ancestor walk.
+    $pdo->prepare(
+        "INSERT INTO storage_locations (parent_id, name, location_type) VALUES (NULL, 'Bauanleitungen', 'instructions_root')"
     )->execute();
 
     // A fresh install already has the current shape (CREATE TABLE above), so it

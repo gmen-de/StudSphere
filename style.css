@@ -1061,6 +1061,163 @@ button[type='submit'] {
   white-space: nowrap;
 }
 
+/* "Bauanleitungen" (src/instruction_manuals.php) tiles — reuse
+   .location-detail-card's layout, just a booklet cover instead of a part
+   thumbnail plus a percent-complete badge (see .instruction-manual-badge*
+   further below, near .owned-set-total-ring*). */
+.instruction-manual-tile-thumb {
+  width: 5.5rem;
+  height: 5.5rem;
+  color: #94a3b8;
+}
+
+.instruction-manual-tile-add {
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  min-height: 9.5rem;
+  border-style: dashed;
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.04);
+  color: #2563eb;
+  cursor: pointer;
+}
+
+.instruction-manual-tile-add-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.instruction-manual-tile-add-icon svg {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.instruction-manual-tile-add-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.instruction-manual-set-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 12rem;
+  overflow-y: auto;
+  margin: 0.4rem 0;
+}
+
+.instruction-manual-set-result-row,
+.instruction-manual-selected-set {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.6rem;
+  background: #ffffff;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.instruction-manual-set-result-row {
+  width: 100%;
+  cursor: pointer;
+}
+
+.instruction-manual-set-result-row:hover {
+  border-color: #2563eb;
+}
+
+.instruction-manual-selected-set {
+  margin: 0.4rem 0;
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.instruction-manual-set-result-thumb,
+.instruction-manual-selected-set-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  color: #94a3b8;
+}
+
+.instruction-manual-set-result-thumb img,
+.instruction-manual-selected-set-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.instruction-manual-detail-set-link {
+  display: block;
+  margin: 0.5rem 0;
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.instruction-manual-detail-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.instruction-manual-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.instruction-manual-move-picker {
+  flex: 1 1 auto;
+  min-width: 10rem;
+}
+
+.instruction-manual-delete-btn {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+/* Highlights a part row in the manual detail's "Bauteile im Lager" tab
+   whose loose stock doesn't yet cover the set's own need for it. */
+.instruction-manual-part-short {
+  border-color: rgba(220, 38, 38, 0.4);
+}
+
+.instruction-manual-price-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.instruction-manual-price-row h4 {
+  flex: 0 0 auto;
+  min-width: 8rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.instruction-manual-price-row p {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
 .location-add-form-details {
   margin-bottom: 1rem;
   border: 1px solid rgba(148, 163, 184, 0.3);
@@ -4228,6 +4385,50 @@ footer {
   font-weight: 500;
   color: #64748b;
   line-height: 1;
+}
+
+/* "Bauanleitungen" (src/instruction_manuals.php) tile badge — badge-scale
+   variant of the same SVG ring technique as .owned-set-total-ring* above
+   (stroke-dasharray/stroke-dashoffset from circumference = 2*PI*r, built in
+   JS by buildPercentBadge()/instructionRingColorClass() in
+   src/routes/pages.php since there's no per-tile PHP render pass for this
+   list). Reuses .owned-set-total-ring-fg-low/-partial/-complete for the
+   traffic-light stroke color unchanged. */
+.instruction-manual-badge {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  width: 2.1rem;
+  height: 2.1rem;
+}
+
+.instruction-manual-badge-ring {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.instruction-manual-badge-bg {
+  fill: none;
+  stroke: #e2e8f0;
+  stroke-width: 14;
+}
+
+.instruction-manual-badge-fg {
+  fill: none;
+  stroke-width: 14;
+  stroke-linecap: round;
+}
+
+.instruction-manual-badge-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #0f172a;
 }
 
 .owned-set-tab-loading {

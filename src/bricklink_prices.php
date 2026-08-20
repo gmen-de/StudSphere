@@ -88,6 +88,27 @@ function resolveBricklinkItemId(string $setNum): ?int
 }
 
 /**
+ * Same as resolveBricklinkItemId(), for a set's own Instructions catalog
+ * page (?I={set_num}) — BrickLink treats a set's instruction booklet as its
+ * own separate catalog item from the set itself, with its own idItem and its
+ * own price guide, hence the fully separate bricklink_instructions_item_id
+ * column on sets (see refreshBricklinkPriceForSetInstructions()) rather than
+ * reusing bricklink_item_id.
+ */
+function resolveBricklinkInstructionsItemId(string $setNum): ?int
+{
+    $url = 'https://www.bricklink.com/v2/catalog/catalogitem.page?I=' . urlencode($setNum);
+    $html = fetchBricklinkPage($url);
+    if ($html === null) {
+        return null;
+    }
+    if (preg_match('/idItem:\s*(\d+)/', $html, $m)) {
+        return (int) $m[1];
+    }
+    return null;
+}
+
+/**
  * Same as resolveBricklinkItemId(), for a minifig's own BrickLink catalog
  * page (?M=<code>) instead of a set's (?S=<setnum>). The input here is
  * BrickLink's own alphanumeric minifig code (e.g. "sw0001a", minifigs.
@@ -248,6 +269,41 @@ function refreshBricklinkPriceForSet(PDO $pdo, array $set): bool
 }
 
 /**
+ * Instructions counterpart to refreshBricklinkPriceForSet() — resolves (if
+ * needed) and refreshes the bricklink_instructions_* fields via the
+ * Instructions catalog item (?I=) instead of the Set catalog item (?S=), so a
+ * set's booklet gets priced completely independently of the set itself. Same
+ * always-stamp-checked_at-even-on-failure reasoning.
+ */
+function refreshBricklinkPriceForSetInstructions(PDO $pdo, array $set): bool
+{
+    $itemId = $set['bricklink_instructions_item_id'] ?? null;
+    if ($itemId === null) {
+        $itemId = resolveBricklinkInstructionsItemId($set['rebrickable_set_num']);
+        if ($itemId !== null) {
+            $pdo->prepare('UPDATE sets SET bricklink_instructions_item_id = ? WHERE id = ?')->execute([$itemId, $set['id']]);
+        }
+    }
+
+    if ($itemId === null) {
+        $pdo->prepare('UPDATE sets SET bricklink_instructions_price_checked_at = NOW() WHERE id = ?')->execute([$set['id']]);
+        return false;
+    }
+
+    $guide = fetchBricklinkPriceGuide((int) $itemId);
+    if ($guide === null) {
+        $pdo->prepare('UPDATE sets SET bricklink_instructions_price_checked_at = NOW() WHERE id = ?')->execute([$set['id']]);
+        return false;
+    }
+
+    $pdo->prepare(
+        'UPDATE sets SET bricklink_instructions_price_new = ?, bricklink_instructions_price_used = ?, bricklink_instructions_price_currency = ?, bricklink_instructions_price_checked_at = NOW() WHERE id = ?'
+    )->execute([$guide['new']['avgPrice'], $guide['used']['avgPrice'], $guide['currency'], $set['id']]);
+
+    return true;
+}
+
+/**
  * Minifig counterpart to refreshBricklinkPriceForSet() — one extra
  * resolution step first, since a minifig needs BrickLink's own catalog code
  * (minifigs.bricklink_id, e.g. "sw0001a") before its numeric idItem can even
@@ -368,6 +424,69 @@ function stepBricklinkPriceSync(PDO $pdo): void
 
         setAppSetting('bricklink_sync_last_run', date('Y-m-d H:i:s'));
         refreshBricklinkPriceForSet($pdo, $due);
+    } catch (Throwable $e) {
+        // Best-effort background enrichment — swallow everything.
+    }
+}
+
+/**
+ * Instructions counterpart to getNextOwnedSetDueForBricklinkSync() —
+ * deliberately scoped to only sets with at least one instruction_manuals row
+ * (INNER JOIN, not owned_sets): "sets the user actually has a physical
+ * manual for", not the whole collection — priced separately from (and much
+ * more narrowly than) the Set price itself, since owning a set doesn't imply
+ * owning its booklet. Same two-bucket never-checked/oldest-checked priority,
+ * most-recently-added manual instance breaking ties in the never-checked
+ * bucket.
+ */
+function getNextSetDueForInstructionsBricklinkSync(PDO $pdo): ?array
+{
+    $stmt = $pdo->prepare(
+        'SELECT s.id, s.rebrickable_set_num, s.bricklink_instructions_item_id, s.bricklink_instructions_price_checked_at
+         FROM sets s
+         INNER JOIN instruction_manuals im ON im.set_id = s.id
+         WHERE s.bricklink_instructions_price_checked_at IS NULL
+            OR s.bricklink_instructions_price_checked_at < (NOW() - INTERVAL ' . BRICKLINK_SYNC_INTERVAL_DAYS . ' DAY)
+         GROUP BY s.id, s.rebrickable_set_num, s.bricklink_instructions_item_id, s.bricklink_instructions_price_checked_at
+         ORDER BY
+            CASE WHEN s.bricklink_instructions_price_checked_at IS NULL THEN 0 ELSE 1 END,
+            CASE
+                WHEN s.bricklink_instructions_price_checked_at IS NULL THEN -UNIX_TIMESTAMP(MAX(im.created_at))
+                ELSE UNIX_TIMESTAMP(s.bricklink_instructions_price_checked_at)
+            END
+         LIMIT 1'
+    );
+    $stmt->execute();
+    $set = $stmt->fetch();
+    if ($set === false) {
+        return null;
+    }
+    $set['id'] = (int) $set['id'];
+    $set['bricklink_instructions_item_id'] = $set['bricklink_instructions_item_id'] !== null ? (int) $set['bricklink_instructions_item_id'] : null;
+    return $set;
+}
+
+/**
+ * Instructions counterpart to stepBricklinkPriceSync() — own throttle key
+ * ('bricklink_instructions_sync_last_run') and own best-effort
+ * swallow-everything try/catch, kept fully independent of the Set/minifig/
+ * part syncs so none of their backlogs delay each other.
+ */
+function stepBricklinkInstructionsPriceSync(PDO $pdo): void
+{
+    try {
+        $lastRun = getAppSetting('bricklink_instructions_sync_last_run');
+        if ($lastRun !== null && (time() - strtotime($lastRun)) < BRICKLINK_SYNC_MIN_INTERVAL_SECONDS) {
+            return;
+        }
+
+        $due = getNextSetDueForInstructionsBricklinkSync($pdo);
+        if ($due === null) {
+            return;
+        }
+
+        setAppSetting('bricklink_instructions_sync_last_run', date('Y-m-d H:i:s'));
+        refreshBricklinkPriceForSetInstructions($pdo, $due);
     } catch (Throwable $e) {
         // Best-effort background enrichment — swallow everything.
     }

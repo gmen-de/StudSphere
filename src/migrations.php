@@ -833,6 +833,49 @@ function getSchemaMigrations(): array
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
             );
         },
+        43 => function (PDO $pdo): void {
+            // "Bauanleitungen" (src/instruction_manuals.php) — a fixed root,
+            // analogous to 'pick_lager_root' (migration 40), except its
+            // children are freely user-created normal locations rather than
+            // programmatically managed ones; every location in its subtree
+            // is dedicated exclusively to instruction-manual storage
+            // (isLocationInInstructionsSubtree()). Idempotent: a second run
+            // must not create a duplicate root.
+            $existingRoot = $pdo->query(
+                "SELECT id FROM storage_locations WHERE location_type = 'instructions_root' LIMIT 1"
+            )->fetchColumn();
+            if ($existingRoot === false) {
+                $pdo->prepare(
+                    "INSERT INTO storage_locations (parent_id, name, location_type) VALUES (NULL, 'Bauanleitungen', 'instructions_root')"
+                )->execute();
+            }
+
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS instruction_manuals (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    location_id INT NOT NULL,
+                    set_id INT NOT NULL,
+                    condition_grade ENUM(\'mint\',\'near_mint\',\'good\',\'fair\',\'poor\') NOT NULL DEFAULT \'good\',
+                    notes TEXT DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_instructionmanual_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_instructionmanual_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE RESTRICT,
+                    INDEX idx_instructionmanual_location (location_id),
+                    INDEX idx_instructionmanual_set (set_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+
+            // Mirrors sets.bricklink_price_* — see
+            // refreshBricklinkPriceForSetInstructions() (src/bricklink_prices.php).
+            // BrickLink treats a set's own catalog entry (S=) and its
+            // Instructions entry (I=) as two separate price guides.
+            addColumnIfMissing($pdo, 'sets', 'bricklink_instructions_item_id', 'INT DEFAULT NULL');
+            addColumnIfMissing($pdo, 'sets', 'bricklink_instructions_price_new', 'DECIMAL(10,2) DEFAULT NULL');
+            addColumnIfMissing($pdo, 'sets', 'bricklink_instructions_price_used', 'DECIMAL(10,2) DEFAULT NULL');
+            addColumnIfMissing($pdo, 'sets', 'bricklink_instructions_price_currency', 'VARCHAR(10) DEFAULT NULL');
+            addColumnIfMissing($pdo, 'sets', 'bricklink_instructions_price_checked_at', 'TIMESTAMP NULL DEFAULT NULL');
+        },
     ];
 }
 
@@ -948,7 +991,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 42;
+const CURRENT_SCHEMA_VERSION = 43;
 
 function getInstalledSchemaVersion(): int
 {

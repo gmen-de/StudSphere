@@ -698,6 +698,48 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
         $ownedSetId = $ownedSetIdValue !== false ? (int) $ownedSetIdValue : null;
     }
 
+    // Locations under "Bauanleitungen" (location_type='instructions_root')
+    // are dedicated exclusively to instruction manuals — never mixed with
+    // storage_items/minifig_storage_items — so this short-circuits into its
+    // own response shape entirely, skipping the parts/minifig assembly below.
+    if (isLocationInInstructionsSubtree($pdo, $locationId)) {
+        $instructionManuals = getInstructionManualTilesForLocation($pdo, $locationId, getLocale());
+
+        $manualLocationInfoCache = [];
+        foreach ($instructionManuals as &$manual) {
+            $manualLocationId = $manual['location_id'];
+            if ($manualLocationId === $locationId) {
+                $manual['location_label'] = null;
+            } else {
+                if (!array_key_exists($manualLocationId, $manualLocationInfoCache)) {
+                    $ancestors = getStorageLocationAncestors($manualLocationId);
+                    $rootIndex = null;
+                    foreach ($ancestors as $i => $ancestor) {
+                        if ($ancestor['id'] === $locationId) {
+                            $rootIndex = $i;
+                            break;
+                        }
+                    }
+                    $relevant = $rootIndex !== null ? array_slice($ancestors, $rootIndex + 1) : $ancestors;
+                    $manualLocationInfoCache[$manualLocationId] = implode(' -> ', array_column($relevant, 'name'));
+                }
+                $manual['location_label'] = $manualLocationInfoCache[$manualLocationId];
+            }
+        }
+        unset($manual);
+
+        echo json_encode([
+            'isInstructionsLocation' => true,
+            'instructionManuals' => $instructionManuals,
+            'categories' => [],
+            'minifigs' => [],
+            'ldraw' => null,
+            'readOnly' => false,
+            'ownedSetId' => null,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     $content = getLocationContentRecursive($pdo, $locationId);
 
     $allPartsFlat = [];
@@ -1970,6 +2012,207 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'refre
             'priceUsed' => $refreshedSet['bricklink_price_used'],
             'currency' => $refreshedSet['bricklink_price_currency'],
             'checkedAt' => formatDate($refreshedSet['bricklink_price_checked_at'], true),
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// "Bauanleitungen" (src/instruction_manuals.php) — the add-manual mini-form's
+// set search. No existing lightweight set-search AJAX endpoint to reuse (the
+// owned-set wizard always already has its set_id from set_detail.php's own
+// "add to collection" button, never searches by name/number itself), so this
+// is a thin wrapper around the same searchSets() the full catalog browser
+// uses, capped to a small page for a popover.
+if (isset($_GET['action']) && $_GET['action'] === 'search_sets_for_instructions') {
+    header('Content-Type: application/json');
+    $instructionsSetQuery = trim((string) ($_GET['q'] ?? ''));
+    $instructionsSetResults = $instructionsSetQuery !== ''
+        ? searchSets($pdo, $instructionsSetQuery, [], 1, 20)['items']
+        : [];
+    echo json_encode(['items' => $instructionsSetResults], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// Adds one physical instruction-manual instance. Best-effort, synchronous
+// BrickLink price refresh for both catalog entries (the Set itself and its
+// separate Instructions catalog item) if either has never been checked —
+// mirrors add_minifig_stock's own unconditional refreshBricklinkPriceForMinifig()
+// call, per the same prior "adding something behaves like a manual refresh
+// right away" direction. Never blocks the add on failure.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_instruction_manual') {
+    header('Content-Type: application/json');
+    try {
+        $newManualLocationId = (int) ($_POST['location_id'] ?? 0);
+        $newManualSetId = (int) ($_POST['set_id'] ?? 0);
+        $newManualConditionGrade = (string) ($_POST['condition_grade'] ?? '');
+        $newManualNotesRaw = trim((string) ($_POST['notes'] ?? ''));
+        $newManualNotes = $newManualNotesRaw !== '' ? $newManualNotesRaw : null;
+
+        $newManualLocation = $newManualLocationId > 0 ? getStorageLocation($newManualLocationId) : null;
+        if ($newManualLocation === null || !isLocationInInstructionsSubtree($pdo, $newManualLocationId)) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+        $newManualSet = $newManualSetId > 0 ? getSetById($pdo, $newManualSetId) : null;
+        if ($newManualSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        if (!in_array($newManualConditionGrade, INSTRUCTION_MANUAL_CONDITION_GRADES, true)) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        $newManualId = addInstructionManual($newManualLocationId, $newManualSetId, $newManualConditionGrade, $newManualNotes);
+
+        try {
+            if ($newManualSet['bricklink_item_id'] === null && $newManualSet['bricklink_price_checked_at'] === null) {
+                refreshBricklinkPriceForSet($pdo, $newManualSet);
+            }
+            if ($newManualSet['bricklink_instructions_item_id'] === null && $newManualSet['bricklink_instructions_price_checked_at'] === null) {
+                refreshBricklinkPriceForSetInstructions($pdo, $newManualSet);
+            }
+        } catch (Throwable $e) {
+            // Never blocks the add.
+        }
+
+        echo json_encode([
+            'success' => true,
+            'id' => $newManualId,
+            'message' => t('instruction_manual_add_success'),
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => t('instruction_manual_add_failed', ['message' => $e->getMessage()])], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_instruction_manual') {
+    header('Content-Type: application/json');
+    try {
+        $updateManualId = (int) ($_POST['instance_id'] ?? 0);
+        $updateManualConditionGrade = (string) ($_POST['condition_grade'] ?? '');
+        $updateManualNotesRaw = trim((string) ($_POST['notes'] ?? ''));
+        $updateManualNotes = $updateManualNotesRaw !== '' ? $updateManualNotesRaw : null;
+
+        if ($updateManualId <= 0 || getInstructionManualById($pdo, $updateManualId) === null) {
+            throw new RuntimeException(t('instruction_manual_not_found'));
+        }
+        if (!in_array($updateManualConditionGrade, INSTRUCTION_MANUAL_CONDITION_GRADES, true)) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        updateInstructionManual($updateManualId, $updateManualConditionGrade, $updateManualNotes);
+
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// Rejects a target outside the instructions subtree — a manual filed there
+// would become invisible, since action=location_content's response branches
+// entirely on isLocationInInstructionsSubtree().
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'move_instruction_manual') {
+    header('Content-Type: application/json');
+    try {
+        $moveManualId = (int) ($_POST['instance_id'] ?? 0);
+        $moveManualNewLocationId = (int) ($_POST['new_location_id'] ?? 0);
+
+        if ($moveManualId <= 0 || getInstructionManualById($pdo, $moveManualId) === null) {
+            throw new RuntimeException(t('instruction_manual_not_found'));
+        }
+        if ($moveManualNewLocationId <= 0 || !isLocationInInstructionsSubtree($pdo, $moveManualNewLocationId)) {
+            throw new RuntimeException(t('instruction_manual_move_outside_subtree'));
+        }
+
+        moveInstructionManual($moveManualId, $moveManualNewLocationId);
+
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_instruction_manual') {
+    header('Content-Type: application/json');
+    try {
+        $deleteManualId = (int) ($_POST['instance_id'] ?? 0);
+        if ($deleteManualId <= 0 || getInstructionManualById($pdo, $deleteManualId) === null) {
+            throw new RuntimeException(t('instruction_manual_not_found'));
+        }
+
+        deleteInstructionManual($deleteManualId);
+
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// Full detail-modal payload: the manual itself, a link to the catalog set,
+// the loose-parts breakdown for that set, and both BrickLink price blocks
+// (Set + Instructions catalog entries, priced completely independently).
+if (isset($_GET['action']) && $_GET['action'] === 'instruction_manual_detail') {
+    header('Content-Type: application/json');
+    $manualDetailId = (int) ($_GET['instance_id'] ?? 0);
+    $manualDetail = $manualDetailId > 0 ? getInstructionManualById($pdo, $manualDetailId) : null;
+    if ($manualDetail === null) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => t('instruction_manual_not_found')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $manualDetailSet = getSetById($pdo, $manualDetail['set_id']);
+    $manualDetailInventoryId = getSetInventoryId($pdo, $manualDetail['set_num']);
+    $manualDetailParts = $manualDetailInventoryId !== null
+        ? getInstructionManualPartsBreakdown($pdo, $manualDetailInventoryId, getLocale())
+        : [];
+    $manualDetailSummary = $manualDetailInventoryId !== null
+        ? getSetInventorySummary($pdo, $manualDetailInventoryId, getLocale())
+        : null;
+
+    echo json_encode([
+        'success' => true,
+        'manual' => $manualDetail,
+        'set' => $manualDetailSet,
+        'parts' => $manualDetailParts,
+        'summary' => $manualDetailSummary,
+        'bricklinkSetUrl' => 'https://www.bricklink.com/v2/catalog/catalogitem.page?S=' . urlencode($manualDetail['set_num']),
+        'bricklinkInstructionsUrl' => 'https://www.bricklink.com/v2/catalog/catalogitem.page?I=' . urlencode($manualDetail['set_num']),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// The detail modal's manual "refresh price" button for the Instructions
+// catalog entry specifically — bypasses stepBricklinkInstructionsPriceSync()'s
+// throttle the same way refresh_bricklink_price already does for the Set
+// entry, and bumps the same last-run marker so the automatic sync doesn't
+// immediately re-fetch it again right after.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'refresh_bricklink_instructions_price') {
+    header('Content-Type: application/json');
+    try {
+        $instructionsRefreshSetId = (int) ($_POST['set_id'] ?? 0);
+        $instructionsRefreshSet = getSetById($pdo, $instructionsRefreshSetId);
+        if ($instructionsRefreshSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        setAppSetting('bricklink_instructions_sync_last_run', date('Y-m-d H:i:s'));
+        refreshBricklinkPriceForSetInstructions($pdo, $instructionsRefreshSet);
+        $refreshedInstructionsSet = getSetById($pdo, $instructionsRefreshSetId);
+        echo json_encode([
+            'success' => true,
+            'priceNew' => $refreshedInstructionsSet['bricklink_instructions_price_new'],
+            'priceUsed' => $refreshedInstructionsSet['bricklink_instructions_price_used'],
+            'currency' => $refreshedInstructionsSet['bricklink_instructions_price_currency'],
+            'checkedAt' => formatDate($refreshedInstructionsSet['bricklink_instructions_price_checked_at'], true),
         ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);

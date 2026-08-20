@@ -290,7 +290,9 @@ function getSetById(PDO $pdo, int $id): ?array
 {
     $stmt = $pdo->prepare(
         'SELECT s.id, s.rebrickable_set_num, s.name, s.year, s.year_retired, s.num_parts, s.local_image_path AS thumbnail, th.theme_id, th.name AS theme_name,
-                s.bricklink_item_id, s.bricklink_price_new, s.bricklink_price_used, s.bricklink_price_currency, s.bricklink_price_checked_at
+                s.bricklink_item_id, s.bricklink_price_new, s.bricklink_price_used, s.bricklink_price_currency, s.bricklink_price_checked_at,
+                s.bricklink_instructions_item_id, s.bricklink_instructions_price_new, s.bricklink_instructions_price_used,
+                s.bricklink_instructions_price_currency, s.bricklink_instructions_price_checked_at
          FROM sets s
          LEFT JOIN themes th ON th.theme_id = s.theme
          WHERE s.id = ?'
@@ -306,6 +308,9 @@ function getSetById(PDO $pdo, int $id): ?array
     $set['bricklink_item_id'] = $set['bricklink_item_id'] !== null ? (int) $set['bricklink_item_id'] : null;
     $set['bricklink_price_new'] = $set['bricklink_price_new'] !== null ? (float) $set['bricklink_price_new'] : null;
     $set['bricklink_price_used'] = $set['bricklink_price_used'] !== null ? (float) $set['bricklink_price_used'] : null;
+    $set['bricklink_instructions_item_id'] = $set['bricklink_instructions_item_id'] !== null ? (int) $set['bricklink_instructions_item_id'] : null;
+    $set['bricklink_instructions_price_new'] = $set['bricklink_instructions_price_new'] !== null ? (float) $set['bricklink_instructions_price_new'] : null;
+    $set['bricklink_instructions_price_used'] = $set['bricklink_instructions_price_used'] !== null ? (float) $set['bricklink_instructions_price_used'] : null;
     return $set;
 }
 

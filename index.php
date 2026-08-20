@@ -20,6 +20,7 @@ require_once __DIR__ . '/src/bricklink_prices.php';
 require_once __DIR__ . '/src/instructions.php';
 require_once __DIR__ . '/src/ldraw.php';
 require_once __DIR__ . '/src/pick_lists.php';
+require_once __DIR__ . '/src/instruction_manuals.php';
 require_once __DIR__ . '/src/owned_sets.php';
 require_once __DIR__ . '/src/owned_set_wizard.php';
 require_once __DIR__ . '/src/minifigs.php';
@@ -116,6 +117,7 @@ if (partTranslationsSyncPending()) {
 // instead of a cron/worker.
 stepBricklinkPriceSync($pdo);
 stepBricklinkMinifigPriceSync($pdo);
+stepBricklinkInstructionsPriceSync($pdo);
 // Same idea, per part+color instead of per set/minifig — see
 // stepBricklinkPartPriceSync()'s own doc comment for why it also shares its
 // throttle state with bin/bricklink_part_price_sync.php, a real crontab
