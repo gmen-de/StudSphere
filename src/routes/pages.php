@@ -2211,16 +2211,37 @@ SCRIPT;
     exit;
 }
 
-// "Bauen" nav dropdown entry — getBuildableMinifigs() (src/build.php) does
-// all the work, this just renders it as a ranked table. Each row opens the
-// dedicated "Bauen" modal (renderBuildMinifigModal(), .build-minifig-row
-// click delegation defined in that same function) — not the generic
-// catalog minifig-detail modal these cards would otherwise open elsewhere,
-// since this page's whole point is a build action, not just viewing.
+// "Bauen" nav dropdown entry — getBuildableMinifigsResults() (src/build.php)
+// reads a tick-scanned cache (buildable_minifigs_cache), this just renders
+// it as a ranked table. Each row opens the dedicated "Bauen" modal
+// (renderBuildMinifigModal(), .build-minifig-row click delegation defined
+// in that same function) — not the generic catalog minifig-detail modal
+// these cards would otherwise open elsewhere, since this page's whole point
+// is a build action, not just viewing.
 if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
-    $buildableMinifigs = getBuildableMinifigs($pdo, getLocale());
+    $buildMinifigsMeta = getBuildableMinifigsCacheMeta();
+    $buildMinifigsBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_build_minifigs'), 'url' => null]];
+
+    // No configure step (unlike build_sets — this scan has no theme/year
+    // scope to pick, it's always the whole catalog): a fresh install or an
+    // explicit refresh click goes straight into the scan overlay.
+    if (isset($_GET['scan']) || $buildMinifigsMeta['computedAt'] === null) {
+        $content = '<h1>' . htmlspecialchars(t('nav_build_minifigs')) . '</h1>';
+        $content .= renderBuildMinifigsScanOverlay();
+        renderApp(t('nav_build_minifigs'), $content, $user, computeAppStats($pdo), $buildMinifigsBreadcrumbs);
+        exit;
+    }
+
+    $buildableMinifigs = getBuildableMinifigsResults($pdo);
 
     $content = '<h1>' . htmlspecialchars(t('nav_build_minifigs')) . '</h1>';
+    $content .= '<p class="hint">' . htmlspecialchars(t('build_sets_last_updated', ['date' => formatDate($buildMinifigsMeta['computedAt'], true)])) . '</p>';
+    if ($buildMinifigsMeta['stale']) {
+        $content .= '<section class="card build-sets-stale-banner">';
+        $content .= '<p>' . htmlspecialchars(t('build_sets_stale_banner')) . '</p>';
+        $content .= '<a class="filter-apply-button" href="?page=build_minifigs&scan=1">' . htmlspecialchars(t('build_sets_refresh_button')) . '</a>';
+        $content .= '</section>';
+    }
     if (empty($buildableMinifigs)) {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('build_minifigs_empty')) . '</p></section>';
     } else {
@@ -2232,9 +2253,9 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_minifigs') {
         // full, unfiltered candidate list, same convention as that page —
         // not re-scoped as other filters get applied. The whole list is
         // already fully materialized in PHP (no pagination here), so
-        // filtering happens in-memory after getBuildableMinifigs() rather
-        // than pushing it into that function's own SQL, which already does
-        // a non-trivial multi-step computation of its own.
+        // filtering happens in-memory after getBuildableMinifigsResults()
+        // rather than pushing it into a query — that function is already
+        // just a plain cache read, no benefit to complicating it further.
         $buildSearchQuery = trim((string) ($_GET['q'] ?? ''));
         $selectedThemeId = isset($_GET['theme']) && $_GET['theme'] !== '' ? (int) $_GET['theme'] : null;
         $priceFrom = isset($_GET['price_from']) && $_GET['price_from'] !== '' ? (float) $_GET['price_from'] : null;

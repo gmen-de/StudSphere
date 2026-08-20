@@ -140,6 +140,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'build
     exit;
 }
 
+// Same tick-based scan pattern as build_sets_scan_tick above, for "Baubare
+// Minifiguren" (src/build.php) — always the whole catalog, no scope to
+// carry along.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'build_minifigs_scan_tick') {
+    header('Content-Type: application/json');
+    try {
+        $state = $_SESSION['build_minifigs_scan_state'] ?? null;
+        if (!is_array($state)) {
+            $state = initBuildMinifigsScanState($pdo);
+        }
+
+        $result = stepBuildMinifigsScan($pdo, $state);
+        if ($result['done']) {
+            unset($_SESSION['build_minifigs_scan_state']);
+        } else {
+            $_SESSION['build_minifigs_scan_state'] = $state;
+        }
+
+        echo json_encode([
+            'processed' => $result['processed'],
+            'total' => $result['total'],
+            'percent' => $result['total'] > 0 ? (int) round(($result['processed'] / $result['total']) * 100) : 100,
+            'done' => $result['done'],
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        unset($_SESSION['build_minifigs_scan_state']);
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => t('import_error', ['message' => $e->getMessage()])], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 $collectionMessage = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_collection_settings') {
     $newCollectionName = trim($_POST['collection_name'] ?? '');

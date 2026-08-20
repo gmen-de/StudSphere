@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/settings.php';
 require_once __DIR__ . '/owned_sets.php';
 require_once __DIR__ . '/build_sets.php';
+require_once __DIR__ . '/build.php';
 
 /**
  * Maps the stats-bar figures to their app_settings cache keys. These are the
@@ -93,10 +94,12 @@ function refreshAppStatsCache(PDO $pdo): array
     }
 
     // Every storage_items/owned_sets write already calls this function (see
-    // this file's own doc comment) — piggybacking the "Baubare Sets" cache's
-    // own staleness flag on that single hook point covers every write site
-    // without touching each one individually (src/build_sets.php).
+    // this file's own doc comment) — piggybacking the "Baubare Sets"/
+    // "Baubare Minifiguren" caches' own staleness flags on that single hook
+    // point covers every write site without touching each one individually
+    // (src/build_sets.php, src/build.php).
     markBuildableSetsCacheStale();
+    markBuildableMinifigsCacheStale();
 
     return $stats;
 }

@@ -284,8 +284,8 @@ function getOwnedMinifigThemeTree(PDO $pdo): array
 
 /**
  * Per-minifig catalog facets for the "Baubare Minifiguren" filter sidebar
- * (getBuildableMinifigs(), src/build.php): every distinct theme the minifig
- * appears under, plus its earliest set-appearance year. A minifig has no
+ * (getBuildableMinifigsResults(), src/build.php): every distinct theme the
+ * minifig appears under, plus its earliest set-appearance year. A minifig has no
  * theme or year of its own (see getMinifigThemeTree()'s doc comment) — both
  * are derived through the sets it appears in, so one appearing in sets from
  * several themes carries all of them (same "counted under each, expected

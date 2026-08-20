@@ -369,6 +369,8 @@ return [
     'build_sets_start_scan_button' => 'Suche starten',
     'build_sets_scan_heading' => 'Sets werden gescannt …',
     'build_sets_scan_status' => '{processed} / {total} Sets',
+    'build_minifigs_scan_heading' => 'Minifiguren werden gescannt …',
+    'build_minifigs_scan_status' => '{processed} / {total} Minifiguren',
     'build_sets_last_updated' => 'Zuletzt aktualisiert: {date}',
     'build_sets_stale_banner' => 'Der lose Bauteilbestand hat sich seit dem letzten Scan geändert.',
     'build_sets_refresh_button' => 'Jetzt aktualisieren',

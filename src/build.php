@@ -8,127 +8,58 @@ require_once __DIR__ . '/icons.php';
 require_once __DIR__ . '/sets.php';
 require_once __DIR__ . '/minifigs.php';
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/settings.php';
 
 /**
- * Catalog minifigs the user could assemble from loose parts stock
- * (storage_items — ordinary bricks and loose minifig parts alike, both live
- * in the same table, see storage_items' own doc comment) — powers the
- * "Bauen" nav dropdown's "Baubare Minifiguren" entry.
+ * "Baubare Minifiguren" (?page=build_minifigs, src/routes/pages.php) — for
+ * every catalog minifig, how many complete copies could be assembled from
+ * current loose parts stock right now. Used to be a live per-request
+ * computation (a two-phase SQL+PHP scan, assumed — per this function's own
+ * former doc comment — to stay under ~1s against "a handful of hundred"
+ * candidates out of the ~80k minifig-inventory rows). That assumption broke
+ * down as the collection's loose stock grew: more minifigs now pass the
+ * cheap "own at least one of everything" prefilter than originally measured,
+ * ballooning the expensive per-candidate getSetPartsList() loop and hanging
+ * the whole page (confirmed live: a 30s+ request with no response at all).
  *
- * Two-phase to stay fast against the whole catalog (~80k minifig-inventory
- * rows as of this writing, confirmed via a live timed test — a single
- * candidate query plus a handful of getSetPartsList() calls finishes in
- * ~1s, well inside shared-hosting request timeouts):
- *  1. One SQL query finds candidates whose every non-spare required part+
- *     color has *some* stock (not necessarily enough) — a cheap necessary
- *     condition for buildable > 0 that prunes the ~80k rows down to a
- *     handful of hundred real candidates before any per-figure work starts.
- *  2. Only for those candidates: getSetPartsList() (src/sets.php, same
- *     function action=minifig_detail already uses for a minifig's own BOM)
- *     gives the exact per-part quantities, compared against a stock map
- *     built once upfront — no per-candidate stock query.
- *
- * Stock counts storage_items.quantity minus damaged_quantity (only intact
- * stock is usable) and deliberately excludes spare_quantity (spares aren't
- * "free" stock, same convention getOwnedSetCompleteness() already uses).
- *
- * $buildable = how many complete copies are assembleable right now (the
- * bottleneck part's floor(stock / needed-per-copy) across every required
- * part). $missing = total individual pieces still short of a single first
- * copy (sum of max(0, needed - have) per part) — deliberately NOT "missing
- * for one more beyond what's already buildable": that alternative can
- * mathematically never read 0 (there's always something short of an
- * *additional* copy), which misleadingly hid the real answer to "is there
- * a figure I already have everything for" — yes, whenever $missing is 0,
- * exactly the same condition as $buildable >= 1.
- *
- * Sorted by BrickLink price (bricklink_price_used — a hand-assembled figure
- * realistically compares to the used market, not factory-sealed "new")
- * descending, unpriced ones last, $missing ascending as tiebreak.
- * $buildable is returned but deliberately not part of the sort — the user
- * wants value first, buildability is just supporting info per row.
+ * Same fix "Baubare Sets" already needed for the identical reason
+ * (buildable_sets_cache/_staging, src/build_sets.php) — a tick-based scan
+ * into buildable_minifigs_cache, read back here without ever recomputing
+ * live. Only the two numbers that actually require the expensive per-
+ * candidate work (buildable, missing) are cached; everything else the page
+ * needs (name/thumbnail/price, theme/year facets) is joined/derived fresh at
+ * read time, same as buildable_sets_cache not storing display info either.
  *
  * @return array<int, array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, buildable:int, missing:int, theme_ids:int[], theme_path:string, year:?int, bricklink_price_used:?float, bricklink_price_currency:?string, bricklink_price_checked_at:?string}>
  */
-function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
+function getBuildableMinifigsResults(PDO $pdo): array
 {
-    // Excludes owned_set-type locations, same as getPartStock() — those hold
-    // parts already materialized into a built/owned set's inventory, not
-    // loose stock free to consume. Omitting this filter previously let a
-    // part "count" as available stock here while getPartStock() (used by
-    // the actual "Bauen" modal and buildMinifigFromStock()'s own re-check)
-    // correctly excluded it, so a minifig could show missing=0 in this list
-    // while the modal — using the real, consumable stock — still showed a
-    // shortfall.
-    $stock = getLooseStockMap($pdo);
-    if (empty($stock)) {
-        return [];
-    }
-
-    // fig_num = the minifig's own pseudo "set number" for its constituent-
-    // parts inventory (see getMinifigInventoryId()'s doc comment) — the
-    // INNER JOIN against minifigs.fig_num already scopes this to minifig
-    // inventories only, a real Rebrickable set number can never coincide
-    // with a "fig-NNNNNN" string.
-    $candidateStmt = $pdo->query(
-        "SELECT ri.set_num AS fig_num, m.id AS minifig_id, m.name, m.local_image_path AS thumbnail,
-                m.bricklink_price_used, m.bricklink_price_currency, m.bricklink_price_checked_at,
-                COUNT(DISTINCT CONCAT(ip.part_id,':',c.id)) AS total_pairs,
-                COUNT(DISTINCT CASE WHEN si.part_id IS NOT NULL THEN CONCAT(ip.part_id,':',c.id) END) AS matched_pairs
-         FROM inventory_parts ip
-         INNER JOIN rebrickable_inventories ri ON ri.inventory_id = ip.inventory_id
-         INNER JOIN minifigs m ON m.fig_num = ri.set_num
-         LEFT JOIN colors c ON c.color_id = ip.color_id
-         LEFT JOIN (
-                SELECT DISTINCT si2.part_id, si2.color_id
-                FROM storage_items si2
-                INNER JOIN storage_locations sl2 ON sl2.id = si2.location_id
-                WHERE si2.quantity > 0 AND (sl2.location_type IS NULL OR sl2.location_type != 'owned_set')
-             ) si ON si.part_id = ip.part_id AND si.color_id = c.id
-         WHERE ip.is_spare = 0
-         GROUP BY ri.set_num, m.id, m.name, m.local_image_path,
-                  m.bricklink_price_used, m.bricklink_price_currency, m.bricklink_price_checked_at
-         HAVING total_pairs = matched_pairs"
-    );
+    $rows = $pdo->query(
+        'SELECT bmc.minifig_id, bmc.buildable, bmc.missing,
+                m.fig_num, m.name, m.local_image_path AS thumbnail,
+                m.bricklink_price_used, m.bricklink_price_currency, m.bricklink_price_checked_at
+         FROM buildable_minifigs_cache bmc
+         INNER JOIN minifigs m ON m.id = bmc.minifig_id'
+    )->fetchAll();
 
     $results = [];
-    foreach ($candidateStmt->fetchAll() as $candidate) {
-        $inventoryId = getMinifigInventoryId($pdo, $candidate['fig_num']);
-        if ($inventoryId === null) {
-            continue;
-        }
-        $parts = getSetPartsList($pdo, $inventoryId, false, $locale);
-
-        $buildable = null;
-        foreach ($parts as $part) {
-            if ($part['quantity'] <= 0) {
-                continue;
-            }
-            $have = $stock[$part['part_id'] . ':' . $part['color_id']] ?? 0;
-            $ratio = intdiv($have, $part['quantity']);
-            $buildable = $buildable === null ? $ratio : min($buildable, $ratio);
-        }
-        $buildable ??= 0;
-
-        $missing = 0;
-        foreach ($parts as $part) {
-            $have = $stock[$part['part_id'] . ':' . $part['color_id']] ?? 0;
-            $missing += max(0, $part['quantity'] - $have);
-        }
-
+    foreach ($rows as $row) {
         $results[] = [
-            'minifig_id' => (int) $candidate['minifig_id'],
-            'fig_num' => $candidate['fig_num'],
-            'name' => $candidate['name'],
-            'thumbnail' => $candidate['thumbnail'],
-            'buildable' => $buildable,
-            'missing' => $missing,
-            'bricklink_price_used' => $candidate['bricklink_price_used'] !== null ? (float) $candidate['bricklink_price_used'] : null,
-            'bricklink_price_currency' => $candidate['bricklink_price_currency'],
-            'bricklink_price_checked_at' => $candidate['bricklink_price_checked_at'],
+            'minifig_id' => (int) $row['minifig_id'],
+            'fig_num' => $row['fig_num'],
+            'name' => $row['name'],
+            'thumbnail' => $row['thumbnail'],
+            'buildable' => (int) $row['buildable'],
+            'missing' => (int) $row['missing'],
+            'bricklink_price_used' => $row['bricklink_price_used'] !== null ? (float) $row['bricklink_price_used'] : null,
+            'bricklink_price_currency' => $row['bricklink_price_currency'],
+            'bricklink_price_checked_at' => $row['bricklink_price_checked_at'],
         ];
     }
 
+    // Same theme/year facet lookup and price/missing sort as the original
+    // live version — this part was never the bottleneck (already batched
+    // into one query for the whole candidate list).
     $facets = getMinifigCatalogFacetsMap($pdo, array_column($results, 'minifig_id'));
     foreach ($results as &$result) {
         $facet = $facets[$result['minifig_id']] ?? ['theme_ids' => [], 'theme_path' => '', 'year' => null];
@@ -151,6 +82,269 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
     return $results;
 }
 
+const BUILD_MINIFIGS_SCAN_BATCH_SIZE = 150;
+const BUILD_MINIFIGS_SCAN_TIME_BUDGET_SECONDS = 4.0;
+
+const BUILD_MINIFIGS_CACHE_COMPUTED_AT_KEY = 'buildable_minifigs_cache_computed_at';
+const BUILD_MINIFIGS_CACHE_STALE_KEY = 'buildable_minifigs_cache_stale';
+
+/**
+ * Same hook-point convention as markBuildableSetsCacheStale()
+ * (src/build_sets.php), called from the same refreshAppStatsCache()
+ * (src/stats.php) after every storage_items-affecting write. Only flips the
+ * flag if a cache already exists — a fresh install with nothing scanned yet
+ * has nothing to mark stale.
+ */
+function markBuildableMinifigsCacheStale(): void
+{
+    if (getAppSetting(BUILD_MINIFIGS_CACHE_COMPUTED_AT_KEY) !== null) {
+        setAppSetting(BUILD_MINIFIGS_CACHE_STALE_KEY, '1');
+    }
+}
+
+/**
+ * @return array{computedAt: ?string, stale: bool}
+ */
+function getBuildableMinifigsCacheMeta(): array
+{
+    return [
+        'computedAt' => getAppSetting(BUILD_MINIFIGS_CACHE_COMPUTED_AT_KEY),
+        'stale' => getAppSetting(BUILD_MINIFIGS_CACHE_STALE_KEY) === '1',
+    ];
+}
+
+/**
+ * One-time setup for a scan — the same cheap SQL prefilter the old live
+ * function used (every non-spare required part+color has *some* stock,
+ * prunes the ~80k minifig-inventory rows down to real candidates before any
+ * per-figure work starts) plus the loose-stock map, both computed once and
+ * reused by every tick.
+ *
+ * @return array the scan state, stored in $_SESSION by the caller
+ */
+function initBuildMinifigsScanState(PDO $pdo): array
+{
+    $stock = getLooseStockMap($pdo);
+
+    // fig_num = the minifig's own pseudo "set number" for its constituent-
+    // parts inventory (see getMinifigInventoryId()'s doc comment) — the
+    // INNER JOIN against minifigs.fig_num already scopes this to minifig
+    // inventories only, a real Rebrickable set number can never coincide
+    // with a "fig-NNNNNN" string.
+    $candidateStmt = $pdo->query(
+        "SELECT ri.set_num AS fig_num, m.id AS minifig_id,
+                COUNT(DISTINCT CONCAT(ip.part_id,':',c.id)) AS total_pairs,
+                COUNT(DISTINCT CASE WHEN si.part_id IS NOT NULL THEN CONCAT(ip.part_id,':',c.id) END) AS matched_pairs
+         FROM inventory_parts ip
+         INNER JOIN rebrickable_inventories ri ON ri.inventory_id = ip.inventory_id
+         INNER JOIN minifigs m ON m.fig_num = ri.set_num
+         LEFT JOIN colors c ON c.color_id = ip.color_id
+         LEFT JOIN (
+                SELECT DISTINCT si2.part_id, si2.color_id
+                FROM storage_items si2
+                INNER JOIN storage_locations sl2 ON sl2.id = si2.location_id
+                WHERE si2.quantity > 0 AND (sl2.location_type IS NULL OR sl2.location_type != 'owned_set')
+             ) si ON si.part_id = ip.part_id AND si.color_id = c.id
+         WHERE ip.is_spare = 0
+         GROUP BY ri.set_num, m.id
+         HAVING total_pairs = matched_pairs"
+    );
+
+    $candidates = [];
+    foreach ($candidateStmt->fetchAll() as $row) {
+        $candidates[] = ['minifig_id' => (int) $row['minifig_id'], 'fig_num' => $row['fig_num']];
+    }
+
+    $pdo->exec('TRUNCATE TABLE buildable_minifigs_cache_staging');
+
+    return [
+        'candidates' => $candidates,
+        'cursor' => 0,
+        'total' => count($candidates),
+        'stock' => $stock,
+    ];
+}
+
+/**
+ * One bounded tick — same batch-size/time-budget/staging-table pattern as
+ * stepBuildSetsScan() (src/build_sets.php). Resolves inventory ids and
+ * fetches parts for the whole batch of candidates in two queries (not one
+ * getMinifigInventoryId()+getSetPartsList() pair per candidate like the old
+ * live version did) — that per-candidate N+1 query pattern was the actual
+ * mechanism behind the page hanging, so the scan can't just replay it on a
+ * slower schedule.
+ *
+ * @return array{processed:int, total:int, done:bool}
+ */
+function stepBuildMinifigsScan(PDO $pdo, array &$state): array
+{
+    $startedAt = microtime(true);
+    $cursor = $state['cursor'];
+    $total = $state['total'];
+    $stock = $state['stock'];
+
+    $batch = [];
+    $processedThisTick = 0;
+    while (
+        $cursor < $total
+        && $processedThisTick < BUILD_MINIFIGS_SCAN_BATCH_SIZE
+        && (microtime(true) - $startedAt) < BUILD_MINIFIGS_SCAN_TIME_BUDGET_SECONDS
+    ) {
+        $batch[] = $state['candidates'][$cursor];
+        $cursor++;
+        $processedThisTick++;
+    }
+
+    if (!empty($batch)) {
+        $figNums = array_column($batch, 'fig_num');
+        $figPlaceholders = implode(',', array_fill(0, count($figNums), '?'));
+
+        // Latest inventory version per fig_num, batched — same "latest
+        // version wins" join stepBuildSetsScan() uses for sets.
+        $invStmt = $pdo->prepare(
+            "SELECT ri.set_num, ri.inventory_id
+             FROM rebrickable_inventories ri
+             INNER JOIN (
+                 SELECT set_num, MAX(version) AS max_version
+                 FROM rebrickable_inventories
+                 WHERE set_num IN ($figPlaceholders)
+                 GROUP BY set_num
+             ) latest ON latest.set_num = ri.set_num AND latest.max_version = ri.version"
+        );
+        $invStmt->execute($figNums);
+        $inventoryIdByFigNum = [];
+        foreach ($invStmt->fetchAll() as $row) {
+            $inventoryIdByFigNum[$row['set_num']] = (int) $row['inventory_id'];
+        }
+
+        $inventoryIds = array_values($inventoryIdByFigNum);
+        $partsByInventory = [];
+        if (!empty($inventoryIds)) {
+            $invPlaceholders = implode(',', array_fill(0, count($inventoryIds), '?'));
+            $partsStmt = $pdo->prepare(
+                "SELECT ip.inventory_id, ip.part_id, c.id AS color_id, SUM(ip.quantity) AS qty
+                 FROM inventory_parts ip
+                 LEFT JOIN colors c ON c.color_id = ip.color_id
+                 WHERE ip.inventory_id IN ($invPlaceholders) AND ip.is_spare = 0
+                 GROUP BY ip.inventory_id, ip.part_id, c.id"
+            );
+            $partsStmt->execute($inventoryIds);
+            foreach ($partsStmt->fetchAll() as $row) {
+                $partsByInventory[(int) $row['inventory_id']][] = $row;
+            }
+        }
+
+        $insertStmt = $pdo->prepare(
+            'INSERT INTO buildable_minifigs_cache_staging (minifig_id, buildable, missing)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE buildable = VALUES(buildable), missing = VALUES(missing)'
+        );
+
+        foreach ($batch as $candidate) {
+            $inventoryId = $inventoryIdByFigNum[$candidate['fig_num']] ?? null;
+            $parts = $inventoryId !== null ? ($partsByInventory[$inventoryId] ?? []) : [];
+
+            $buildable = null;
+            $missing = 0;
+            foreach ($parts as $part) {
+                $need = (int) $part['qty'];
+                if ($need <= 0) {
+                    continue;
+                }
+                $have = $stock[$part['part_id'] . ':' . $part['color_id']] ?? 0;
+                $ratio = intdiv($have, $need);
+                $buildable = $buildable === null ? $ratio : min($buildable, $ratio);
+                $missing += max(0, $need - $have);
+            }
+            $buildable ??= 0;
+
+            $insertStmt->execute([$candidate['minifig_id'], $buildable, $missing]);
+        }
+    }
+
+    $state['cursor'] = $cursor;
+    $done = $cursor >= $total;
+
+    if ($done) {
+        $pdo->exec('TRUNCATE TABLE buildable_minifigs_cache');
+        $pdo->exec('INSERT INTO buildable_minifigs_cache SELECT * FROM buildable_minifigs_cache_staging');
+        $pdo->exec('TRUNCATE TABLE buildable_minifigs_cache_staging');
+        setAppSetting(BUILD_MINIFIGS_CACHE_COMPUTED_AT_KEY, date('Y-m-d H:i:s'));
+        setAppSetting(BUILD_MINIFIGS_CACHE_STALE_KEY, '0');
+    }
+
+    return ['processed' => $cursor, 'total' => $total, 'done' => $done];
+}
+
+/**
+ * The dark progress overlay shown while a scan runs — same markup/script
+ * shape as renderBuildSetsScanOverlay() (src/build_sets.php), just against
+ * action=build_minifigs_scan_tick and no scope/filter params to carry along
+ * (this scan is always the whole catalog, unlike build_sets' optional
+ * theme/year scope).
+ */
+function renderBuildMinifigsScanOverlay(): string
+{
+    $html = '<div class="modal-overlay" id="build-minifigs-scan-overlay" style="display:flex;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<h2>' . htmlspecialchars(t('build_minifigs_scan_heading')) . '</h2>';
+    $html .= '<div class="import-status">';
+    $html .= '<div class="progress-message" id="build-minifigs-scan-message">' . htmlspecialchars(t('import_not_started')) . '</div>';
+    $html .= '<div class="progress-track" id="build-minifigs-scan-progress"><div class="progress-fill"></div></div>';
+    $html .= '</div>';
+    $html .= '</div></div>';
+
+    $payload = json_encode([
+        'doneUrl' => '?page=build_minifigs',
+        'statusLabel' => t('build_minifigs_scan_status'),
+        'errorLabel' => t('import_error_retry'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var cfg = {$payload};
+  var message = document.getElementById('build-minifigs-scan-message');
+  var track = document.getElementById('build-minifigs-scan-progress');
+  var fill = track ? track.querySelector('.progress-fill') : null;
+  if (!message || !track || !fill) {
+    return;
+  }
+
+  function formatStatus(processed, total) {
+    return cfg.statusLabel.replace('{processed}', String(processed)).replace('{total}', String(total));
+  }
+
+  function tick() {
+    var formData = new FormData();
+    formData.set('action', 'build_minifigs_scan_tick');
+    fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.done) {
+          message.textContent = formatStatus(data.total, data.total);
+          fill.style.width = '100%';
+          window.location.href = cfg.doneUrl;
+          return;
+        }
+        message.textContent = formatStatus(data.processed, data.total);
+        fill.style.width = (data.percent || 0) + '%';
+        tick();
+      })
+      .catch(function() {
+        message.textContent = cfg.errorLabel;
+        setTimeout(tick, 2000);
+      });
+  }
+
+  tick();
+})();
+</script>
+SCRIPT;
+
+    return $html;
+}
+
 /**
  * Full data for the "Bauen" modal (renderBuildMinifigModal() below) for one
  * specific catalog minifig — image/name/price (getMinifigById(),
@@ -158,8 +352,9 @@ function getBuildableMinifigs(PDO $pdo, string $locale = 'en'): array
  * src/sets.php) each paired with current loose stock (getPartStock(),
  * src/storage.php, filtered to the matching color) and the locations that
  * stock sits at. $have nets out damaged stock and ignores condition_type
- * (same convention getBuildableMinifigs()'s own stock map already uses) — a
- * part's own color is what matters here, not the built figure's condition.
+ * (same convention getLooseStockMap()-based stock maps elsewhere in this
+ * file already use) — a part's own color is what matters here, not the
+ * built figure's condition.
  *
  * @return array{minifig_id:int, fig_num:string, name:?string, thumbnail:?string, bricklink_price_used:?float, bricklink_price_currency:?string, parts: array<int, array{part_id:int, color_id:?int, name:string, color_name:?string, thumbnail:?string, quantity_per_unit:int, have:int, locations: array<int, array{location_path:string, quantity:int, condition_type:string}>}>}|null
  */

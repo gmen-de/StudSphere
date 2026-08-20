@@ -20,10 +20,12 @@ require_once __DIR__ . '/storage.php';
  * already-assembled-or-buildable-from-parts minifig bucket.
  *
  * The catalog is far too large (27,851 sets, ~1.5M inventory_parts rows) for
- * a live per-request computation, unlike getBuildableMinifigs() (src/build.php)
- * which handles the whole ~17k-minifig catalog in about a second — so the
- * result is a tick-based scan (mirroring stepRebrickableImport(),
- * src/download.php) into buildable_sets_cache, read back by
+ * a live per-request computation — the same reason "Baubare Minifiguren"
+ * (getBuildableMinifigsResults(), src/build.php) also moved from a live
+ * computation to a tick-scanned cache once its own "small enough to stay
+ * live" assumption broke down at this collection's scale. Tick-based scan
+ * here too (mirroring stepRebrickableImport(), src/download.php) into
+ * buildable_sets_cache, read back by
  * getBuildableSetsResults() without ever re-scanning. The cache is a single
  * "last scan" snapshot (not one per filter combination): re-running with
  * different filters replaces it. A running scan writes into
@@ -172,9 +174,9 @@ function getBuildableSetsResults(PDO $pdo, bool $exclusiveOnly, bool $exclusiveR
 }
 
 /**
- * Generalizes getBuildableMinifigs()'s (src/build.php) per-part min-ratio
+ * Generalizes stepBuildMinifigsScan()'s (src/build.php) per-part min-ratio
  * logic: how many *additional* copies of each minifig could be assembled
- * from $stock right now. Reuses that same function's "every required part
+ * from $stock right now. Reuses that same file's "every required part
  * has at least some stock" SQL prefilter so the expensive per-part ratio
  * calculation only runs for genuine candidates — the vast majority of
  * minifigs are missing at least one part entirely and stay at 0 without
@@ -281,14 +283,14 @@ function computeMinifigAvailabilityMap(PDO $pdo, ?array $minifigIds, array $stoc
  * year range, both optional and combinable; neither given scans the whole
  * catalog) and precomputes everything every tick needs so
  * stepBuildSetsScan() never repeats it: the loose-stock map (same
- * "exclude owned_set locations" convention as getBuildableMinifigs(),
- * src/build.php), the global sticker-part-id set (sticker-ness is a
- * part-category property, not per-inventory, unlike getStickerPartIds()'s
+ * "exclude owned_set locations" convention initBuildMinifigsScanState(),
+ * src/build.php, also uses), the global sticker-part-id set (sticker-ness is
+ * a part-category property, not per-inventory, unlike getStickerPartIds()'s
  * per-inventory scoping), and minifig availability for the *whole* minifig
- * catalog (matching getBuildableMinifigs()'s own always-full-catalog scope
- * — proven to run in about a second — rather than trying to first resolve
- * which minifigs the candidate sets reference, which for an unrestricted
- * scan could mean an unwieldy 27k-item IN-list for no real benefit).
+ * catalog (always full-catalog, same scope "Baubare Minifiguren"'s own scan
+ * uses — rather than trying to first resolve which minifigs the candidate
+ * sets reference, which for an unrestricted scan could mean an unwieldy
+ * 27k-item IN-list for no real benefit).
  *
  * @return array the scan state, stored in $_SESSION by the caller
  */

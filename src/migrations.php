@@ -804,6 +804,35 @@ function getSchemaMigrations(): array
             // already created goes unlabeled.
             addColumnIfMissing($pdo, 'pick_lists', 'name', "VARCHAR(255) NOT NULL DEFAULT ''");
         },
+        42 => function (PDO $pdo): void {
+            // "Baubare Minifiguren" (?page=build_minifigs) used to compute
+            // getBuildableMinifigs() live on every page load — a two-phase
+            // SQL+PHP scan assumed to stay under ~1s at "a handful of
+            // hundred" candidates (src/build.php's own doc comment). That
+            // assumption broke down as the collection's loose stock grew:
+            // more minifigs now pass the cheap "own at least one of
+            // everything" prefilter, ballooning the expensive per-candidate
+            // loop and hanging the whole page (confirmed live: a 30s+
+            // request with no response). Same fix "Baubare Sets" already
+            // needed for the same reason — buildable_sets_cache/_staging,
+            // see migration history — mirrored here for minifigs.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS buildable_minifigs_cache (
+                    minifig_id INT NOT NULL PRIMARY KEY,
+                    buildable INT NOT NULL,
+                    missing INT NOT NULL,
+                    CONSTRAINT fk_buildableminifigscache_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS buildable_minifigs_cache_staging (
+                    minifig_id INT NOT NULL PRIMARY KEY,
+                    buildable INT NOT NULL,
+                    missing INT NOT NULL,
+                    CONSTRAINT fk_buildableminifigscachestaging_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        },
     ];
 }
 
@@ -919,7 +948,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 41;
+const CURRENT_SCHEMA_VERSION = 42;
 
 function getInstalledSchemaVersion(): int
 {

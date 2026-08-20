@@ -582,8 +582,9 @@ function setStorageItemSpareQuantity(int $locationId, int $partId, int $colorId,
  * Excludes owned-set instance locations (location_type 'owned_set') the same
  * way getPartStock() below does, since those pieces are "owned" but not
  * really "available" until the set is taken apart. Shared by every feature
- * that needs this same stock map: getBuildableMinifigs() (src/build.php),
- * the "Baubare Sets" scan (initBuildSetsScanState(), src/build_sets.php),
+ * that needs this same stock map: the "Baubare Minifiguren" scan
+ * (initBuildMinifigsScanState(), src/build.php), the "Baubare Sets" scan
+ * (initBuildSetsScanState(), src/build_sets.php),
  * and the catalog set_detail inventory tab's stock-availability borders
  * (src/routes/pages.php).
  *

@@ -534,6 +534,20 @@ function installDatabase(): void
             minifig_actual INT NOT NULL,
             CONSTRAINT fk_buildablesetscachestaging_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS buildable_minifigs_cache (
+            minifig_id INT NOT NULL PRIMARY KEY,
+            buildable INT NOT NULL,
+            missing INT NOT NULL,
+            CONSTRAINT fk_buildableminifigscache_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        'CREATE TABLE IF NOT EXISTS buildable_minifigs_cache_staging (
+            minifig_id INT NOT NULL PRIMARY KEY,
+            buildable INT NOT NULL,
+            missing INT NOT NULL,
+            CONSTRAINT fk_buildableminifigscachestaging_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
     ];
 
     foreach ($queries as $query) {

@@ -369,6 +369,8 @@ return [
     'build_sets_start_scan_button' => 'Start search',
     'build_sets_scan_heading' => 'Scanning sets …',
     'build_sets_scan_status' => '{processed} / {total} sets',
+    'build_minifigs_scan_heading' => 'Scanning minifigs …',
+    'build_minifigs_scan_status' => '{processed} / {total} minifigs',
     'build_sets_last_updated' => 'Last updated: {date}',
     'build_sets_stale_banner' => 'Your loose parts stock has changed since the last scan.',
     'build_sets_refresh_button' => 'Refresh now',

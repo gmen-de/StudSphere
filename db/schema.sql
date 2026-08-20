@@ -566,3 +566,24 @@ CREATE TABLE IF NOT EXISTS buildable_sets_cache_staging (
     minifig_actual INT NOT NULL,
     CONSTRAINT fk_buildablesetscachestaging_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- "Baubare Minifiguren" (?page=build_minifigs) counterpart to
+-- buildable_sets_cache above — getBuildableMinifigsResults() reads this,
+-- stepBuildMinifigsScan() (src/build.php) writes it tick-by-tick. Only the
+-- two computed numbers are cached; everything else the page needs (name,
+-- thumbnail, price, theme/year facets) is joined/derived live from
+-- minifigs/getMinifigCatalogFacetsMap() at read time, same convention as
+-- buildable_sets_cache not storing display info either.
+CREATE TABLE IF NOT EXISTS buildable_minifigs_cache (
+    minifig_id INT NOT NULL PRIMARY KEY,
+    buildable INT NOT NULL,
+    missing INT NOT NULL,
+    CONSTRAINT fk_buildableminifigscache_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS buildable_minifigs_cache_staging (
+    minifig_id INT NOT NULL PRIMARY KEY,
+    buildable INT NOT NULL,
+    missing INT NOT NULL,
+    CONSTRAINT fk_buildableminifigscachestaging_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
