@@ -795,24 +795,24 @@ return [
     'instruction_manual_move_heading' => 'Bauanleitung verschieben',
     'instruction_manual_delete_button' => 'Löschen',
     'instruction_manual_delete_confirm' => 'Diese Bauanleitung wirklich löschen?',
-    'instruction_manual_parts_empty' => 'Keine Bauteile im Inventar dieses Sets.',
-    'instruction_manual_parts_nominal_label' => 'Benötigt',
-    'instruction_manual_parts_available_label' => '{available} von {nominal} im Lager',
     'instruction_manual_price_set_label' => 'Set',
     'instruction_manual_price_instructions_label' => 'Bauanleitung',
     'instruction_manual_price_new_label' => 'Neu',
     'instruction_manual_price_used_label' => 'Gebraucht',
+    'instruction_manual_field_total' => 'Teile gesamt',
+    'instruction_manual_field_minifigs' => 'Minifiguren',
 
-    // Bewertungskriterien für den Zustand alter LEGO-Bauanleitungen — mit dem
-    // Nutzer abgestimmt (5-stufige Skala), siehe der Plan zu diesem Feature.
-    'instruction_manual_condition_mint' => 'Neuwertig',
-    'instruction_manual_condition_mint_desc' => 'Keine Knicke, keine Eselsohren, keine Kratzer/Flecken, scharfe Ecken, glatter Rücken, keine Schreibspuren.',
-    'instruction_manual_condition_near_mint' => 'Sehr gut',
-    'instruction_manual_condition_near_mint_desc' => 'Minimal sichtbare Lagerspuren (z. B. leicht angedrückter Rücken), aber keine Risse, kein Schreiben.',
-    'instruction_manual_condition_good' => 'Gut',
-    'instruction_manual_condition_good_desc' => 'Deutliche, oberflächliche Gebrauchsspuren: leichte Knicke/Eselsohren, evtl. leichte Vergilbung, keine inhaltsbeeinträchtigenden Risse, alle Seiten vollständig.',
-    'instruction_manual_condition_fair' => 'Befriedigend',
-    'instruction_manual_condition_fair_desc' => 'Stärkere Knicke, kleine Einrisse (Bauschritte noch lesbar), evtl. Bleistiftnotizen/Namenszug, leichte Verfärbungen.',
-    'instruction_manual_condition_poor' => 'Schlecht',
-    'instruction_manual_condition_poor_desc' => 'Fehlende/stark beschädigte Seiten, Wasserschäden, große Risse die Bauschritte betreffen, abgelöster Rücken.',
+    // Zustands-Kriterien (Checkboxen) und daraus abgeleitete Schulnote 1-6 —
+    // mit dem Nutzer abgestimmt: jedes angehakte Kriterium verschlechtert
+    // die Note um eine Stufe (0 angehakt -> 1, ab 5 angehakt -> 6), siehe
+    // computeInstructionManualGrade() (src/instruction_manuals.php).
+    'instruction_manual_criterion_is_new' => 'Neu',
+    'instruction_manual_criterion_is_holed' => 'Gelocht',
+    'instruction_manual_criterion_has_tears' => 'Risse',
+    'instruction_manual_criterion_is_painted' => 'Bemalt',
+    'instruction_manual_criterion_has_stickers' => 'Beklebt',
+    'instruction_manual_criterion_is_glued' => 'Geklebt',
+    'instruction_manual_criterion_binding_broken' => 'Bindung defekt',
+    'instruction_manual_grade_tooltip' => 'Zustandsnote {grade} von 6',
+    'instruction_manual_grade_new_tooltip' => 'Neuwertig',
 ];

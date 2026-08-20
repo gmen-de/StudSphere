@@ -1066,16 +1066,24 @@ button[type='submit'] {
    thumbnail plus a percent-complete badge (see .instruction-manual-badge*
    further below, near .owned-set-total-ring*). */
 .instruction-manual-tile-thumb {
-  width: 5.5rem;
-  height: 5.5rem;
+  width: 11rem;
+  height: 11rem;
   color: #94a3b8;
+}
+
+/* Wider columns than the shared .location-detail-grid (parts/minifigs) —
+   needed to give the doubled-size cover thumbnails above room to breathe.
+   Applied alongside .location-detail-grid, not instead of it, so the base
+   card/gap rules stay shared. */
+.instruction-manual-grid {
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
 }
 
 .instruction-manual-tile-add {
   align-items: center;
   justify-content: center;
   gap: 0.6rem;
-  min-height: 9.5rem;
+  min-height: 15rem;
   border-style: dashed;
   border-color: rgba(37, 99, 235, 0.35);
   background: rgba(37, 99, 235, 0.04);
@@ -1145,8 +1153,8 @@ button[type='submit'] {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 4.5rem;
+  height: 4.5rem;
   flex-shrink: 0;
   color: #94a3b8;
 }
@@ -1189,10 +1197,64 @@ button[type='submit'] {
   color: #ffffff;
 }
 
-/* Highlights a part row in the manual detail's "Bauteile im Lager" tab
-   whose loose stock doesn't yet cover the set's own need for it. */
-.instruction-manual-part-short {
-  border-color: rgba(220, 38, 38, 0.4);
+/* Manual detail modal's "Bauteile im Lager" tab — 4 compact summary rows
+   (Gesamt/Exklusiv/Selten/Minifiguren), not a full part-by-part table. */
+.instruction-manual-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.instruction-manual-summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.55rem 0.2rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  font-size: 0.9rem;
+}
+
+.instruction-manual-summary-row span:last-child {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Add/edit form's condition checkboxes (buildInstructionCriteriaFieldset(),
+   src/routes/pages.php) — the "Neu" checkbox visually set apart from the 6
+   defect criteria below it, which grey out (via the input's own :disabled
+   style) once "Neu" is checked. */
+.instruction-manual-criteria-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.4rem 0 0.8rem;
+}
+
+.instruction-manual-criteria-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  font-weight: 400;
+}
+
+.instruction-manual-criteria-item-new {
+  padding-bottom: 0.5rem;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.4);
+  font-weight: 600;
+}
+
+.instruction-manual-criteria-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.4rem 0.8rem;
+}
+
+.instruction-manual-criteria-item input:disabled {
+  opacity: 0.4;
+}
+
+.instruction-manual-grade-preview {
+  margin-top: 0.3rem;
 }
 
 .instruction-manual-price-row {
@@ -4429,6 +4491,59 @@ footer {
   font-size: 0.62rem;
   font-weight: 700;
   color: #0f172a;
+}
+
+/* Condition grade badge (buildInstructionGradeBadge(), src/routes/pages.php)
+   — a solid-fill circle, deliberately NOT the ring style .instruction-manual-badge*
+   above uses, so the two indicators read as distinct at a glance. Tile
+   placement is the top-left corner (.instruction-manual-badge, the percent
+   ring, keeps the top-right); the bare circle is reused unpositioned as the
+   add/edit form's live preview. */
+.instruction-manual-grade-badge {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.4rem;
+}
+
+.instruction-manual-grade-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+/* Green -> red, ampel-inspired (yellow at the midpoint) — see
+   computeInstructionManualGrade() (src/instruction_manuals.php) for how a
+   manual's grade 1-6 is derived from its checked defect criteria. "Neu"
+   reuses grade-1's green (at least as good as grade 1) but shows "N" as its
+   label instead of "1" (buildInstructionGradeBadge()). */
+.instruction-manual-grade-1 {
+  background: #22c55e;
+}
+
+.instruction-manual-grade-2 {
+  background: #84cc16;
+}
+
+.instruction-manual-grade-3 {
+  background: #eab308;
+}
+
+.instruction-manual-grade-4 {
+  background: #f59e0b;
+}
+
+.instruction-manual-grade-5 {
+  background: #f97316;
+}
+
+.instruction-manual-grade-6 {
+  background: #ef4444;
 }
 
 .owned-set-tab-loading {

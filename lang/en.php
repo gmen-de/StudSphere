@@ -795,24 +795,24 @@ return [
     'instruction_manual_move_heading' => 'Move instruction manual',
     'instruction_manual_delete_button' => 'Delete',
     'instruction_manual_delete_confirm' => 'Really delete this instruction manual?',
-    'instruction_manual_parts_empty' => 'No parts in this set\'s inventory.',
-    'instruction_manual_parts_nominal_label' => 'Needed',
-    'instruction_manual_parts_available_label' => '{available} of {nominal} in stock',
     'instruction_manual_price_set_label' => 'Set',
     'instruction_manual_price_instructions_label' => 'Instructions',
     'instruction_manual_price_new_label' => 'New',
     'instruction_manual_price_used_label' => 'Used',
+    'instruction_manual_field_total' => 'Total parts',
+    'instruction_manual_field_minifigs' => 'Minifigs',
 
-    // Condition grading criteria for old LEGO instruction manuals — agreed
-    // with the user (5-tier scale), see this feature's plan.
-    'instruction_manual_condition_mint' => 'Mint',
-    'instruction_manual_condition_mint_desc' => 'No creases, no dog-ears, no scratches/stains, sharp corners, smooth spine, no writing.',
-    'instruction_manual_condition_near_mint' => 'Near mint',
-    'instruction_manual_condition_near_mint_desc' => 'Minimal visible storage wear (e.g. slightly pressed spine), but no tears, no writing.',
-    'instruction_manual_condition_good' => 'Good',
-    'instruction_manual_condition_good_desc' => 'Noticeable but superficial wear: light creases/dog-ears, possibly slight yellowing, no tears affecting content, all pages present.',
-    'instruction_manual_condition_fair' => 'Fair',
-    'instruction_manual_condition_fair_desc' => 'Heavier creases, small tears (build steps still readable), possibly pencil notes/name, slight discoloration.',
-    'instruction_manual_condition_poor' => 'Poor',
-    'instruction_manual_condition_poor_desc' => 'Missing/badly damaged pages, water damage, large tears affecting build steps, detached spine.',
+    // Condition criteria (checkboxes) and the school-grade-style 1-6 rating
+    // derived from them — agreed with the user: each checked criterion
+    // worsens the grade by one step (0 checked -> 1, 5+ checked -> 6), see
+    // computeInstructionManualGrade() (src/instruction_manuals.php).
+    'instruction_manual_criterion_is_new' => 'New',
+    'instruction_manual_criterion_is_holed' => 'Holed',
+    'instruction_manual_criterion_has_tears' => 'Tears',
+    'instruction_manual_criterion_is_painted' => 'Painted',
+    'instruction_manual_criterion_has_stickers' => 'Stickers',
+    'instruction_manual_criterion_is_glued' => 'Glued',
+    'instruction_manual_criterion_binding_broken' => 'Binding broken',
+    'instruction_manual_grade_tooltip' => 'Condition grade {grade} of 6',
+    'instruction_manual_grade_new_tooltip' => 'Mint condition',
 ];

@@ -687,6 +687,47 @@ function getSetMinifigsList(PDO $pdo, int $inventoryId): array
 }
 
 /**
+ * How many of a set's needed minifigs are currently sitting in loose
+ * minifig_storage_items stock — deliberately just a raw physical-instance
+ * count (mirrors getSetInventorySummary()'s own "actual" for parts), unlike
+ * computeMinifigAvailabilityMap() (src/build_sets.php), which additionally
+ * credits figures that could still be assembled from loose parts on hand —
+ * that's the right tool for "what could I build", not for "what do I
+ * physically have", which is what the instruction-manual detail modal's
+ * "Bauteile im Lager" summary needs (same scope as its total/exclusive/rare
+ * parts counts, all genuinely-in-stock only).
+ *
+ * @return array{nominal:int, actual:int}
+ */
+function getSetMinifigStockSummary(PDO $pdo, int $inventoryId): array
+{
+    $needed = getSetMinifigsList($pdo, $inventoryId);
+    if (empty($needed)) {
+        return ['nominal' => 0, 'actual' => 0];
+    }
+
+    $minifigIds = array_column($needed, 'minifig_id');
+    $placeholders = implode(',', array_fill(0, count($minifigIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT minifig_id, COUNT(*) AS cnt FROM minifig_storage_items WHERE minifig_id IN ($placeholders) GROUP BY minifig_id"
+    );
+    $stmt->execute($minifigIds);
+    $have = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $have[(int) $row['minifig_id']] = (int) $row['cnt'];
+    }
+
+    $nominal = 0;
+    $actual = 0;
+    foreach ($needed as $row) {
+        $nominal += $row['quantity'];
+        $actual += min($row['quantity'], $have[$row['minifig_id']] ?? 0);
+    }
+
+    return ['nominal' => $nominal, 'actual' => $actual];
+}
+
+/**
  * @param string[] $selectedThemes
  * @return array{items: array, total: int, page: int, perPage: int}
  */

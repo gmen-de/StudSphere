@@ -876,6 +876,23 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'sets', 'bricklink_instructions_price_currency', 'VARCHAR(10) DEFAULT NULL');
             addColumnIfMissing($pdo, 'sets', 'bricklink_instructions_price_checked_at', 'TIMESTAMP NULL DEFAULT NULL');
         },
+        44 => function (PDO $pdo): void {
+            // Condition is now derived from checkable defect criteria
+            // (computeInstructionManualGrade(), src/instruction_manuals.php)
+            // instead of a fixed 5-tier ENUM. Old condition_grade values
+            // (mint/near_mint/...) have no meaningful equivalent under the
+            // new criteria — existing rows are cleared per explicit user
+            // request rather than mapped.
+            $pdo->exec('DELETE FROM instruction_manuals');
+            dropColumnIfExists($pdo, 'instruction_manuals', 'condition_grade');
+            addColumnIfMissing($pdo, 'instruction_manuals', 'is_new', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'instruction_manuals', 'is_holed', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'instruction_manuals', 'has_tears', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'instruction_manuals', 'is_painted', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'instruction_manuals', 'has_stickers', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'instruction_manuals', 'is_glued', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'instruction_manuals', 'binding_broken', 'TINYINT(1) NOT NULL DEFAULT 0');
+        },
     ];
 }
 
@@ -991,7 +1008,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 43;
+const CURRENT_SCHEMA_VERSION = 44;
 
 function getInstalledSchemaVersion(): int
 {

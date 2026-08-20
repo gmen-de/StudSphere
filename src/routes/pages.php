@@ -704,8 +704,8 @@ SCRIPT;
     $content .= '<label>' . htmlspecialchars(t('instruction_manual_add_set_search_label')) . '<input type="text" id="location-instruction-add-set-search" autocomplete="off" placeholder="' . htmlspecialchars(t('instruction_manual_add_set_search_placeholder')) . '"></label>';
     $content .= '<div id="location-instruction-add-set-results" class="instruction-manual-set-results"></div>';
     $content .= '<div id="location-instruction-add-selected-set" class="instruction-manual-selected-set" style="display:none;"></div>';
-    $content .= '<label>' . htmlspecialchars(t('instruction_manual_field_condition')) . '<select id="location-instruction-add-condition"></select></label>';
-    $content .= '<p class="hint" id="location-instruction-add-condition-desc"></p>';
+    $content .= '<div class="hint">' . htmlspecialchars(t('instruction_manual_field_condition')) . '</div>';
+    $content .= '<div id="location-instruction-add-criteria"></div>';
     $content .= '<label>' . htmlspecialchars(t('instruction_manual_field_notes')) . '<textarea id="location-instruction-add-notes" rows="2"></textarea></label>';
     $content .= '<button type="submit" id="location-instruction-add-submit" disabled>' . htmlspecialchars(t('instruction_manual_add_button')) . '</button>';
     $content .= '</form></div></div>';
@@ -783,10 +783,14 @@ SCRIPT;
         'instructionAddHeading' => t('instruction_manual_add_heading'),
         'instructionSetSearchNoResults' => t('instruction_manual_add_set_search_no_results'),
         'instructionAddSubmitFailed' => t('instruction_manual_add_failed'),
-        'instructionConditionGrades' => array_map(
-            fn (string $grade): array => ['value' => $grade, 'label' => t('instruction_manual_condition_' . $grade), 'desc' => t('instruction_manual_condition_' . $grade . '_desc')],
-            INSTRUCTION_MANUAL_CONDITION_GRADES
+        'instructionFieldCondition' => t('instruction_manual_field_condition'),
+        'instructionIsNewLabel' => t('instruction_manual_criterion_is_new'),
+        'instructionCriteriaLabels' => array_map(
+            fn (string $criterion): array => ['key' => $criterion, 'label' => t('instruction_manual_criterion_' . $criterion)],
+            INSTRUCTION_MANUAL_CRITERIA
         ),
+        'instructionGradeTooltip' => t('instruction_manual_grade_tooltip'),
+        'instructionGradeNewTooltip' => t('instruction_manual_grade_new_tooltip'),
         'instructionDetailTabDetails' => t('instruction_manual_tab_details'),
         'instructionDetailTabParts' => t('instruction_manual_tab_parts'),
         'instructionDetailTabPrices' => t('instruction_manual_tab_prices'),
@@ -796,9 +800,10 @@ SCRIPT;
         'instructionMoveHeading' => t('instruction_manual_move_heading'),
         'instructionDeleteButton' => t('instruction_manual_delete_button'),
         'instructionDeleteConfirm' => t('instruction_manual_delete_confirm'),
-        'instructionPartsEmpty' => t('instruction_manual_parts_empty'),
-        'instructionPartsNominalLabel' => t('instruction_manual_parts_nominal_label'),
-        'instructionPartsAvailableLabel' => t('instruction_manual_parts_available_label'),
+        'instructionFieldTotal' => t('instruction_manual_field_total'),
+        'instructionFieldExclusive' => t('set_detail_field_exclusive'),
+        'instructionFieldRare' => t('set_detail_field_rare'),
+        'instructionFieldMinifigs' => t('instruction_manual_field_minifigs'),
         'instructionPriceSetLabel' => t('instruction_manual_price_set_label'),
         'instructionPriceInstructionsLabel' => t('instruction_manual_price_instructions_label'),
         'instructionPriceNewLabel' => t('instruction_manual_price_new_label'),
@@ -852,8 +857,7 @@ SCRIPT;
   var instructionAddSetSearch = document.getElementById('location-instruction-add-set-search');
   var instructionAddSetResults = document.getElementById('location-instruction-add-set-results');
   var instructionAddSelectedSet = document.getElementById('location-instruction-add-selected-set');
-  var instructionAddCondition = document.getElementById('location-instruction-add-condition');
-  var instructionAddConditionDesc = document.getElementById('location-instruction-add-condition-desc');
+  var instructionAddCriteriaContainer = document.getElementById('location-instruction-add-criteria');
   var instructionAddNotes = document.getElementById('location-instruction-add-notes');
   var instructionAddSubmit = document.getElementById('location-instruction-add-submit');
   var instructionDetailModal = document.getElementById('location-instruction-detail-modal');
@@ -1306,6 +1310,99 @@ SCRIPT;
     return wrap;
   }
 
+  // Solid-fill circle (not the ring style buildPercentBadge() uses) showing
+  // the school-grade-style condition (1 green/best .. 6 red/worst, "N"or
+  // green for is_new) — used both as the tile's own badge and as the live
+  // preview while checking criteria in the add/edit forms.
+  function buildInstructionGradeBadge(grade, isNew) {
+    var span = document.createElement('span');
+    span.className = 'instruction-manual-grade-circle instruction-manual-grade-' + grade;
+    span.textContent = isNew ? 'N' : String(grade);
+    span.title = isNew ? texts.instructionGradeNewTooltip : texts.instructionGradeTooltip.replace('{grade}', String(grade));
+    return span;
+  }
+
+  // Shared by the add-manual mini-form and the detail modal's edit form —
+  // one "Neu" checkbox (disables + visually overrides the other 6 when
+  // checked) plus the 6 defect-criteria checkboxes, with a live grade badge
+  // that updates on every change. Mirrors computeInstructionManualGrade()
+  // (src/instruction_manuals.php) exactly: each checked criterion worsens
+  // the grade by one step, floored at 6, is_new always forces grade 1.
+  //
+  // @param initial {is_new?, is_holed?, has_tears?, is_painted?, has_stickers?, is_glued?, binding_broken?}
+  // @return {el: Element, getState: function(): same shape as initial}
+  function buildInstructionCriteriaFieldset(initial) {
+    var wrap = document.createElement('div');
+    wrap.className = 'instruction-manual-criteria-fieldset';
+
+    var newLabel = document.createElement('label');
+    newLabel.className = 'instruction-manual-criteria-item instruction-manual-criteria-item-new';
+    var newCheckbox = document.createElement('input');
+    newCheckbox.type = 'checkbox';
+    newCheckbox.checked = !!initial.is_new;
+    newLabel.appendChild(newCheckbox);
+    newLabel.appendChild(document.createTextNode(' ' + texts.instructionIsNewLabel));
+    wrap.appendChild(newLabel);
+
+    var list = document.createElement('div');
+    list.className = 'instruction-manual-criteria-list';
+    var criterionCheckboxes = {};
+    texts.instructionCriteriaLabels.forEach(function(c) {
+      var label = document.createElement('label');
+      label.className = 'instruction-manual-criteria-item';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!initial[c.key];
+      criterionCheckboxes[c.key] = cb;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + c.label));
+      list.appendChild(label);
+      cb.addEventListener('change', update);
+    });
+    wrap.appendChild(list);
+
+    var preview = document.createElement('div');
+    preview.className = 'instruction-manual-grade-preview';
+    wrap.appendChild(preview);
+
+    function computeGrade() {
+      if (newCheckbox.checked) {
+        return { isNew: true, grade: 1 };
+      }
+      var count = 0;
+      Object.keys(criterionCheckboxes).forEach(function(key) {
+        if (criterionCheckboxes[key].checked) {
+          count++;
+        }
+      });
+      return { isNew: false, grade: Math.min(6, count + 1) };
+    }
+
+    function update() {
+      var disabled = newCheckbox.checked;
+      Object.keys(criterionCheckboxes).forEach(function(key) {
+        criterionCheckboxes[key].disabled = disabled;
+      });
+      preview.innerHTML = '';
+      var g = computeGrade();
+      preview.appendChild(buildInstructionGradeBadge(g.grade, g.isNew));
+    }
+
+    newCheckbox.addEventListener('change', update);
+    update();
+
+    return {
+      el: wrap,
+      getState: function() {
+        var state = { is_new: newCheckbox.checked };
+        Object.keys(criterionCheckboxes).forEach(function(key) {
+          state[key] = criterionCheckboxes[key].checked;
+        });
+        return state;
+      }
+    };
+  }
+
   function buildInstructionManualTile(manual) {
     var card = document.createElement('div');
     card.className = 'location-detail-card instruction-manual-tile';
@@ -1313,6 +1410,11 @@ SCRIPT;
     if (manual.percent_complete !== null && manual.percent_complete !== undefined) {
       card.appendChild(buildPercentBadge(manual.percent_complete));
     }
+
+    var gradeBadgeWrap = document.createElement('span');
+    gradeBadgeWrap.className = 'instruction-manual-grade-badge';
+    gradeBadgeWrap.appendChild(buildInstructionGradeBadge(manual.grade, manual.is_new));
+    card.appendChild(gradeBadgeWrap);
 
     var thumb = document.createElement('span');
     thumb.className = 'location-detail-card-thumb instruction-manual-tile-thumb';
@@ -1330,16 +1432,12 @@ SCRIPT;
     name.textContent = manual.set_name;
     card.appendChild(name);
 
-    var meta = document.createElement('span');
-    meta.className = 'location-detail-card-meta';
-    var gradeInfo = null;
-    texts.instructionConditionGrades.forEach(function(g) {
-      if (g.value === manual.condition_grade) {
-        gradeInfo = g;
-      }
-    });
-    meta.textContent = gradeInfo ? gradeInfo.label : manual.condition_grade;
-    card.appendChild(meta);
+    if (manual.price_text) {
+      var price = document.createElement('span');
+      price.className = 'location-detail-card-price';
+      price.textContent = manual.price_text;
+      card.appendChild(price);
+    }
 
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
@@ -1388,7 +1486,7 @@ SCRIPT;
     var groups = groupByLocationLabel(manuals);
     if (groups.length <= 1) {
       var grid = document.createElement('div');
-      grid.className = 'location-detail-grid';
+      grid.className = 'location-detail-grid instruction-manual-grid';
       grid.appendChild(buildInstructionManualAddTile(locationId));
       manuals.forEach(function(manual) {
         grid.appendChild(buildInstructionManualTile(manual));
@@ -1406,7 +1504,7 @@ SCRIPT;
       heading.textContent = group.label;
       section.appendChild(heading);
       var grid = document.createElement('div');
-      grid.className = 'location-detail-grid';
+      grid.className = 'location-detail-grid instruction-manual-grid';
       var isHereGroup = group.items.length > 0 && (group.items[0].location_label === null || group.items[0].location_label === undefined);
       if (isHereGroup) {
         grid.appendChild(buildInstructionManualAddTile(locationId));
@@ -1519,28 +1617,11 @@ SCRIPT;
     }
     renderInstructionAddSelectedSet(null);
 
-    if (instructionAddCondition) {
-      instructionAddCondition.innerHTML = '';
-      texts.instructionConditionGrades.forEach(function(g) {
-        var opt = document.createElement('option');
-        opt.value = g.value;
-        opt.textContent = g.label;
-        instructionAddCondition.appendChild(opt);
-      });
-      instructionAddCondition.value = 'good';
-      var updateDesc = function() {
-        var selected = null;
-        texts.instructionConditionGrades.forEach(function(g) {
-          if (g.value === instructionAddCondition.value) {
-            selected = g;
-          }
-        });
-        if (instructionAddConditionDesc) {
-          instructionAddConditionDesc.textContent = selected ? selected.desc : '';
-        }
-      };
-      instructionAddCondition.onchange = updateDesc;
-      updateDesc();
+    var instructionAddCriteriaFieldset = null;
+    if (instructionAddCriteriaContainer) {
+      instructionAddCriteriaContainer.innerHTML = '';
+      instructionAddCriteriaFieldset = buildInstructionCriteriaFieldset({});
+      instructionAddCriteriaContainer.appendChild(instructionAddCriteriaFieldset.el);
     }
 
     instructionAddForm.onsubmit = function(e) {
@@ -1548,11 +1629,15 @@ SCRIPT;
       if (!instructionAddSelectedSetId) {
         return;
       }
+      var criteriaState = instructionAddCriteriaFieldset ? instructionAddCriteriaFieldset.getState() : {};
       var formData = new FormData();
       formData.set('action', 'add_instruction_manual');
       formData.set('location_id', locationId);
       formData.set('set_id', instructionAddSelectedSetId);
-      formData.set('condition_grade', instructionAddCondition ? instructionAddCondition.value : 'good');
+      formData.set('is_new', criteriaState.is_new ? '1' : '0');
+      texts.instructionCriteriaLabels.forEach(function(c) {
+        formData.set(c.key, criteriaState[c.key] ? '1' : '0');
+      });
       formData.set('notes', instructionAddNotes ? instructionAddNotes.value : '');
       fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
         .then(function(r) { return r.json(); })
@@ -1680,17 +1765,12 @@ SCRIPT;
     editMessage.className = 'add-stock-message';
     editForm.appendChild(editMessage);
 
-    var conditionLabel = document.createElement('label');
-    var condSelect = document.createElement('select');
-    texts.instructionConditionGrades.forEach(function(g) {
-      var opt = document.createElement('option');
-      opt.value = g.value;
-      opt.textContent = g.label;
-      condSelect.appendChild(opt);
-    });
-    condSelect.value = manual.condition_grade;
-    conditionLabel.appendChild(condSelect);
-    editForm.appendChild(conditionLabel);
+    var conditionHint = document.createElement('div');
+    conditionHint.className = 'hint';
+    conditionHint.textContent = texts.instructionFieldCondition;
+    editForm.appendChild(conditionHint);
+    var criteriaFieldset = buildInstructionCriteriaFieldset(manual);
+    editForm.appendChild(criteriaFieldset.el);
 
     var notesLabel = document.createElement('label');
     var notesTextarea = document.createElement('textarea');
@@ -1706,10 +1786,14 @@ SCRIPT;
 
     editForm.addEventListener('submit', function(e) {
       e.preventDefault();
+      var criteriaState = criteriaFieldset.getState();
       var formData = new FormData();
       formData.set('action', 'update_instruction_manual');
       formData.set('instance_id', manual.id);
-      formData.set('condition_grade', condSelect.value);
+      formData.set('is_new', criteriaState.is_new ? '1' : '0');
+      texts.instructionCriteriaLabels.forEach(function(c) {
+        formData.set(c.key, criteriaState[c.key] ? '1' : '0');
+      });
       formData.set('notes', notesTextarea.value);
       fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
         .then(function(r) { return r.json(); })
@@ -1803,57 +1887,38 @@ SCRIPT;
     panelDetails.appendChild(actionsRow);
 
     // ---- Bauteile im Lager tab ----
-    if (data.summary && data.summary.total_nominal > 0) {
-      var percent = Math.round(data.summary.total_actual / data.summary.total_nominal * 100);
-      var ringWrap = document.createElement('div');
-      ringWrap.className = 'owned-set-total-ring-wrap';
-      var ringClass = instructionRingColorClass(percent);
-      var circumference = 2 * Math.PI * 45;
-      var offset = circumference * (1 - Math.min(100, percent) / 100);
-      ringWrap.innerHTML =
-        '<svg class="owned-set-total-ring" viewBox="0 0 100 100" aria-hidden="true">' +
-        '<circle class="owned-set-total-ring-bg" cx="50" cy="50" r="45"></circle>' +
-        '<circle class="owned-set-total-ring-fg ' + ringClass + '" cx="50" cy="50" r="45" style="stroke-dasharray: ' + circumference.toFixed(2) + '; stroke-dashoffset: ' + offset.toFixed(2) + ';"></circle>' +
-        '</svg>' +
-        '<span class="owned-set-total-ring-label">' + data.summary.total_actual + ' / ' + data.summary.total_nominal + '</span>';
-      panelParts.appendChild(ringWrap);
-    }
-
-    var parts = data.parts || [];
-    if (parts.length === 0) {
-      var partsEmpty = document.createElement('p');
-      partsEmpty.className = 'hint';
-      partsEmpty.textContent = texts.instructionPartsEmpty;
-      panelParts.appendChild(partsEmpty);
-    } else {
-      var partsGrid = document.createElement('div');
-      partsGrid.className = 'location-detail-grid';
-      parts.forEach(function(part) {
-        var card = document.createElement('div');
-        card.className = 'location-detail-card';
-        if (part.available_quantity < part.nominal_quantity) {
-          card.className += ' instruction-manual-part-short';
-        }
-        var thumb = document.createElement('span');
-        thumb.className = 'location-detail-card-thumb';
-        thumb.innerHTML = part.thumbnail ? ('<img src="' + part.thumbnail + '" alt="">') : texts.brickIcon;
-        card.appendChild(thumb);
-        var num = document.createElement('span');
-        num.className = 'location-detail-card-num';
-        num.textContent = part.part_num;
-        card.appendChild(num);
-        var name = document.createElement('span');
-        name.className = 'location-detail-card-name';
-        name.title = part.name;
-        name.textContent = part.name;
-        card.appendChild(name);
-        var meta = document.createElement('span');
-        meta.className = 'location-detail-card-meta';
-        meta.textContent = texts.instructionPartsAvailableLabel.replace('{available}', part.available_quantity).replace('{nominal}', part.nominal_quantity);
-        card.appendChild(meta);
-        partsGrid.appendChild(card);
+    // Per explicit follow-up request: just the 4 summary counts (no more
+    // ring, no more full part-by-part table) — same "actual / nominal" shape
+    // set_detail's own inventory table uses for these exact same fields
+    // (src/routes/pages.php's renderSetGeneralInfoTable() surroundings).
+    var summaryRows = [
+      { label: texts.instructionFieldTotal, key: 'total' },
+      { label: texts.instructionFieldExclusive, key: 'exclusive' },
+      { label: texts.instructionFieldRare, key: 'rare' },
+      { label: texts.instructionFieldMinifigs, key: 'minifig' }
+    ];
+    if (data.summary) {
+      var summaryList = document.createElement('div');
+      summaryList.className = 'instruction-manual-summary-list';
+      summaryRows.forEach(function(row) {
+        var nominal = data.summary[row.key + '_nominal'] || 0;
+        var actual = data.summary[row.key + '_actual'] || 0;
+        var line = document.createElement('div');
+        line.className = 'instruction-manual-summary-row';
+        var label = document.createElement('span');
+        label.textContent = row.label;
+        line.appendChild(label);
+        var value = document.createElement('span');
+        value.textContent = actual + ' / ' + nominal;
+        line.appendChild(value);
+        summaryList.appendChild(line);
       });
-      panelParts.appendChild(partsGrid);
+      panelParts.appendChild(summaryList);
+    } else {
+      var summaryEmpty = document.createElement('p');
+      summaryEmpty.className = 'hint';
+      summaryEmpty.textContent = texts.contentEmpty;
+      panelParts.appendChild(summaryEmpty);
     }
 
     // ---- Preise tab ----

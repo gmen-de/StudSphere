@@ -275,12 +275,21 @@ CREATE TABLE IF NOT EXISTS minifig_storage_item_sales (
 -- is always either the fixed 'instructions_root' location or one of its
 -- descendants — enforced in the application layer
 -- (isLocationInInstructionsSubtree()), not by this FK, since a plain FK
--- can't express "must be inside a subtree".
+-- can't express "must be inside a subtree". Condition is derived from the
+-- 6 checkable defect columns (is_holed..binding_broken) rather than stored
+-- as a fixed grade — see computeInstructionManualGrade(). is_new, when set,
+-- overrides all 6 defect columns to 0 (enforced application-side).
 CREATE TABLE IF NOT EXISTS instruction_manuals (
     id INT AUTO_INCREMENT PRIMARY KEY,
     location_id INT NOT NULL,
     set_id INT NOT NULL,
-    condition_grade ENUM('mint','near_mint','good','fair','poor') NOT NULL DEFAULT 'good',
+    is_new TINYINT(1) NOT NULL DEFAULT 0,
+    is_holed TINYINT(1) NOT NULL DEFAULT 0,
+    has_tears TINYINT(1) NOT NULL DEFAULT 0,
+    is_painted TINYINT(1) NOT NULL DEFAULT 0,
+    has_stickers TINYINT(1) NOT NULL DEFAULT 0,
+    is_glued TINYINT(1) NOT NULL DEFAULT 0,
+    binding_broken TINYINT(1) NOT NULL DEFAULT 0,
     notes TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

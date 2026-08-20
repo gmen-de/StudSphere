@@ -725,6 +725,19 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
                 }
                 $manual['location_label'] = $manualLocationInfoCache[$manualLocationId];
             }
+
+            // Same "one price, matching this instance's own condition"
+            // convention as part cards (see buildOnePartCard()'s
+            // bricklink_unit_price, src/routes/pages.php) — 'is_new' selects
+            // which of the Instructions catalog entry's two BrickLink
+            // averages applies, rather than showing both.
+            $instructionsPrice = $manual['is_new']
+                ? $manual['bricklink_instructions_price_new']
+                : $manual['bricklink_instructions_price_used'];
+            $manual['price_text'] = $instructionsPrice !== null
+                ? formatNumber($instructionsPrice, 2) . ' ' . bricklinkCurrencySymbol($manual['bricklink_instructions_price_currency'])
+                : null;
+            unset($manual['bricklink_instructions_price_new'], $manual['bricklink_instructions_price_used'], $manual['bricklink_instructions_price_currency']);
         }
         unset($manual);
 
@@ -2047,7 +2060,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_i
     try {
         $newManualLocationId = (int) ($_POST['location_id'] ?? 0);
         $newManualSetId = (int) ($_POST['set_id'] ?? 0);
-        $newManualConditionGrade = (string) ($_POST['condition_grade'] ?? '');
+        $newManualIsNew = ($_POST['is_new'] ?? '') === '1';
+        $newManualCriteria = [];
+        foreach (INSTRUCTION_MANUAL_CRITERIA as $criterion) {
+            $newManualCriteria[$criterion] = ($_POST[$criterion] ?? '') === '1';
+        }
         $newManualNotesRaw = trim((string) ($_POST['notes'] ?? ''));
         $newManualNotes = $newManualNotesRaw !== '' ? $newManualNotesRaw : null;
 
@@ -2059,11 +2076,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_i
         if ($newManualSet === null) {
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
-        if (!in_array($newManualConditionGrade, INSTRUCTION_MANUAL_CONDITION_GRADES, true)) {
-            throw new RuntimeException(t('add_stock_invalid_input'));
-        }
 
-        $newManualId = addInstructionManual($newManualLocationId, $newManualSetId, $newManualConditionGrade, $newManualNotes);
+        $newManualId = addInstructionManual($newManualLocationId, $newManualSetId, $newManualIsNew, $newManualCriteria, $newManualNotes);
 
         try {
             if ($newManualSet['bricklink_item_id'] === null && $newManualSet['bricklink_price_checked_at'] === null) {
@@ -2092,18 +2106,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     header('Content-Type: application/json');
     try {
         $updateManualId = (int) ($_POST['instance_id'] ?? 0);
-        $updateManualConditionGrade = (string) ($_POST['condition_grade'] ?? '');
+        $updateManualIsNew = ($_POST['is_new'] ?? '') === '1';
+        $updateManualCriteria = [];
+        foreach (INSTRUCTION_MANUAL_CRITERIA as $criterion) {
+            $updateManualCriteria[$criterion] = ($_POST[$criterion] ?? '') === '1';
+        }
         $updateManualNotesRaw = trim((string) ($_POST['notes'] ?? ''));
         $updateManualNotes = $updateManualNotesRaw !== '' ? $updateManualNotesRaw : null;
 
         if ($updateManualId <= 0 || getInstructionManualById($pdo, $updateManualId) === null) {
             throw new RuntimeException(t('instruction_manual_not_found'));
         }
-        if (!in_array($updateManualConditionGrade, INSTRUCTION_MANUAL_CONDITION_GRADES, true)) {
-            throw new RuntimeException(t('add_stock_invalid_input'));
-        }
 
-        updateInstructionManual($updateManualId, $updateManualConditionGrade, $updateManualNotes);
+        updateInstructionManual($updateManualId, $updateManualIsNew, $updateManualCriteria, $updateManualNotes);
 
         echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
@@ -2158,8 +2173,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 }
 
 // Full detail-modal payload: the manual itself, a link to the catalog set,
-// the loose-parts breakdown for that set, and both BrickLink price blocks
-// (Set + Instructions catalog entries, priced completely independently).
+// a compact stock summary for that set (total/exclusive/rare parts +
+// minifigs — not the full part-by-part breakdown, per explicit follow-up
+// request), and both BrickLink price blocks (Set + Instructions catalog
+// entries, priced completely independently).
 if (isset($_GET['action']) && $_GET['action'] === 'instruction_manual_detail') {
     header('Content-Type: application/json');
     $manualDetailId = (int) ($_GET['instance_id'] ?? 0);
@@ -2172,18 +2189,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'instruction_manual_detail') {
 
     $manualDetailSet = getSetById($pdo, $manualDetail['set_id']);
     $manualDetailInventoryId = getSetInventoryId($pdo, $manualDetail['set_num']);
-    $manualDetailParts = $manualDetailInventoryId !== null
-        ? getInstructionManualPartsBreakdown($pdo, $manualDetailInventoryId, getLocale())
-        : [];
-    $manualDetailSummary = $manualDetailInventoryId !== null
-        ? getSetInventorySummary($pdo, $manualDetailInventoryId, getLocale())
-        : null;
+    $manualDetailSummary = null;
+    if ($manualDetailInventoryId !== null) {
+        $manualDetailSummary = getSetInventorySummary($pdo, $manualDetailInventoryId, getLocale());
+        $minifigSummary = getSetMinifigStockSummary($pdo, $manualDetailInventoryId);
+        $manualDetailSummary['minifig_nominal'] = $minifigSummary['nominal'];
+        $manualDetailSummary['minifig_actual'] = $minifigSummary['actual'];
+    }
 
     echo json_encode([
         'success' => true,
         'manual' => $manualDetail,
         'set' => $manualDetailSet,
-        'parts' => $manualDetailParts,
         'summary' => $manualDetailSummary,
         'bricklinkSetUrl' => 'https://www.bricklink.com/v2/catalog/catalogitem.page?S=' . urlencode($manualDetail['set_num']),
         'bricklinkInstructionsUrl' => 'https://www.bricklink.com/v2/catalog/catalogitem.page?I=' . urlencode($manualDetail['set_num']),
