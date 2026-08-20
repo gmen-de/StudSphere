@@ -1012,6 +1012,34 @@ function computeMinifigStorageBricklinkValueTotal(PDO $pdo): array
 }
 
 /**
+ * Instruction-manual counterpart to computeOwnedSetsBricklinkValueTotal() —
+ * same per-condition sum (is_new picks bricklink_instructions_price_new,
+ * otherwise _used), one row per stored manual instance, priced from the
+ * Instructions catalog entry (not the Set entry — a set's own price is
+ * already counted via computeOwnedSetsBricklinkValueTotal() if owned, and
+ * owning a set's manual doesn't imply owning the set itself or vice versa).
+ * The status bar adds this to the sets/minifigs/loose-parts totals (see
+ * index.php).
+ *
+ * @return array{total: float, currency: ?string}
+ */
+function computeInstructionManualsBricklinkValueTotal(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        "SELECT
+            SUM(CASE WHEN im.is_new = 1 THEN s.bricklink_instructions_price_new ELSE s.bricklink_instructions_price_used END) AS total,
+            MAX(s.bricklink_instructions_price_currency) AS currency
+         FROM instruction_manuals im
+         INNER JOIN sets s ON s.id = im.set_id"
+    );
+    $row = $stmt->fetch();
+    return [
+        'total' => $row !== false && $row['total'] !== null ? (float) $row['total'] : 0.0,
+        'currency' => $row !== false ? $row['currency'] : null,
+    ];
+}
+
+/**
  * The owned_set_detail sidebar's "Ø BrickLink-Preis" row — shared by the
  * initial page render and the manual-refresh button's live JS update (see
  * the inline script next to that row in src/routes/pages.php), so the two

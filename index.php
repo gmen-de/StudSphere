@@ -376,8 +376,9 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     // already counted via that set's own aggregate price above, so summing
     // it here too would double it.
     $bricklinkLoosePartsValue = computeLoosePartsBricklinkValueTotal(getPDO());
-    $bricklinkValueTotal = $bricklinkSetsValue['total'] + $bricklinkMinifigsValue['total'] + $bricklinkLoosePartsValue['total'];
-    $bricklinkValueCurrency = $bricklinkSetsValue['currency'] ?? $bricklinkMinifigsValue['currency'] ?? $bricklinkLoosePartsValue['currency'];
+    $bricklinkInstructionManualsValue = computeInstructionManualsBricklinkValueTotal(getPDO());
+    $bricklinkValueTotal = $bricklinkSetsValue['total'] + $bricklinkMinifigsValue['total'] + $bricklinkLoosePartsValue['total'] + $bricklinkInstructionManualsValue['total'];
+    $bricklinkValueCurrency = $bricklinkSetsValue['currency'] ?? $bricklinkMinifigsValue['currency'] ?? $bricklinkLoosePartsValue['currency'] ?? $bricklinkInstructionManualsValue['currency'];
     if ($bricklinkValueTotal > 0) {
         echo '<span class="status-stat" id="status-stat-bricklink_value"><strong>' . formatNumber($bricklinkValueTotal, 2) . ' ' . htmlspecialchars(bricklinkCurrencySymbol($bricklinkValueCurrency)) . '</strong> ' . htmlspecialchars(t('stat_bricklink_value')) . '</span>';
     }
