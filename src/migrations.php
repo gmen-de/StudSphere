@@ -973,6 +973,42 @@ function getSchemaMigrations(): array
             dropIndexIfExists($pdo, 'storage_locations', 'idx_storage_locations_theme');
             addUniqueIndexIfMissing($pdo, 'storage_locations', 'idx_storage_locations_theme_unique', 'theme_id');
         },
+        47 => function (PDO $pdo): void {
+            // Theme folders now mirror a theme's FULL Rebrickable ancestor
+            // path (e.g. "Bauanleitungen > Train > 9V"), not a flat leaf
+            // theme directly under the root — per explicit follow-up
+            // request: the leaf name alone ("9V") is ambiguous without its
+            // parent for context. Every instructions_theme location
+            // migrations 45/46 created sits flat under the root; each one
+            // that actually has an ancestor gets re-parented onto that
+            // chain here, creating any missing intermediate theme locations
+            // along the way via the same functions the app itself now uses
+            // (src/instruction_manuals.php) — so an ancestor that happens to
+            // already exist as another set's own (still flat, not yet
+            // processed) leaf is correctly reused rather than duplicated.
+            $rootId = getInstructionsRootId($pdo);
+            if ($rootId === null) {
+                return;
+            }
+            $themeLocations = $pdo->query(
+                "SELECT id, theme_id FROM storage_locations WHERE location_type = 'instructions_theme'"
+            )->fetchAll();
+            foreach ($themeLocations as $loc) {
+                $themeId = (int) $loc['theme_id'];
+                if ($themeId === INSTRUCTIONS_THEME_FALLBACK_ID) {
+                    continue;
+                }
+                $ancestorChain = getThemeAncestorChain($pdo, $themeId);
+                if (empty($ancestorChain)) {
+                    continue;
+                }
+                $parentLocationId = $rootId;
+                foreach ($ancestorChain as $ancestor) {
+                    $parentLocationId = findOrCreateInstructionsLocationAtParent($pdo, $parentLocationId, $ancestor['theme_id'], $ancestor['name']);
+                }
+                $pdo->prepare('UPDATE storage_locations SET parent_id = ? WHERE id = ?')->execute([$parentLocationId, $loc['id']]);
+            }
+        },
     ];
 }
 
@@ -1116,7 +1152,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 46;
+const CURRENT_SCHEMA_VERSION = 47;
 
 function getInstalledSchemaVersion(): int
 {

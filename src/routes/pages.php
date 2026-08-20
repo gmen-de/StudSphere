@@ -1477,22 +1477,30 @@ SCRIPT;
   // the add tile only ever goes into the group that IS the currently viewed
   // location (location_label null/empty) — where exactly it's clicked from
   // no longer matters for filing purposes (a manual's location is always
-  // auto-derived from its set's theme, see addInstructionManual()), this
-  // just keeps it from appearing redundantly once per subgroup.
+  // auto-derived from its set's theme, see addInstructionManual()) — always
+  // rendered exactly once, regardless of grouping. Theme folders now nest
+  // onto their full Rebrickable ancestor path (e.g. "Bauanleitungen > Train
+  // > 9V"), so a manual is essentially never directly AT whatever location
+  // is currently being viewed (only ever a few levels further down) — tying
+  // the add-tile to a "here" group like earlier versions did would mean it
+  // almost never shows up at all.
   function buildInstructionManualsGrid(manuals) {
     var groups = groupByLocationLabel(manuals);
+
+    var addGrid = document.createElement('div');
+    addGrid.className = 'location-detail-grid instruction-manual-grid';
+    addGrid.appendChild(buildInstructionManualAddTile());
+
     if (groups.length <= 1) {
-      var grid = document.createElement('div');
-      grid.className = 'location-detail-grid instruction-manual-grid';
-      grid.appendChild(buildInstructionManualAddTile());
       manuals.forEach(function(manual) {
-        grid.appendChild(buildInstructionManualTile(manual));
+        addGrid.appendChild(buildInstructionManualTile(manual));
       });
-      return grid;
+      return addGrid;
     }
 
     var wrap = document.createElement('div');
     wrap.className = 'location-content-subgroups';
+    wrap.appendChild(addGrid);
     groups.forEach(function(group) {
       var section = document.createElement('div');
       section.className = 'location-content-subgroup';
@@ -1502,10 +1510,6 @@ SCRIPT;
       section.appendChild(heading);
       var grid = document.createElement('div');
       grid.className = 'location-detail-grid instruction-manual-grid';
-      var isHereGroup = group.items.length > 0 && (group.items[0].location_label === null || group.items[0].location_label === undefined);
-      if (isHereGroup) {
-        grid.appendChild(buildInstructionManualAddTile());
-      }
       group.items.forEach(function(manual) {
         grid.appendChild(buildInstructionManualTile(manual));
       });

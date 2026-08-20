@@ -101,20 +101,59 @@ const INSTRUCTIONS_THEME_FALLBACK_ID = 0;
 const INSTRUCTIONS_THEME_FALLBACK_NAME = 'Ohne Thema';
 
 /**
- * Finds (or creates, on first use) the "virtual" per-theme location under
- * "Bauanleitungen" that a manual with the given theme belongs in —
- * find-by-marker on (location_type, theme_id), same idiom as
- * getInstructionsRootId()/getPickLagerRootId(). $themeId/$themeName should
- * be INSTRUCTIONS_THEME_FALLBACK_ID/_NAME for a set with no theme at all.
+ * $themeId's ancestor chain, top-level first down to (but not including)
+ * $themeId's own immediate parent — e.g. for "9V" (a child of "Train", a
+ * top-level theme) this returns [{id: Train's id, name: 'Train'}]. Empty for
+ * a theme that's already top-level itself. Walks themes.parent_theme_id one
+ * row at a time (not a recursive CTE) for the same shared-hosting MariaDB-
+ * version reason as getStorageLocationPath() (src/storage.php).
+ *
+ * @return array<int, array{theme_id:int, name:string}>
+ */
+function getThemeAncestorChain(PDO $pdo, int $themeId): array
+{
+    $stmt = $pdo->prepare('SELECT parent_theme_id, name FROM themes WHERE theme_id = ?');
+    $chain = [];
+    $current = $themeId;
+    $guard = 0;
+    while ($guard++ < 20) {
+        $stmt->execute([$current]);
+        $row = $stmt->fetch();
+        if ($row === false || $row['parent_theme_id'] === null) {
+            break;
+        }
+        $parentId = (int) $row['parent_theme_id'];
+        $parentStmt = $pdo->prepare('SELECT name FROM themes WHERE theme_id = ?');
+        $parentStmt->execute([$parentId]);
+        $parentName = $parentStmt->fetchColumn();
+        if ($parentName === false) {
+            break;
+        }
+        array_unshift($chain, ['theme_id' => $parentId, 'name' => $parentName]);
+        $current = $parentId;
+    }
+    return $chain;
+}
+
+/**
+ * Finds (or creates, on first use) one specific theme location directly
+ * under $parentLocationId — the single-level primitive
+ * getOrCreateInstructionsThemeLocation() below chains once per level of a
+ * theme's ancestor path. find-by-marker on (location_type, theme_id) alone
+ * (not also parent_id): theme_id is globally unique across the whole table
+ * (storage_locations.theme_id's UNIQUE index), so once a theme's location
+ * exists anywhere it's simply reused as-is, regardless of which caller
+ * (a manual filed directly under it, or a deeper theme needing it as an
+ * ancestor) is asking — this is what lets the same "Train" folder serve
+ * both roles without extra bookkeeping.
  *
  * Two concurrent requests racing to create the very first location for the
- * same theme both pass the SELECT above before either INSERTs (confirmed
- * live — migration 46's own doc comment). storage_locations.theme_id has a
- * UNIQUE index specifically to turn that into a catchable integrity-
- * constraint violation rather than a silent duplicate: the loser here just
- * re-queries and gets the winner's row instead.
+ * same theme both pass the SELECT below before either INSERTs (confirmed
+ * live — migration 46's own doc comment). The UNIQUE index turns the loser's
+ * INSERT into a catchable integrity-constraint violation rather than a
+ * silent duplicate: it just re-queries and gets the winner's row instead.
  */
-function getOrCreateInstructionsThemeLocation(PDO $pdo, int $themeId, string $themeName): int
+function findOrCreateInstructionsLocationAtParent(PDO $pdo, int $parentLocationId, int $themeId, string $themeName): int
 {
     $stmt = $pdo->prepare("SELECT id FROM storage_locations WHERE location_type = 'instructions_theme' AND theme_id = ? LIMIT 1");
     $stmt->execute([$themeId]);
@@ -123,15 +162,11 @@ function getOrCreateInstructionsThemeLocation(PDO $pdo, int $themeId, string $th
         return (int) $id;
     }
 
-    $rootId = getInstructionsRootId($pdo);
-    if ($rootId === null) {
-        throw new RuntimeException('Instructions root location is missing — was migration 43 applied?');
-    }
     try {
         $insert = $pdo->prepare(
             "INSERT INTO storage_locations (parent_id, name, location_type, theme_id) VALUES (?, ?, 'instructions_theme', ?)"
         );
-        $insert->execute([$rootId, $themeName, $themeId]);
+        $insert->execute([$parentLocationId, $themeName, $themeId]);
         return (int) $pdo->lastInsertId();
     } catch (PDOException $e) {
         if ((int) $e->getCode() !== 23000) {
@@ -147,23 +182,66 @@ function getOrCreateInstructionsThemeLocation(PDO $pdo, int $themeId, string $th
 }
 
 /**
+ * Finds (or creates, on first use) the "virtual" per-theme location a manual
+ * with the given theme belongs in — nested onto the theme's FULL Rebrickable
+ * ancestor path (e.g. "Bauanleitungen > Train > 9V", not a flat "9V"
+ * directly under the root), since the leaf theme name alone can be
+ * ambiguous out of context (confirmed with the user, using exactly this
+ * "9V"/"Train" example). $themeId/$themeName should be
+ * INSTRUCTIONS_THEME_FALLBACK_ID/_NAME for a set with no theme at all — that
+ * one's always a flat child of the root, it has no ancestor chain to walk.
+ */
+function getOrCreateInstructionsThemeLocation(PDO $pdo, int $themeId, string $themeName): int
+{
+    $rootId = getInstructionsRootId($pdo);
+    if ($rootId === null) {
+        throw new RuntimeException('Instructions root location is missing — was migration 43 applied?');
+    }
+
+    $parentLocationId = $rootId;
+    if ($themeId !== INSTRUCTIONS_THEME_FALLBACK_ID) {
+        foreach (getThemeAncestorChain($pdo, $themeId) as $ancestor) {
+            $parentLocationId = findOrCreateInstructionsLocationAtParent($pdo, $parentLocationId, $ancestor['theme_id'], $ancestor['name']);
+        }
+    }
+    return findOrCreateInstructionsLocationAtParent($pdo, $parentLocationId, $themeId, $themeName);
+}
+
+/**
  * Deletes $locationId if (and only if) it's an instructions_theme location
- * that no longer holds any manuals — called after every delete (and, in
- * migration 45, every reassignment) so the tree only ever shows themes that
- * currently have something in them. Safe to call on any location id: the
- * location_type/NOT EXISTS guard means this is a silent no-op for anything
- * else (a still-occupied theme, the root, or a non-instructions location).
+ * that no longer holds any manuals AND has no child locations of its own
+ * (the latter matters now that a theme folder can double as an ancestor for
+ * a deeper theme — e.g. "Train" must survive emptying out even while "9V"
+ * still lives inside it) — then repeats one level up, since removing a leaf
+ * can leave its own parent newly empty-and-childless too. Called after every
+ * delete (and, in migration 45, every reassignment) so the tree only ever
+ * shows themes that currently have something in them, directly or via a
+ * descendant. Safe to call on any location id: the location_type/NOT EXISTS
+ * guards mean each step is a silent no-op (and the walk simply stops) for
+ * anything not eligible — a still-occupied theme, one that still has
+ * children, the root itself, or a non-instructions location.
  */
 function pruneEmptyInstructionsThemeLocation(PDO $pdo, int $locationId): void
 {
     $stmt = $pdo->prepare(
-        "SELECT sl.id FROM storage_locations sl
+        "SELECT sl.parent_id FROM storage_locations sl
          WHERE sl.id = ? AND sl.location_type = 'instructions_theme'
-           AND NOT EXISTS (SELECT 1 FROM instruction_manuals im WHERE im.location_id = sl.id)"
+           AND NOT EXISTS (SELECT 1 FROM instruction_manuals im WHERE im.location_id = sl.id)
+           AND NOT EXISTS (SELECT 1 FROM storage_locations child WHERE child.parent_id = sl.id)"
     );
-    $stmt->execute([$locationId]);
-    if ($stmt->fetchColumn() !== false) {
-        $pdo->prepare('DELETE FROM storage_locations WHERE id = ?')->execute([$locationId]);
+    $current = $locationId;
+    $guard = 0;
+    while ($guard++ < 20) {
+        $stmt->execute([$current]);
+        $parentId = $stmt->fetchColumn();
+        if ($parentId === false) {
+            break;
+        }
+        $pdo->prepare('DELETE FROM storage_locations WHERE id = ?')->execute([$current]);
+        if ($parentId === null) {
+            break;
+        }
+        $current = (int) $parentId;
     }
 }
 
