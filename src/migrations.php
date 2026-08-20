@@ -1116,7 +1116,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 45;
+const CURRENT_SCHEMA_VERSION = 46;
 
 function getInstalledSchemaVersion(): int
 {
