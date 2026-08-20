@@ -106,6 +106,13 @@ const INSTRUCTIONS_THEME_FALLBACK_NAME = 'Ohne Thema';
  * find-by-marker on (location_type, theme_id), same idiom as
  * getInstructionsRootId()/getPickLagerRootId(). $themeId/$themeName should
  * be INSTRUCTIONS_THEME_FALLBACK_ID/_NAME for a set with no theme at all.
+ *
+ * Two concurrent requests racing to create the very first location for the
+ * same theme both pass the SELECT above before either INSERTs (confirmed
+ * live — migration 46's own doc comment). storage_locations.theme_id has a
+ * UNIQUE index specifically to turn that into a catchable integrity-
+ * constraint violation rather than a silent duplicate: the loser here just
+ * re-queries and gets the winner's row instead.
  */
 function getOrCreateInstructionsThemeLocation(PDO $pdo, int $themeId, string $themeName): int
 {
@@ -120,11 +127,23 @@ function getOrCreateInstructionsThemeLocation(PDO $pdo, int $themeId, string $th
     if ($rootId === null) {
         throw new RuntimeException('Instructions root location is missing — was migration 43 applied?');
     }
-    $insert = $pdo->prepare(
-        "INSERT INTO storage_locations (parent_id, name, location_type, theme_id) VALUES (?, ?, 'instructions_theme', ?)"
-    );
-    $insert->execute([$rootId, $themeName, $themeId]);
-    return (int) $pdo->lastInsertId();
+    try {
+        $insert = $pdo->prepare(
+            "INSERT INTO storage_locations (parent_id, name, location_type, theme_id) VALUES (?, ?, 'instructions_theme', ?)"
+        );
+        $insert->execute([$rootId, $themeName, $themeId]);
+        return (int) $pdo->lastInsertId();
+    } catch (PDOException $e) {
+        if ((int) $e->getCode() !== 23000) {
+            throw $e;
+        }
+        $stmt->execute([$themeId]);
+        $id = $stmt->fetchColumn();
+        if ($id === false) {
+            throw $e;
+        }
+        return (int) $id;
+    }
 }
 
 /**

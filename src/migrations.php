@@ -932,6 +932,47 @@ function getSchemaMigrations(): array
                 pruneEmptyInstructionsThemeLocation($pdo, $oldLocationId);
             }
         },
+        46 => function (PDO $pdo): void {
+            // Migration 45's find-or-create had a TOCTOU race: two requests
+            // hitting getOrCreateInstructionsThemeLocation() for the same
+            // theme_id at the same time could both see "not found" and both
+            // insert — confirmed live (a real user was actively adding
+            // manuals the moment this migration first ran, so a concurrent
+            // request landed mid-migration). Merge any such duplicates
+            // before enforcing uniqueness at the DB level below.
+            $dupGroups = $pdo->query(
+                "SELECT theme_id, MIN(id) AS canonical_id
+                 FROM storage_locations
+                 WHERE location_type = 'instructions_theme'
+                 GROUP BY theme_id
+                 HAVING COUNT(*) > 1"
+            )->fetchAll();
+            foreach ($dupGroups as $group) {
+                $canonicalId = (int) $group['canonical_id'];
+                $dupStmt = $pdo->prepare(
+                    "SELECT id FROM storage_locations
+                     WHERE location_type = 'instructions_theme' AND theme_id <=> ? AND id != ?"
+                );
+                $dupStmt->execute([$group['theme_id'], $canonicalId]);
+                foreach ($dupStmt->fetchAll() as $dup) {
+                    $dupId = (int) $dup['id'];
+                    $pdo->prepare('UPDATE instruction_manuals SET location_id = ? WHERE location_id = ?')
+                        ->execute([$canonicalId, $dupId]);
+                    $pdo->prepare('DELETE FROM storage_locations WHERE id = ?')->execute([$dupId]);
+                }
+            }
+
+            // Now safe to convert the plain index migration 45 added into a
+            // real UNIQUE constraint — NULL (every non-instructions_theme
+            // location) is allowed to repeat under MariaDB's UNIQUE
+            // semantics, only the actual theme ids need to stay distinct, so
+            // this doesn't affect any other location type. Combined with
+            // getOrCreateInstructionsThemeLocation() now catching the
+            // resulting duplicate-key error and re-fetching, the same race
+            // can no longer create a second row for one theme.
+            dropIndexIfExists($pdo, 'storage_locations', 'idx_storage_locations_theme');
+            addUniqueIndexIfMissing($pdo, 'storage_locations', 'idx_storage_locations_theme_unique', 'theme_id');
+        },
     ];
 }
 
@@ -960,6 +1001,34 @@ function addIndexIfMissing(PDO $pdo, string $table, string $indexName, string $c
         return '`' . $c . '`';
     }, explode(',', $columns)));
     $pdo->exec("ALTER TABLE `$table` ADD INDEX `$indexName` ($columnList)");
+}
+
+/**
+ * Same as addIndexIfMissing(), but UNIQUE — for a column where only one row
+ * may ever hold a given non-NULL value (MariaDB's UNIQUE allows any number
+ * of NULLs, so this is safe on a column most rows leave NULL). Enforces
+ * find-or-create idioms like getOrCreateInstructionsThemeLocation()
+ * (src/instruction_manuals.php) at the DB level too, closing the race a
+ * plain non-unique index can't.
+ */
+function addUniqueIndexIfMissing(PDO $pdo, string $table, string $indexName, string $columns): void
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.statistics
+         WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?'
+    );
+    $stmt->execute([$table, $indexName]);
+    if ((int) $stmt->fetchColumn() > 0) {
+        return;
+    }
+    $columnList = implode(', ', array_map(function (string $c) {
+        $c = trim($c);
+        if (preg_match('/^([a-zA-Z0-9_]+)(\(\d+\))$/', $c, $m)) {
+            return '`' . $m[1] . '`' . $m[2];
+        }
+        return '`' . $c . '`';
+    }, explode(',', $columns)));
+    $pdo->exec("ALTER TABLE `$table` ADD UNIQUE INDEX `$indexName` ($columnList)");
 }
 
 /**
