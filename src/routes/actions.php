@@ -729,15 +729,26 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
             // Same "one price, matching this instance's own condition"
             // convention as part cards (see buildOnePartCard()'s
             // bricklink_unit_price, src/routes/pages.php) — 'is_new' selects
-            // which of the Instructions catalog entry's two BrickLink
-            // averages applies, rather than showing both.
+            // which of the two BrickLink averages applies, rather than
+            // showing both, for both the manual's own Instructions-catalog
+            // price and (per explicit follow-up request, shown alongside it
+            // for reference) the Set-catalog price of the set it belongs to.
             $instructionsPrice = $manual['is_new']
                 ? $manual['bricklink_instructions_price_new']
                 : $manual['bricklink_instructions_price_used'];
-            $manual['price_text'] = $instructionsPrice !== null
+            $manual['manual_price_text'] = $instructionsPrice !== null
                 ? formatNumber($instructionsPrice, 2) . ' ' . bricklinkCurrencySymbol($manual['bricklink_instructions_price_currency'])
                 : null;
-            unset($manual['bricklink_instructions_price_new'], $manual['bricklink_instructions_price_used'], $manual['bricklink_instructions_price_currency']);
+            $setPrice = $manual['is_new']
+                ? $manual['set_bricklink_price_new']
+                : $manual['set_bricklink_price_used'];
+            $manual['set_price_text'] = $setPrice !== null
+                ? formatNumber($setPrice, 2) . ' ' . bricklinkCurrencySymbol($manual['set_bricklink_price_currency'])
+                : null;
+            unset(
+                $manual['bricklink_instructions_price_new'], $manual['bricklink_instructions_price_used'], $manual['bricklink_instructions_price_currency'],
+                $manual['set_bricklink_price_new'], $manual['set_bricklink_price_used'], $manual['set_bricklink_price_currency']
+            );
         }
         unset($manual);
 

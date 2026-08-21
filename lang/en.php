@@ -796,6 +796,7 @@ return [
     'instruction_manual_price_instructions_label' => 'Instructions',
     'instruction_manual_price_new_label' => 'New',
     'instruction_manual_price_used_label' => 'Used',
+    'instruction_manual_tile_set_price_tooltip' => 'Set price (for comparison)',
     'instruction_manual_field_total' => 'Total parts',
     'instruction_manual_field_minifigs' => 'Minifigs',
 

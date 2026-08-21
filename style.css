@@ -1045,6 +1045,14 @@ button[type='submit'] {
   color: #16a34a;
 }
 
+/* The instruction-manual tile's own set-price hint (in parens, next to the
+   manual's own price) — muted and un-bolded so it stays clearly secondary to
+   the manual price it sits beside. */
+.instruction-manual-tile-set-price {
+  font-weight: 500;
+  color: #64748b;
+}
+
 .location-detail-card-qty {
   position: absolute;
   top: 0.4rem;

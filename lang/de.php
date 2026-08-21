@@ -796,6 +796,7 @@ return [
     'instruction_manual_price_instructions_label' => 'Bauanleitung',
     'instruction_manual_price_new_label' => 'Neu',
     'instruction_manual_price_used_label' => 'Gebraucht',
+    'instruction_manual_tile_set_price_tooltip' => 'Preis des Sets (zum Vergleich)',
     'instruction_manual_field_total' => 'Teile gesamt',
     'instruction_manual_field_minifigs' => 'Minifiguren',
 

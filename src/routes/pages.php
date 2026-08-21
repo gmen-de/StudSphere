@@ -805,6 +805,7 @@ SCRIPT;
         'instructionPriceInstructionsLabel' => t('instruction_manual_price_instructions_label'),
         'instructionPriceNewLabel' => t('instruction_manual_price_new_label'),
         'instructionPriceUsedLabel' => t('instruction_manual_price_used_label'),
+        'instructionTileSetPriceTooltip' => t('instruction_manual_tile_set_price_tooltip'),
         'bricklinkPriceNever' => t('owned_set_bricklink_price_never'),
         'bricklinkPriceUpdatedTitle' => t('owned_set_bricklink_price_updated_title'),
         'bricklinkPriceRefreshLabel' => t('owned_set_bricklink_price_refresh_label'),
@@ -1429,10 +1430,22 @@ SCRIPT;
     name.textContent = manual.set_name;
     card.appendChild(name);
 
-    if (manual.price_text) {
+    if (manual.manual_price_text || manual.set_price_text) {
       var price = document.createElement('span');
       price.className = 'location-detail-card-price';
-      price.textContent = manual.price_text;
+      if (manual.manual_price_text) {
+        price.appendChild(document.createTextNode(manual.manual_price_text));
+      }
+      if (manual.set_price_text) {
+        if (manual.manual_price_text) {
+          price.appendChild(document.createTextNode(' '));
+        }
+        var setPrice = document.createElement('span');
+        setPrice.className = 'instruction-manual-tile-set-price';
+        setPrice.title = texts.instructionTileSetPriceTooltip;
+        setPrice.textContent = '(' + manual.set_price_text + ')';
+        price.appendChild(setPrice);
+      }
       card.appendChild(price);
     }
 

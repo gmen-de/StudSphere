@@ -373,7 +373,7 @@ function getInstructionManualById(PDO $pdo, int $id): ?array
  * getLocationContentRecursive()). Raw rows, no percent_complete yet — see
  * getInstructionManualTilesForLocation() for that.
  *
- * @return array<int, array{id:int, location_id:int, set_id:int, is_new:bool, is_holed:bool, has_tears:bool, is_painted:bool, has_stickers:bool, is_glued:bool, binding_broken:bool, grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string}>
+ * @return array<int, array{id:int, location_id:int, set_id:int, is_new:bool, is_holed:bool, has_tears:bool, is_painted:bool, has_stickers:bool, is_glued:bool, binding_broken:bool, grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string, bricklink_instructions_price_new:?float, bricklink_instructions_price_used:?float, bricklink_instructions_price_currency:?string, set_bricklink_price_new:?float, set_bricklink_price_used:?float, set_bricklink_price_currency:?string}>
  */
 function getInstructionManualsForLocation(PDO $pdo, int $locationId): array
 {
@@ -382,7 +382,8 @@ function getInstructionManualsForLocation(PDO $pdo, int $locationId): array
     $stmt = $pdo->prepare(
         "SELECT im.id, im.location_id, im.set_id, im.is_new, im.is_holed, im.has_tears, im.is_painted, im.has_stickers, im.is_glued, im.binding_broken, im.notes,
                 s.rebrickable_set_num AS set_num, s.name AS set_name, s.local_image_path AS thumbnail,
-                s.bricklink_instructions_price_new, s.bricklink_instructions_price_used, s.bricklink_instructions_price_currency
+                s.bricklink_instructions_price_new, s.bricklink_instructions_price_used, s.bricklink_instructions_price_currency,
+                s.bricklink_price_new AS set_bricklink_price_new, s.bricklink_price_used AS set_bricklink_price_used, s.bricklink_price_currency AS set_bricklink_price_currency
          FROM instruction_manuals im
          INNER JOIN sets s ON s.id = im.set_id
          WHERE im.location_id IN ($placeholders)
@@ -393,6 +394,8 @@ function getInstructionManualsForLocation(PDO $pdo, int $locationId): array
     foreach ($rows as &$row) {
         $row['bricklink_instructions_price_new'] = $row['bricklink_instructions_price_new'] !== null ? (float) $row['bricklink_instructions_price_new'] : null;
         $row['bricklink_instructions_price_used'] = $row['bricklink_instructions_price_used'] !== null ? (float) $row['bricklink_instructions_price_used'] : null;
+        $row['set_bricklink_price_new'] = $row['set_bricklink_price_new'] !== null ? (float) $row['set_bricklink_price_new'] : null;
+        $row['set_bricklink_price_used'] = $row['set_bricklink_price_used'] !== null ? (float) $row['set_bricklink_price_used'] : null;
     }
     unset($row);
     return $rows;
