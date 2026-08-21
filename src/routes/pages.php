@@ -2559,6 +2559,13 @@ SCRIPT;
     explorer.style.height = Math.max(320, height) + 'px';
   }
   sizeExplorer();
+  // This inline script runs synchronously while the parser is still inside
+  // <main> — <footer> is later in the document and doesn't exist yet, so the
+  // immediate call above always runs without it (querySelector('footer')
+  // returns null, reserved stays at the fallback). Re-run once the whole
+  // document (footer included) has been parsed so the real footer height
+  // gets reserved too.
+  document.addEventListener('DOMContentLoaded', sizeExplorer);
   window.addEventListener('resize', sizeExplorer);
 })();
 </script>
