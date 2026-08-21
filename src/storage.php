@@ -86,7 +86,7 @@ function deleteStorageLocation(int $id): void
 function getStorageLocation(int $id): ?array
 {
     $pdo = getPDO();
-    $stmt = $pdo->prepare('SELECT id, parent_id, name, location_type FROM storage_locations WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, parent_id, name, location_type, flagged_for_stocktake_at FROM storage_locations WHERE id = ?');
     $stmt->execute([$id]);
     $row = $stmt->fetch();
     return $row === false ? null : $row;

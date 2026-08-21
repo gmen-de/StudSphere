@@ -115,6 +115,9 @@ function getActionIcon(string $key): string
         // clipboard). Used both for the instructions_root tree row and every
         // manual tile.
         'instructions' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5c2.2-1.3 5-1.3 7 0v14c-2-1.3-4.8-1.3-7 0z"/><path d="M20 5.5c-2.2-1.3-5-1.3-7 0v14c2-1.3 4.8-1.3 7 0z"/><path d="M11 5.5v14"/></svg>',
+        // Inventur (src/stocktakes.php) — a clipboard with a checkmark,
+        // distinct from 'pick_list' (clipboard with dots).
+        'stocktake' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="17" rx="1.5"/><path d="M9 3.5h6a1 1 0 0 1 1 1V6H8V4.5a1 1 0 0 1 1-1z"/><path d="M8 12.5l2.3 2.3L16 9.5"/></svg>',
     ];
 
     return $icons[$key] ?? '';

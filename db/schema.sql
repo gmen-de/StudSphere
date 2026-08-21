@@ -186,12 +186,16 @@ CREATE TABLE IF NOT EXISTS inventory_minifigs (
 -- only ever populated for location_type='instructions_theme' rows, the
 -- auto-managed "virtual" per-theme folders under "Bauanleitungen" (see
 -- getOrCreateInstructionsThemeLocation(), src/instruction_manuals.php).
+-- flagged_for_stocktake_at marks a location as "zur Inventur vorgemerkt" —
+-- set/cleared via the location explorer, cleared automatically once its
+-- stocktake completes (see src/stocktakes.php).
 CREATE TABLE IF NOT EXISTS storage_locations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     parent_id INT DEFAULT NULL,
     name VARCHAR(255) NOT NULL,
     location_type VARCHAR(50) DEFAULT NULL,
     theme_id INT DEFAULT NULL,
+    flagged_for_stocktake_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_location_parent FOREIGN KEY (parent_id) REFERENCES storage_locations(id) ON DELETE RESTRICT,
     UNIQUE INDEX idx_storage_locations_theme_unique (theme_id)
@@ -587,6 +591,64 @@ CREATE TABLE IF NOT EXISTS pick_list_stocktake_flags (
     CONSTRAINT fk_plflag_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE CASCADE,
     CONSTRAINT fk_plflag_user FOREIGN KEY (flagged_by) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_plflag_unresolved (resolved_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Inventur (re-count) for owned sets and flagged storage locations — see
+-- src/stocktakes.php. Its own tables rather than reusing
+-- pick_lists/pick_list_items: a stocktake never physically relocates stock
+-- (no move_out/move_in pair), it only corrects the quantity already sitting
+-- at the same location.
+CREATE TABLE IF NOT EXISTS stocktakes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    source_type ENUM('owned_set', 'location') NOT NULL,
+    owned_set_id INT DEFAULT NULL,
+    location_id INT NOT NULL,
+    recursive_scope TINYINT(1) NOT NULL DEFAULT 0,
+    status ENUM('active', 'completed') NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL DEFAULT NULL,
+    CONSTRAINT fk_stocktake_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_stocktake_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE CASCADE,
+    CONSTRAINT fk_stocktake_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE CASCADE,
+    INDEX idx_stocktake_ownedset_status (owned_set_id, status),
+    INDEX idx_stocktake_location_status (location_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- location_id + condition_type are the exact write-back target for a 'part'
+-- item (always populated, for BOTH source types — an owned_set stocktake
+-- just repeats the set's own location/condition on every row). This is what
+-- makes a recursive location stocktake safe: a part sitting at two different
+-- sub-locations becomes two separate rows here instead of one aggregated
+-- number, so confirming one never silently moves stock into a location it
+-- was never actually counted at.
+--
+-- nominal_quantity ("Soll") and previous_actual_quantity are deliberately two
+-- different numbers: nominal is the set's BOM count (used to clamp an
+-- owned_set part write exactly like the existing inventory-tab editor does),
+-- while previous_actual_quantity is whatever was really on record right
+-- before this stocktake zeroed it out — the value cancelStocktake() restores
+-- an unconfirmed row to. For a location-type item (no BOM concept) both
+-- columns hold the same pre-stocktake value.
+CREATE TABLE IF NOT EXISTS stocktake_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    stocktake_id INT NOT NULL,
+    item_type ENUM('part', 'minifig') NOT NULL,
+    location_id INT DEFAULT NULL,
+    part_id INT DEFAULT NULL,
+    color_id INT DEFAULT NULL,
+    condition_type ENUM('new', 'used') DEFAULT NULL,
+    minifig_id INT DEFAULT NULL,
+    nominal_quantity INT NOT NULL,
+    previous_actual_quantity INT NOT NULL DEFAULT 0,
+    confirmed_quantity INT DEFAULT NULL,
+    confirmed_at TIMESTAMP NULL DEFAULT NULL,
+    CONSTRAINT fk_stitem_stocktake FOREIGN KEY (stocktake_id) REFERENCES stocktakes(id) ON DELETE CASCADE,
+    CONSTRAINT fk_stitem_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_stitem_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_stitem_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_stitem_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
+    INDEX idx_stitem_stocktake (stocktake_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- "Baubare Sets" (?page=build_sets, src/build_sets.php): one row per catalog

@@ -23,6 +23,7 @@ require_once __DIR__ . '/src/pick_lists.php';
 require_once __DIR__ . '/src/instruction_manuals.php';
 require_once __DIR__ . '/src/owned_sets.php';
 require_once __DIR__ . '/src/owned_set_wizard.php';
+require_once __DIR__ . '/src/stocktakes.php';
 require_once __DIR__ . '/src/minifigs.php';
 require_once __DIR__ . '/src/minifig_modal.php';
 require_once __DIR__ . '/src/owned_minifigs.php';

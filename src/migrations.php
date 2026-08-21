@@ -1107,6 +1107,79 @@ function getSchemaMigrations(): array
                 dropColumnIfExists($pdo, 'instruction_manuals', $column);
             }
         },
+        50 => function (PDO $pdo): void {
+            // Inventur (re-count) for owned sets and flagged storage
+            // locations — see src/stocktakes.php. Deliberately its own two
+            // tables rather than reusing pick_lists/pick_list_items: a
+            // stocktake never physically relocates stock the way a pick list
+            // does (setStorageItemQuantity()/addStorageStock() move_out/
+            // move_in pairs), it only corrects the quantity already sitting
+            // at the same location, so it needs none of that machinery.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS stocktakes (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    source_type ENUM(\'owned_set\', \'location\') NOT NULL,
+                    owned_set_id INT DEFAULT NULL,
+                    location_id INT NOT NULL,
+                    recursive_scope TINYINT(1) NOT NULL DEFAULT 0,
+                    status ENUM(\'active\', \'completed\') NOT NULL DEFAULT \'active\',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP NULL DEFAULT NULL,
+                    CONSTRAINT fk_stocktake_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_stocktake_ownedset FOREIGN KEY (owned_set_id) REFERENCES owned_sets(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_stocktake_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE CASCADE,
+                    INDEX idx_stocktake_ownedset_status (owned_set_id, status),
+                    INDEX idx_stocktake_location_status (location_id, status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+            // location_id + condition_type are the exact write-back target
+            // for a 'part' item (always populated, for BOTH source types —
+            // an owned_set stocktake just repeats the set's own location/
+            // condition on every row). This is what makes a recursive
+            // location stocktake safe: a part sitting at two different
+            // sub-locations becomes two separate rows here instead of one
+            // aggregated number, so confirming one never silently moves
+            // stock from wherever it physically was into some other location
+            // it was never actually counted at.
+            //
+            // nominal_quantity ("Soll") and previous_actual_quantity are
+            // deliberately two different numbers, not one: nominal is the
+            // set's BOM count (used to clamp an owned_set part write exactly
+            // like the existing inventory-tab editor does, via
+            // setOwnedSetPartInventory()), while previous_actual_quantity is
+            // whatever was really on record right before this stocktake
+            // zeroed it out — the value cancelStocktake() restores an
+            // unconfirmed row to. A set that already had 2 of 6 missing
+            // before the stocktake started must cancel back to that same 2,
+            // not silently top back up to the full nominal 6. For a
+            // location-type item (no BOM concept) both columns hold the same
+            // pre-stocktake value.
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS stocktake_items (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    stocktake_id INT NOT NULL,
+                    item_type ENUM(\'part\', \'minifig\') NOT NULL,
+                    location_id INT DEFAULT NULL,
+                    part_id INT DEFAULT NULL,
+                    color_id INT DEFAULT NULL,
+                    condition_type ENUM(\'new\', \'used\') DEFAULT NULL,
+                    minifig_id INT DEFAULT NULL,
+                    nominal_quantity INT NOT NULL,
+                    previous_actual_quantity INT NOT NULL DEFAULT 0,
+                    confirmed_quantity INT DEFAULT NULL,
+                    confirmed_at TIMESTAMP NULL DEFAULT NULL,
+                    CONSTRAINT fk_stitem_stocktake FOREIGN KEY (stocktake_id) REFERENCES stocktakes(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_stitem_location FOREIGN KEY (location_id) REFERENCES storage_locations(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_stitem_part FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_stitem_color FOREIGN KEY (color_id) REFERENCES colors(id) ON DELETE RESTRICT,
+                    CONSTRAINT fk_stitem_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE RESTRICT,
+                    INDEX idx_stitem_stocktake (stocktake_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+
+            addColumnIfMissing($pdo, 'storage_locations', 'flagged_for_stocktake_at', 'TIMESTAMP NULL DEFAULT NULL');
+        },
     ];
 }
 
@@ -1250,7 +1323,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 49;
+const CURRENT_SCHEMA_VERSION = 50;
 
 function getInstalledSchemaVersion(): int
 {

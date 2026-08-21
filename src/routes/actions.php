@@ -903,13 +903,169 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     }
     unset($minifig);
 
+    $activeStocktake = $readOnly ? null : getActiveStocktakeForLocation($pdo, $locationId);
+
     echo json_encode([
         'categories' => $categories,
         'minifigs' => $minifigs,
         'ldraw' => $ldrawStatus,
         'readOnly' => $readOnly,
         'ownedSetId' => $ownedSetId,
+        'stocktakeFlagged' => $location['flagged_for_stocktake_at'] !== null,
+        'stocktakeActive' => $activeStocktake !== null ? (
+            ['stocktakeId' => (int) $activeStocktake['id'], 'recursive' => (bool) $activeStocktake['recursive_scope']] + getStocktakeProgress($pdo, (int) $activeStocktake['id'])
+        ) : null,
     ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// Inventur (src/stocktakes.php) — the guided re-count modal shared by
+// owned_set_detail and the location Explorer. Every mutating action here
+// follows the same try/catch-into-JSON convention as save_owned_set_inventory
+// above: a RuntimeException's already-translated message becomes the
+// response's "message" field directly.
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'start_stocktake_for_owned_set') {
+    header('Content-Type: application/json');
+    try {
+        $stocktakeOwnedSet = getOwnedSetById($pdo, (int) ($_POST['owned_set_id'] ?? 0));
+        if ($stocktakeOwnedSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        $stocktakeId = startStocktakeForOwnedSet($pdo, (int) $_SESSION['user_id'], $stocktakeOwnedSet);
+        echo json_encode(['success' => true, 'stocktakeId' => $stocktakeId], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'start_stocktake_for_location') {
+    header('Content-Type: application/json');
+    try {
+        $stocktakeLocationId = (int) ($_POST['location_id'] ?? 0);
+        $stocktakeRecursive = ($_POST['recursive'] ?? '0') === '1';
+        $stocktakeId = startStocktakeForLocation($pdo, (int) $_SESSION['user_id'], $stocktakeLocationId, $stocktakeRecursive);
+        echo json_encode(['success' => true, 'stocktakeId' => $stocktakeId], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'stocktake_next_item') {
+    header('Content-Type: application/json');
+    try {
+        $stocktakeId = (int) ($_POST['stocktake_id'] ?? 0);
+        if (getStocktake($pdo, $stocktakeId) === null) {
+            throw new RuntimeException(t('stocktake_not_active_error'));
+        }
+        echo json_encode([
+            'success' => true,
+            'item' => getNextStocktakeItem($pdo, $stocktakeId),
+            'progress' => getStocktakeProgress($pdo, $stocktakeId),
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// Powers the guided modal's "Zurück" button — re-fetches one specific,
+// possibly already-confirmed item for display (unlike stocktake_next_item,
+// which only ever surfaces unconfirmed ones).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'stocktake_item_get') {
+    header('Content-Type: application/json');
+    try {
+        $stocktakeId = (int) ($_POST['stocktake_id'] ?? 0);
+        $stocktakeItemId = (int) ($_POST['stocktake_item_id'] ?? 0);
+        $item = getStocktakeItemDisplayById($pdo, $stocktakeId, $stocktakeItemId);
+        if ($item === null) {
+            throw new RuntimeException(t('stocktake_item_not_found_error'));
+        }
+        echo json_encode(['success' => true, 'item' => $item, 'progress' => getStocktakeProgress($pdo, $stocktakeId)], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'stocktake_item_confirm') {
+    header('Content-Type: application/json');
+    try {
+        $stocktakeId = (int) ($_POST['stocktake_id'] ?? 0);
+        $stocktakeItemId = (int) ($_POST['stocktake_item_id'] ?? 0);
+        $quantity = (int) ($_POST['quantity'] ?? -1);
+        if ($quantity < 0) {
+            throw new RuntimeException(t('stocktake_item_not_found_error'));
+        }
+        $result = confirmStocktakeItem($pdo, $stocktakeId, $stocktakeItemId, $quantity, (int) $_SESSION['user_id']);
+        echo json_encode(['success' => true] + $result, JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'stocktake_complete') {
+    header('Content-Type: application/json');
+    try {
+        completeStocktake($pdo, (int) ($_POST['stocktake_id'] ?? 0));
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'stocktake_cancel') {
+    header('Content-Type: application/json');
+    try {
+        cancelStocktake($pdo, (int) ($_POST['stocktake_id'] ?? 0), (int) $_SESSION['user_id']);
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// GET status check for the resume banner/pill — owned_set_id OR location_id,
+// whichever the caller has at hand.
+if (isset($_GET['action']) && $_GET['action'] === 'stocktake_status') {
+    header('Content-Type: application/json');
+    $active = null;
+    if (isset($_GET['owned_set_id'])) {
+        $active = getActiveStocktakeForOwnedSet($pdo, (int) $_GET['owned_set_id']);
+    } elseif (isset($_GET['location_id'])) {
+        $active = getActiveStocktakeForLocation($pdo, (int) $_GET['location_id']);
+    }
+    if ($active === null) {
+        echo json_encode(['active' => false], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode(['active' => true, 'stocktakeId' => (int) $active['id']] + getStocktakeProgress($pdo, (int) $active['id']), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_location_stocktake_flag') {
+    header('Content-Type: application/json');
+    try {
+        $flagLocationId = (int) ($_POST['location_id'] ?? 0);
+        $flagged = ($_POST['flagged'] ?? '0') === '1';
+        $pdo->prepare('UPDATE storage_locations SET flagged_for_stocktake_at = ' . ($flagged ? 'NOW()' : 'NULL') . ' WHERE id = ?')
+            ->execute([$flagLocationId]);
+        echo json_encode(['success' => true, 'flagged' => $flagged], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
     exit;
 }
 

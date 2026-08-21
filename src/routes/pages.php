@@ -840,6 +840,10 @@ SCRIPT;
         'hereLabel' => t('location_content_here_label'),
         'setReadOnlyNote' => t('location_content_set_readonly'),
         'recursiveToggleLabel' => t('location_content_recursive_toggle'),
+        'stocktakeFlagLabel' => t('stocktake_flag_label'),
+        'stocktakeStartLabel' => t('stocktake_start_button'),
+        'stocktakeResumeLabel' => t('stocktake_resume_button'),
+        'stocktakeIcon' => getActionIcon('stocktake'),
         'openSetDetailsLink' => t('location_content_open_set_details'),
         'instructionsAddTileLabel' => t('instruction_manual_add_tile_label'),
         'instructionPercentTooltip' => t('instruction_manual_percent_tooltip'),
@@ -2217,6 +2221,55 @@ SCRIPT;
     });
   }
 
+  // "Zur Inventur vormerken" checkbox + "Inventur starten/fortsetzen" button
+  // — only ever shown for a genuine, directly-editable location (the caller
+  // already gates this on !currentReadOnly), never for an owned_set/pick_list
+  // node or the Bauanleitungen root. Rebuilt fresh on every renderContent()
+  // call so it always reflects that specific location's own flag/active
+  // session state, exactly like the recursive toggle right above it.
+  function buildStocktakeControls(locationId, data) {
+    var wrap = document.createElement('div');
+    wrap.className = 'location-stocktake-controls';
+
+    var flagLabel = document.createElement('label');
+    flagLabel.className = 'location-recursive-toggle';
+    var flagInput = document.createElement('input');
+    flagInput.type = 'checkbox';
+    flagInput.checked = !!data.stocktakeFlagged;
+    flagInput.addEventListener('change', function() {
+      var formData = new FormData();
+      formData.set('action', 'toggle_location_stocktake_flag');
+      formData.set('location_id', String(locationId));
+      formData.set('flagged', flagInput.checked ? '1' : '0');
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' }).catch(function() {});
+    });
+    flagLabel.appendChild(flagInput);
+    flagLabel.appendChild(document.createTextNode(' ' + texts.stocktakeFlagLabel));
+    wrap.appendChild(flagLabel);
+
+    var startBtn = document.createElement('button');
+    startBtn.type = 'button';
+    startBtn.className = 'location-stocktake-start-button';
+    var active = data.stocktakeActive;
+    startBtn.innerHTML = texts.stocktakeIcon;
+    startBtn.appendChild(document.createTextNode(' ' + (active ? texts.stocktakeResumeLabel + ' (' + active.confirmed + '/' + active.total + ')' : texts.stocktakeStartLabel)));
+    startBtn.addEventListener('click', function() {
+      window.openStocktakeModal(
+        'start_stocktake_for_location',
+        { location_id: locationId, recursive: recursiveEnabled ? '1' : '0' },
+        active ? active.stocktakeId : null,
+        function(changed) {
+          if (changed) {
+            refreshContent();
+          }
+        }
+      );
+    });
+    wrap.appendChild(startBtn);
+
+    return wrap;
+  }
+
   function renderContent(id, name, data) {
     contentEl.innerHTML = '';
     allSelectableItems = [];
@@ -2243,6 +2296,10 @@ SCRIPT;
     recursiveToggleLabel.appendChild(recursiveToggleInput);
     recursiveToggleLabel.appendChild(document.createTextNode(' ' + texts.recursiveToggleLabel));
     contentEl.appendChild(recursiveToggleLabel);
+
+    if (!currentReadOnly) {
+      contentEl.appendChild(buildStocktakeControls(id, data));
+    }
 
     if (currentReadOnly) {
       var readOnlyNote = document.createElement('p');
@@ -2576,6 +2633,7 @@ SCRIPT;
     // .part-card document-click delegate, but the modal's own markup/script
     // still needs to be present on the page for that to exist at all.
     $content .= renderPartDetailModal();
+    $content .= renderStocktakeModal();
 
     renderApp(t('locations_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('locations_title'), 'url' => null]]);
     exit;
@@ -4406,6 +4464,14 @@ SCRIPT;
     $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-pick-list-open" title="' . htmlspecialchars(t('owned_set_pick_list_label')) . '" aria-label="' . htmlspecialchars(t('owned_set_pick_list_label')) . '">' . getActionIcon('pick_list') . '</button>';
     $content .= '</form>';
     $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-sell-open" title="' . htmlspecialchars(t('owned_set_sell_heading')) . '" aria-label="' . htmlspecialchars(t('owned_set_sell_heading')) . '">' . getActionIcon('sell') . '</button>';
+    // A still-sealed instance has no meaningful Inventur (see
+    // owned_set_sealed_note elsewhere on this page) — same one-way
+    // new->used rule setOwnedSetPartInventory()'s docs already describe, so
+    // the button simply doesn't exist until the set is opened, rather than
+    // existing disabled with an explanation.
+    if ($ownedSet['condition_type'] !== 'new') {
+        $content .= '<button type="button" class="owned-set-action-pill" id="owned-set-stocktake-open" title="' . htmlspecialchars(t('stocktake_start_button')) . '" aria-label="' . htmlspecialchars(t('stocktake_start_button')) . '">' . getActionIcon('stocktake') . '</button>';
+    }
     $removeConfirmJson = json_encode(t('owned_set_remove_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $content .= <<<SCRIPT
 <script>
@@ -4678,6 +4744,51 @@ SCRIPT;
 
     $content .= '</div>'; // .owned-set-tabs-row
     $content .= '</div>'; // .owned-set-layout
+
+    if ($ownedSet['condition_type'] !== 'new') {
+        $content .= renderStocktakeModal();
+        $stocktakeOwnedSetIdJson = json_encode($ownedSet['id']);
+        $stocktakeResumeLabelJson = json_encode(t('stocktake_resume_button'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $content .= <<<SCRIPT
+<script>
+(function(){
+  var ownedSetId = $stocktakeOwnedSetIdJson;
+  var openBtn = document.getElementById('owned-set-stocktake-open');
+  if (!openBtn) { return; }
+
+  function applyResumeState(res) {
+    if (res && res.active) {
+      openBtn.dataset.resumeId = res.stocktakeId;
+      var label = $stocktakeResumeLabelJson + ' (' + res.confirmed + '/' + res.total + ')';
+      openBtn.title = label;
+      openBtn.setAttribute('aria-label', label);
+    } else {
+      delete openBtn.dataset.resumeId;
+    }
+  }
+
+  fetch('?action=stocktake_status&owned_set_id=' + ownedSetId, { credentials: 'same-origin' })
+    .then(function(r) { return r.json(); })
+    .then(applyResumeState)
+    .catch(function() {});
+
+  openBtn.addEventListener('click', function() {
+    var resumeId = openBtn.dataset.resumeId ? parseInt(openBtn.dataset.resumeId, 10) : null;
+    window.openStocktakeModal('start_stocktake_for_owned_set', { owned_set_id: ownedSetId }, resumeId, function(changed) {
+      if (changed) {
+        window.location.reload();
+      } else {
+        fetch('?action=stocktake_status&owned_set_id=' + ownedSetId, { credentials: 'same-origin' })
+          .then(function(r) { return r.json(); })
+          .then(applyResumeState)
+          .catch(function() {});
+      }
+    });
+  });
+})();
+</script>
+SCRIPT;
+    }
 
     $ownedSetPageTitle = t('owned_set_detail_page_title', ['set_num' => $ownedSet['rebrickable_set_num'], 'name' => $ownedSet['name']]);
     renderApp($ownedSetPageTitle, $content, $user, computeAppStats($pdo), $ownedSetBreadcrumbs);
