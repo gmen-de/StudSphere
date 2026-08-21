@@ -605,7 +605,11 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $editLocation = $editId !== null ? getStorageLocation($editId) : null;
     $isEdit = $editLocation !== null;
 
-    $content = '<h1>' . htmlspecialchars(t('locations_title')) . '</h1>';
+    // No <h1> here (removed per explicit follow-up request, to save
+    // vertical space for the tree/content split view below) — the page
+    // title/breadcrumb (both still "Mein Lager", via t('locations_title'))
+    // already say where you are.
+    $content = '';
     if ($locationMessage !== '') {
         $content .= '<p><strong>' . htmlspecialchars($locationMessage) . '</strong></p>';
     }
