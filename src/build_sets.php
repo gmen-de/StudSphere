@@ -46,6 +46,17 @@ require_once __DIR__ . '/storage.php';
 const BUILD_SETS_SCAN_BATCH_SIZE = 150;
 const BUILD_SETS_SCAN_TIME_BUDGET_SECONDS = 4.0;
 
+// getBuildableSetsResults() had no LIMIT at all until this was added — with
+// no theme/year scope set, the unfiltered catalog returns ~19,600 matching
+// rows, and rendering all of them as one page (each a tile with an image
+// plus 4 progress bars) was confirmed live to make the whole server
+// unresponsive: not from the query itself (a few ms) but from the browser
+// then firing off thousands of simultaneous image requests, saturating
+// Apache's worker pool. Same infinite-scroll sentinel pattern as
+// sets_search/minifigs_search/bricks_search (src/routes/pages.php) fixes
+// this by only ever rendering one page's worth at a time.
+const BUILD_SETS_RESULTS_PAGE_SIZE = 100;
+
 const BUILD_SETS_CACHE_COMPUTED_AT_KEY = 'buildable_sets_cache_computed_at';
 const BUILD_SETS_CACHE_SCOPE_KEY = 'buildable_sets_cache_scope';
 const BUILD_SETS_CACHE_STALE_KEY = 'buildable_sets_cache_stale';
@@ -103,24 +114,25 @@ function getBuildableSetsCacheMeta(PDO $pdo): array
 }
 
 /**
- * Reads the cached scan (buildable_sets_cache joined with sets for display
- * info), computing percentages at read time rather than storing them (same
- * convention as getOwnedSetCompleteness()). $exclusiveOnly/$exclusiveRareOnly
- * are pure filters over the already-cached numbers — no re-scan, mirrors how
- * "Baubare Minifiguren"'s own filters work purely in PHP/SQL over an
- * already-computed list.
+ * Reads one page of the cached scan (buildable_sets_cache joined with sets
+ * for display info), computing percentages at read time rather than storing
+ * them (same convention as getOwnedSetCompleteness()). $exclusiveOnly/
+ * $exclusiveRareOnly are pure filters over the already-cached numbers — no
+ * re-scan, mirrors how "Baubare Minifiguren"'s own filters work purely in
+ * SQL over an already-computed list. Sorting (highest total-completeness
+ * first) happens in SQL now, not a post-fetch usort() — required for
+ * LIMIT/OFFSET to paginate a consistently-ordered result instead of an
+ * arbitrary row-storage order; done as a plain ratio rather than the display
+ * percent() closure's rounding/100-cap, which doesn't change the ordering.
  *
- * @return array<int, array{set_id:int, rebrickable_set_num:string, name:string, thumbnail:?string, year:?int,
+ * @return array{items: array<int, array{set_id:int, rebrickable_set_num:string, name:string, thumbnail:?string, year:?int,
  *   total_percent:float, total_actual:int, total_nominal:int,
  *   exclusive_percent:float, exclusive_actual:int, exclusive_nominal:int,
  *   rare_percent:float, rare_actual:int, rare_nominal:int,
- *   minifig_percent:float, minifig_actual:int, minifig_nominal:int}>
+ *   minifig_percent:float, minifig_actual:int, minifig_nominal:int}>, total: int, page: int, perPage: int}
  */
-function getBuildableSetsResults(PDO $pdo, bool $exclusiveOnly, bool $exclusiveRareOnly): array
+function getBuildableSetsResults(PDO $pdo, bool $exclusiveOnly, bool $exclusiveRareOnly, int $page, int $perPage): array
 {
-    $sql = 'SELECT bsc.*, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail, s.year
-            FROM buildable_sets_cache bsc
-            INNER JOIN sets s ON s.id = bsc.set_id';
     // total_nominal = 0 means this catalog entry has no own inventory_parts
     // at all — mostly "Super Pack"/bundle set numbers that just repackage
     // other complete sets rather than listing their own parts. Without this
@@ -134,18 +146,27 @@ function getBuildableSetsResults(PDO $pdo, bool $exclusiveOnly, bool $exclusiveR
     if ($exclusiveRareOnly) {
         $conditions[] = 'bsc.rare_actual >= bsc.rare_nominal';
     }
-    if (!empty($conditions)) {
-        $sql .= ' WHERE ' . implode(' AND ', $conditions);
-    }
+    $whereSql = 'WHERE ' . implode(' AND ', $conditions);
+
+    $total = (int) $pdo->query("SELECT COUNT(*) FROM buildable_sets_cache bsc $whereSql")->fetchColumn();
+
+    $perPage = max(1, $perPage);
+    $offset = (max(1, $page) - 1) * $perPage;
+    $sql = "SELECT bsc.*, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail, s.year
+            FROM buildable_sets_cache bsc
+            INNER JOIN sets s ON s.id = bsc.set_id
+            $whereSql
+            ORDER BY (bsc.total_actual / bsc.total_nominal) DESC, bsc.set_id ASC
+            LIMIT $perPage OFFSET $offset";
     $rows = $pdo->query($sql)->fetchAll();
 
     $percent = function (int $actual, int $nominal): float {
         return $nominal > 0 ? round(min(100.0, ($actual / $nominal) * 100), 1) : 100.0;
     };
 
-    $results = [];
+    $items = [];
     foreach ($rows as $row) {
-        $results[] = [
+        $items[] = [
             'set_id' => (int) $row['set_id'],
             'rebrickable_set_num' => $row['rebrickable_set_num'],
             'name' => $row['name'],
@@ -166,11 +187,7 @@ function getBuildableSetsResults(PDO $pdo, bool $exclusiveOnly, bool $exclusiveR
         ];
     }
 
-    usort($results, function (array $a, array $b): int {
-        return $b['total_percent'] <=> $a['total_percent'];
-    });
-
-    return $results;
+    return ['items' => $items, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
 }
 
 /**

@@ -3439,12 +3439,43 @@ SCRIPT;
     exit;
 }
 
+/**
+ * One "Baubare Sets" result tile — shared by the initial page render and the
+ * ajax=1 infinite-scroll continuation (both below), so the two can never
+ * drift apart in markup.
+ */
+function renderBuildableSetTile(array $row): string
+{
+    $html = '<a class="buildable-set-tile" href="?page=set_detail&id=' . $row['set_id'] . '">';
+    $html .= '<span class="buildable-set-tile-image">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
+    $html .= '<span class="buildable-set-tile-name">' . htmlspecialchars($row['name']) . ' <span class="hint">' . htmlspecialchars($row['rebrickable_set_num']) . '</span></span>';
+
+    $metrics = [
+        ['build_sets_tile_total', $row['total_percent'], $row['total_actual'], $row['total_nominal']],
+        ['build_sets_tile_exclusive', $row['exclusive_percent'], $row['exclusive_actual'], $row['exclusive_nominal']],
+        ['build_sets_tile_rare', $row['rare_percent'], $row['rare_actual'], $row['rare_nominal']],
+        ['build_sets_tile_minifigs', $row['minifig_percent'], $row['minifig_actual'], $row['minifig_nominal']],
+    ];
+    $html .= '<div class="buildable-set-tile-metrics">';
+    foreach ($metrics as [$labelKey, $percent, $actual, $nominal]) {
+        $html .= '<div class="buildable-set-tile-metric">';
+        $html .= '<span class="buildable-set-tile-metric-label">' . htmlspecialchars(t($labelKey)) . '</span>';
+        $html .= '<div class="progress-track buildable-set-tile-bar"><div class="progress-fill" style="width:' . $percent . '%"></div></div>';
+        $html .= '<span class="buildable-set-tile-metric-value">' . formatNumber($percent, 1) . ' % (' . formatNumber($actual) . '/' . formatNumber($nominal) . ')</span>';
+        $html .= '</div>';
+    }
+    $html .= '</div>';
+    $html .= '</a>';
+    return $html;
+}
+
 // "Baubare Sets" — three states driven by GET params, see src/build_sets.php's
 // own doc comment for the overall design: ?scan=1[&theme=&year_from=&year_to=]
 // shows only the dark progress overlay and kicks off the tick loop;
 // ?configure=1 (or no cache at all yet) shows the theme/year/completeness
-// config form; otherwise the cached results are shown directly, with a
-// staleness banner if the loose stock changed since the last scan.
+// config form; otherwise the cached results are shown directly (one page at
+// a time, see BUILD_SETS_RESULTS_PAGE_SIZE), with a staleness banner if the
+// loose stock changed since the last scan.
 if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
     $buildSetsMeta = getBuildableSetsCacheMeta($pdo);
     $buildSetsExclusiveOnly = ($_GET['exclusive_only'] ?? '') === '1';
@@ -3550,7 +3581,27 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
         exit;
     }
 
-    $buildSetsResults = getBuildableSetsResults($pdo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly);
+    $buildSetsPage = max(1, (int) ($_GET['p'] ?? 1));
+    $buildSetsResults = getBuildableSetsResults($pdo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly, $buildSetsPage, BUILD_SETS_RESULTS_PAGE_SIZE);
+    $buildSetsHasMore = ($buildSetsPage * BUILD_SETS_RESULTS_PAGE_SIZE) < $buildSetsResults['total'];
+
+    // Infinite-scroll continuation (same sentinel+IntersectionObserver
+    // pattern as sets_search/minifigs_search/bricks_search) — checked here,
+    // before any of the full page's own header/nav markup gets built, since
+    // an ajax=1 request only ever wants the next batch of tiles as JSON.
+    // exclusive_only/exclusive_rare_only ride along automatically: the
+    // client builds this request from the current page's own query string,
+    // which already carries them if set.
+    if (($_GET['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        $ajaxHtml = '';
+        foreach ($buildSetsResults['items'] as $row) {
+            $ajaxHtml .= renderBuildableSetTile($row);
+        }
+        echo json_encode(['html' => $ajaxHtml, 'hasMore' => $buildSetsHasMore], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     $scope = $buildSetsMeta['scope'];
 
     $content = '<h1>' . htmlspecialchars(t('nav_build_sets')) . '</h1>';
@@ -3587,35 +3638,70 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
     $content .= '<a href="?page=build_sets&configure=1' . $scopeQuery . $filterQuery . '">' . htmlspecialchars(t('build_sets_change_filter_link')) . '</a>';
     $content .= '</form>';
 
-    $content .= '<span class="results-summary">' . htmlspecialchars(t('build_sets_results_count', ['count' => formatNumber(count($buildSetsResults))])) . '</span>';
+    $content .= '<span class="results-summary">' . htmlspecialchars(t('build_sets_results_count', ['count' => formatNumber($buildSetsResults['total'])])) . '</span>';
 
-    if (empty($buildSetsResults)) {
+    if (empty($buildSetsResults['items'])) {
         $content .= '<section class="card"><p>' . htmlspecialchars(t('build_sets_empty')) . '</p></section>';
     } else {
-        $content .= '<div class="buildable-sets-grid">';
-        foreach ($buildSetsResults as $row) {
-            $content .= '<a class="buildable-set-tile" href="?page=set_detail&id=' . $row['set_id'] . '">';
-            $content .= '<span class="buildable-set-tile-image">' . ($row['thumbnail'] !== null ? '<img src="' . htmlspecialchars($row['thumbnail']) . '" alt="">' : getNavIcon('sets')) . '</span>';
-            $content .= '<span class="buildable-set-tile-name">' . htmlspecialchars($row['name']) . ' <span class="hint">' . htmlspecialchars($row['rebrickable_set_num']) . '</span></span>';
-
-            $metrics = [
-                ['build_sets_tile_total', $row['total_percent'], $row['total_actual'], $row['total_nominal']],
-                ['build_sets_tile_exclusive', $row['exclusive_percent'], $row['exclusive_actual'], $row['exclusive_nominal']],
-                ['build_sets_tile_rare', $row['rare_percent'], $row['rare_actual'], $row['rare_nominal']],
-                ['build_sets_tile_minifigs', $row['minifig_percent'], $row['minifig_actual'], $row['minifig_nominal']],
-            ];
-            $content .= '<div class="buildable-set-tile-metrics">';
-            foreach ($metrics as [$labelKey, $percent, $actual, $nominal]) {
-                $content .= '<div class="buildable-set-tile-metric">';
-                $content .= '<span class="buildable-set-tile-metric-label">' . htmlspecialchars(t($labelKey)) . '</span>';
-                $content .= '<div class="progress-track buildable-set-tile-bar"><div class="progress-fill" style="width:' . $percent . '%"></div></div>';
-                $content .= '<span class="buildable-set-tile-metric-value">' . formatNumber($percent, 1) . ' % (' . formatNumber($actual) . '/' . formatNumber($nominal) . ')</span>';
-                $content .= '</div>';
-            }
-            $content .= '</div>';
-            $content .= '</a>';
+        $content .= '<div class="buildable-sets-grid" id="build-sets-grid">';
+        foreach ($buildSetsResults['items'] as $row) {
+            $content .= renderBuildableSetTile($row);
         }
         $content .= '</div>';
+
+        // Same sentinel+IntersectionObserver infinite-scroll pattern as
+        // sets_search/minifigs_search/bricks_search — see the ajax=1 branch
+        // above for the continuation endpoint this fetches from. This is
+        // what replaced rendering all ~19,600 unfiltered-catalog tiles in
+        // one page load (confirmed live to make the whole server
+        // unresponsive — see BUILD_SETS_RESULTS_PAGE_SIZE's own doc comment,
+        // src/build_sets.php).
+        $content .= '<div id="build-sets-load-sentinel" class="parts-load-sentinel" data-has-more="' . ($buildSetsHasMore ? '1' : '0') . '" data-next-page="' . ($buildSetsPage + 1) . '">';
+        $content .= '<span class="parts-load-status" data-loading-text="' . htmlspecialchars(t('parts_loading_more')) . '" data-end-text="' . htmlspecialchars(t('parts_no_more')) . '">' . ($buildSetsHasMore ? '' : htmlspecialchars(t('parts_no_more'))) . '</span>';
+        $content .= '</div>';
+        $content .= <<<SCRIPT
+<script>
+(function(){
+  var sentinel = document.getElementById('build-sets-load-sentinel');
+  var grid = document.getElementById('build-sets-grid');
+  var status = sentinel ? sentinel.querySelector('.parts-load-status') : null;
+  if (!sentinel || !grid || !status) return;
+  var loading = false;
+  function loadMore() {
+    if (loading || sentinel.dataset.hasMore !== '1') return;
+    loading = true;
+    status.textContent = status.dataset.loadingText;
+    var params = new URLSearchParams(window.location.search);
+    params.set('ajax', '1');
+    params.set('p', sentinel.dataset.nextPage);
+    fetch('?' + params.toString(), { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        grid.insertAdjacentHTML('beforeend', data.html);
+        sentinel.dataset.hasMore = data.hasMore ? '1' : '0';
+        sentinel.dataset.nextPage = String(parseInt(sentinel.dataset.nextPage, 10) + 1);
+        status.textContent = data.hasMore ? '' : status.dataset.endText;
+        loading = false;
+        if (data.hasMore) checkAndLoad();
+      })
+      .catch(function() { loading = false; });
+  }
+  function checkAndLoad() {
+    var rect = sentinel.getBoundingClientRect();
+    if (rect.top < window.innerHeight + 400) loadMore();
+  }
+  if ('IntersectionObserver' in window) {
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) { if (entry.isIntersecting) loadMore(); });
+    }, { rootMargin: '400px' });
+    observer.observe(sentinel);
+  } else {
+    window.addEventListener('scroll', checkAndLoad);
+    checkAndLoad();
+  }
+})();
+</script>
+SCRIPT;
     }
 
     renderApp(t('nav_build_sets'), $content, $user, computeAppStats($pdo), $buildSetsBreadcrumbs);
