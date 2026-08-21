@@ -1009,6 +1009,17 @@ function getSchemaMigrations(): array
                 $pdo->prepare('UPDATE storage_locations SET parent_id = ? WHERE id = ?')->execute([$parentLocationId, $loc['id']]);
             }
         },
+        48 => function (PDO $pdo): void {
+            // 3 more checkable defect criteria, per explicit follow-up
+            // request — INSTRUCTION_MANUAL_CRITERIA (src/instruction_manuals.php)
+            // is the single source of truth for which columns exist; kept
+            // spelled out here (not derived from that constant) since a
+            // migration step must stay meaningful on its own even after the
+            // constant changes again in the future.
+            addColumnIfMissing($pdo, 'instruction_manuals', 'is_creased', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'instruction_manuals', 'has_dog_ears', 'TINYINT(1) NOT NULL DEFAULT 0');
+            addColumnIfMissing($pdo, 'instruction_manuals', 'has_scratches', 'TINYINT(1) NOT NULL DEFAULT 0');
+        },
     ];
 }
 
@@ -1152,7 +1163,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 47;
+const CURRENT_SCHEMA_VERSION = 48;
 
 function getInstalledSchemaVersion(): int
 {

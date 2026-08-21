@@ -29,23 +29,25 @@ require_once __DIR__ . '/sets.php';
  * copies of the same set's manual can be in different condition.
  */
 
-// The 6 checkable defect criteria a manual's condition is derived from (see
+// The checkable defect criteria a manual's condition is derived from (see
 // computeInstructionManualGrade()) — column names on instruction_manuals,
 // each a plain 0/1. 'is_new' is handled separately: checking it overrides
-// all 6 of these to false rather than being one more entry in this list.
-const INSTRUCTION_MANUAL_CRITERIA = ['is_holed', 'has_tears', 'is_painted', 'has_stickers', 'is_glued', 'binding_broken'];
+// all of these to false rather than being one more entry in this list.
+const INSTRUCTION_MANUAL_CRITERIA = ['is_holed', 'is_creased', 'has_dog_ears', 'has_tears', 'has_scratches', 'is_painted', 'has_stickers', 'is_glued', 'binding_broken'];
 
 /**
  * Derives a school-grade-style condition (1 = best/"sehr gut", 6 = worst/
- * "sehr schlecht") from the 6 checkable defect criteria — confirmed with the
+ * "sehr schlecht") from the checkable defect criteria — confirmed with the
  * user: each checked criterion worsens the grade by exactly one step, 0
- * checked -> 1, floored at 6 once 5 or more are checked. 'is_new' overrides
- * everything to a fixed best grade (1) regardless of the 6 criteria's actual
- * values — addInstructionManual()/updateInstructionManual() also force those
- * 6 to false when is_new is true, so this never actually needs to reconcile
- * a contradictory is_new+criteria combination, but doesn't rely on that.
+ * checked -> 1, floored at 6 once 5 or more are checked (still true now that
+ * there are more than 6 possible criteria — the floor doesn't change).
+ * 'is_new' overrides everything to a fixed best grade (1) regardless of the
+ * criteria's actual values — addInstructionManual()/updateInstructionManual()
+ * also force all of them to false when is_new is true, so this never
+ * actually needs to reconcile a contradictory is_new+criteria combination,
+ * but doesn't rely on that.
  *
- * @param array{is_new:bool|int, is_holed?:bool|int, has_tears?:bool|int, is_painted?:bool|int, has_stickers?:bool|int, is_glued?:bool|int, binding_broken?:bool|int} $manual
+ * @param array{is_new:bool|int, is_holed?:bool|int, is_creased?:bool|int, has_dog_ears?:bool|int, has_tears?:bool|int, has_scratches?:bool|int, is_painted?:bool|int, has_stickers?:bool|int, is_glued?:bool|int, binding_broken?:bool|int} $manual
  * @return array{isNew:bool, grade:int}
  */
 function computeInstructionManualGrade(array $manual): array
@@ -280,14 +282,19 @@ function addInstructionManual(array $set, bool $isNew, array $criteria, ?string 
     $locationId = getOrCreateInstructionsThemeLocation($pdo, $themeId, $themeName);
 
     $c = normalizeInstructionManualCriteria($isNew, $criteria);
+    // Column list built from INSTRUCTION_MANUAL_CRITERIA rather than spelled
+    // out (like the SELECTs below still are) since this one has both an
+    // INSERT and an UPDATE variant to keep in lockstep with the constant —
+    // one shared source for the column order removes that duplication.
+    $criteriaColumns = implode(', ', INSTRUCTION_MANUAL_CRITERIA);
+    $criteriaPlaceholders = implode(', ', array_fill(0, count(INSTRUCTION_MANUAL_CRITERIA), '?'));
     $stmt = $pdo->prepare(
-        'INSERT INTO instruction_manuals (location_id, set_id, is_new, is_holed, has_tears, is_painted, has_stickers, is_glued, binding_broken, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        "INSERT INTO instruction_manuals (location_id, set_id, is_new, $criteriaColumns, notes)
+         VALUES (?, ?, ?, $criteriaPlaceholders, ?)"
     );
     $stmt->execute([
         $locationId, $set['id'], $isNew ? 1 : 0,
-        $c['is_holed'] ? 1 : 0, $c['has_tears'] ? 1 : 0, $c['is_painted'] ? 1 : 0,
-        $c['has_stickers'] ? 1 : 0, $c['is_glued'] ? 1 : 0, $c['binding_broken'] ? 1 : 0,
+        ...array_map(fn (string $criterion): int => $c[$criterion] ? 1 : 0, INSTRUCTION_MANUAL_CRITERIA),
         $notes,
     ]);
     return (int) $pdo->lastInsertId();
@@ -297,12 +304,12 @@ function updateInstructionManual(int $id, bool $isNew, array $criteria, ?string 
 {
     $pdo = getPDO();
     $c = normalizeInstructionManualCriteria($isNew, $criteria);
+    $criteriaAssignments = implode(', ', array_map(fn (string $criterion): string => "$criterion = ?", INSTRUCTION_MANUAL_CRITERIA));
     $pdo->prepare(
-        'UPDATE instruction_manuals SET is_new = ?, is_holed = ?, has_tears = ?, is_painted = ?, has_stickers = ?, is_glued = ?, binding_broken = ?, notes = ? WHERE id = ?'
+        "UPDATE instruction_manuals SET is_new = ?, $criteriaAssignments, notes = ? WHERE id = ?"
     )->execute([
         $isNew ? 1 : 0,
-        $c['is_holed'] ? 1 : 0, $c['has_tears'] ? 1 : 0, $c['is_painted'] ? 1 : 0,
-        $c['has_stickers'] ? 1 : 0, $c['is_glued'] ? 1 : 0, $c['binding_broken'] ? 1 : 0,
+        ...array_map(fn (string $criterion): int => $c[$criterion] ? 1 : 0, INSTRUCTION_MANUAL_CRITERIA),
         $notes, $id,
     ]);
 }
@@ -348,16 +355,17 @@ function hydrateInstructionManualRow(array $row): array
 }
 
 /**
- * @return ?array{id:int, location_id:int, set_id:int, is_new:bool, is_holed:bool, has_tears:bool, is_painted:bool, has_stickers:bool, is_glued:bool, binding_broken:bool, grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string}
+ * @return ?array{id:int, location_id:int, set_id:int, is_new:bool, is_holed:bool, is_creased:bool, has_dog_ears:bool, has_tears:bool, has_scratches:bool, is_painted:bool, has_stickers:bool, is_glued:bool, binding_broken:bool, grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string}
  */
 function getInstructionManualById(PDO $pdo, int $id): ?array
 {
+    $criteriaColumns = implode(', ', array_map(fn (string $c): string => "im.$c", INSTRUCTION_MANUAL_CRITERIA));
     $stmt = $pdo->prepare(
-        'SELECT im.id, im.location_id, im.set_id, im.is_new, im.is_holed, im.has_tears, im.is_painted, im.has_stickers, im.is_glued, im.binding_broken, im.notes,
+        "SELECT im.id, im.location_id, im.set_id, im.is_new, $criteriaColumns, im.notes,
                 s.rebrickable_set_num AS set_num, s.name AS set_name, s.local_image_path AS thumbnail
          FROM instruction_manuals im
          INNER JOIN sets s ON s.id = im.set_id
-         WHERE im.id = ?'
+         WHERE im.id = ?"
     );
     $stmt->execute([$id]);
     $row = $stmt->fetch();
@@ -373,14 +381,15 @@ function getInstructionManualById(PDO $pdo, int $id): ?array
  * getLocationContentRecursive()). Raw rows, no percent_complete yet — see
  * getInstructionManualTilesForLocation() for that.
  *
- * @return array<int, array{id:int, location_id:int, set_id:int, is_new:bool, is_holed:bool, has_tears:bool, is_painted:bool, has_stickers:bool, is_glued:bool, binding_broken:bool, grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string, bricklink_instructions_price_new:?float, bricklink_instructions_price_used:?float, bricklink_instructions_price_currency:?string, set_bricklink_price_new:?float, set_bricklink_price_used:?float, set_bricklink_price_currency:?string}>
+ * @return array<int, array{id:int, location_id:int, set_id:int, is_new:bool, is_holed:bool, is_creased:bool, has_dog_ears:bool, has_tears:bool, has_scratches:bool, is_painted:bool, has_stickers:bool, is_glued:bool, binding_broken:bool, grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string, bricklink_instructions_price_new:?float, bricklink_instructions_price_used:?float, bricklink_instructions_price_currency:?string, set_bricklink_price_new:?float, set_bricklink_price_used:?float, set_bricklink_price_currency:?string}>
  */
 function getInstructionManualsForLocation(PDO $pdo, int $locationId): array
 {
     $ids = getLocationSubtreeIds($locationId);
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $criteriaColumns = implode(', ', array_map(fn (string $c): string => "im.$c", INSTRUCTION_MANUAL_CRITERIA));
     $stmt = $pdo->prepare(
-        "SELECT im.id, im.location_id, im.set_id, im.is_new, im.is_holed, im.has_tears, im.is_painted, im.has_stickers, im.is_glued, im.binding_broken, im.notes,
+        "SELECT im.id, im.location_id, im.set_id, im.is_new, $criteriaColumns, im.notes,
                 s.rebrickable_set_num AS set_num, s.name AS set_name, s.local_image_path AS thumbnail,
                 s.bricklink_instructions_price_new, s.bricklink_instructions_price_used, s.bricklink_instructions_price_currency,
                 s.bricklink_price_new AS set_bricklink_price_new, s.bricklink_price_used AS set_bricklink_price_used, s.bricklink_price_currency AS set_bricklink_price_currency

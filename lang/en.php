@@ -806,7 +806,10 @@ return [
     // computeInstructionManualGrade() (src/instruction_manuals.php).
     'instruction_manual_criterion_is_new' => 'New',
     'instruction_manual_criterion_is_holed' => 'Holed',
+    'instruction_manual_criterion_is_creased' => 'Creased',
+    'instruction_manual_criterion_has_dog_ears' => 'Dog-ears',
     'instruction_manual_criterion_has_tears' => 'Tears',
+    'instruction_manual_criterion_has_scratches' => 'Scratches',
     'instruction_manual_criterion_is_painted' => 'Painted',
     'instruction_manual_criterion_has_stickers' => 'Stickers',
     'instruction_manual_criterion_is_glued' => 'Glued',
