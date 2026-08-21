@@ -2549,7 +2549,7 @@ SCRIPT;
       return;
     }
     var top = explorer.getBoundingClientRect().top;
-    var reserved = 24;
+    var reserved = 34;
     var footerEl = document.querySelector('footer');
     if (footerEl) {
       var footerStyle = window.getComputedStyle(footerEl);
