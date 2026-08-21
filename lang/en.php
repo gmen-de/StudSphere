@@ -277,6 +277,7 @@ return [
     'location_content_thumbnail_unverified' => 'No color-verified image available – this image may show the part in a different color.',
     'location_content_here_label' => 'Directly here',
     'location_content_set_readonly' => 'Contents of this set – view only, not editable here.',
+    'location_content_recursive_toggle' => 'Also show parts from nested locations',
     'location_content_open_set_details' => 'Open full set details',
     'location_detail_minifig_delete_button' => 'Remove figure',
     'location_detail_minifig_delete_confirm' => 'Really remove this figure from storage?',

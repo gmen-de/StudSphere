@@ -1501,6 +1501,18 @@ button[type='submit'] {
   margin: 0 0 1rem;
 }
 
+/* "Auch untergeordnete Lagerorte anzeigen" toggle, right under the Location
+   Explorer's content-pane heading (renderContent(), src/routes/pages.php). */
+.location-recursive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: #475569;
+  cursor: pointer;
+}
+
 .location-tree-row-actions {
   display: none;
   align-items: center;

@@ -764,7 +764,12 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
         exit;
     }
 
-    $content = getLocationContentRecursive($pdo, $locationId);
+    // "Auch untergeordnete Lagerorte anzeigen" toggle (Location Explorer,
+    // src/routes/pages.php) — defaults to the app's original always-
+    // recursive behavior when the param is missing entirely (e.g. an older
+    // cached page still fetching without it).
+    $recursive = ($_GET['recursive'] ?? '1') !== '0';
+    $content = getLocationContentRecursive($pdo, $locationId, $recursive);
 
     $allPartsFlat = [];
     foreach ($content['partsByCategory'] as $parts) {

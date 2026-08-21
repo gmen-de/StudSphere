@@ -277,6 +277,7 @@ return [
     'location_content_thumbnail_unverified' => 'Kein farbgenaues Bild vorhanden – dieses Bild zeigt das Teil eventuell in einer anderen Farbe.',
     'location_content_here_label' => 'Direkt hier',
     'location_content_set_readonly' => 'Inhalt dieses Sets – nur zur Ansicht, hier nicht bearbeitbar.',
+    'location_content_recursive_toggle' => 'Auch Bauteile aus untergeordneten Lagerorten anzeigen',
     'location_content_open_set_details' => 'Vollständige Set-Details öffnen',
     'location_detail_minifig_delete_button' => 'Figur entfernen',
     'location_detail_minifig_delete_confirm' => 'Diese Figur wirklich aus dem Lager entfernen?',

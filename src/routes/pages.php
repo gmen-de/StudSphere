@@ -835,6 +835,7 @@ SCRIPT;
         'thumbnailUnverifiedTitle' => t('location_content_thumbnail_unverified'),
         'hereLabel' => t('location_content_here_label'),
         'setReadOnlyNote' => t('location_content_set_readonly'),
+        'recursiveToggleLabel' => t('location_content_recursive_toggle'),
         'openSetDetailsLink' => t('location_content_open_set_details'),
         'instructionsAddTileLabel' => t('instruction_manual_add_tile_label'),
         'instructionPercentTooltip' => t('instruction_manual_percent_tooltip'),
@@ -980,6 +981,30 @@ SCRIPT;
     } catch (e) {
       // Private browsing / storage disabled — expand state just won't
       // survive a reload, nothing else depends on this succeeding.
+    }
+  }
+
+  // "Auch untergeordnete Lagerorte anzeigen" — persists across page loads
+  // (localStorage, not sessionStorage like expandedIds above: this is a
+  // genuine display preference, not transient per-tab UI state), per
+  // explicit follow-up request. Defaults to true (the app's original
+  // always-recursive behavior) so nothing changes for anyone who's never
+  // touched the toggle.
+  var RECURSIVE_STORAGE_KEY = 'studsphere_location_content_recursive';
+  var recursiveEnabled = (function() {
+    try {
+      var raw = window.localStorage.getItem(RECURSIVE_STORAGE_KEY);
+      return raw === null ? true : raw === '1';
+    } catch (e) {
+      return true;
+    }
+  })();
+  function setRecursiveEnabled(value) {
+    recursiveEnabled = value;
+    try {
+      window.localStorage.setItem(RECURSIVE_STORAGE_KEY, value ? '1' : '0');
+    } catch (e) {
+      // Private browsing / storage disabled — just won't persist.
     }
   }
 
@@ -2202,6 +2227,19 @@ SCRIPT;
       return;
     }
 
+    var recursiveToggleLabel = document.createElement('label');
+    recursiveToggleLabel.className = 'location-recursive-toggle';
+    var recursiveToggleInput = document.createElement('input');
+    recursiveToggleInput.type = 'checkbox';
+    recursiveToggleInput.checked = recursiveEnabled;
+    recursiveToggleInput.addEventListener('change', function() {
+      setRecursiveEnabled(recursiveToggleInput.checked);
+      refreshContent();
+    });
+    recursiveToggleLabel.appendChild(recursiveToggleInput);
+    recursiveToggleLabel.appendChild(document.createTextNode(' ' + texts.recursiveToggleLabel));
+    contentEl.appendChild(recursiveToggleLabel);
+
     if (currentReadOnly) {
       var readOnlyNote = document.createElement('p');
       readOnlyNote.className = 'hint location-content-readonly-note';
@@ -2266,7 +2304,7 @@ SCRIPT;
     currentLocationId = id;
     currentLocationName = name;
     contentEl.innerHTML = '<p class="hint">' + texts.loading + '</p>';
-    fetch('?action=location_content&location_id=' + id, { credentials: 'same-origin' })
+    fetch('?action=location_content&location_id=' + id + '&recursive=' + (recursiveEnabled ? '1' : '0'), { credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (myToken === loadToken) {

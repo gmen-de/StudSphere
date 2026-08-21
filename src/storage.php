@@ -740,18 +740,21 @@ function getLocationSubtreeIds(int $locationId): array
 }
 
 /**
- * Everything stored anywhere under $locationId — itself plus every
- * descendant location, recursively — grouped into the two buckets the
- * location Explorer's right pane renders as separate sections. Parts are
- * further grouped by their top-level category (category_name is null for a
- * part with no category at all; the caller decides the fallback label for
- * that group).
+ * Everything stored at $locationId — plus, when $recursive is true (the
+ * Location Explorer's own default), every descendant location too — grouped
+ * into the two buckets the Explorer's right pane renders as separate
+ * sections. Parts are further grouped by their top-level category
+ * (category_name is null for a part with no category at all; the caller
+ * decides the fallback label for that group). $recursive=false is the
+ * Explorer's "nur diesen Lagerort" toggle (per explicit follow-up request) —
+ * everything below still stays untouched, since $looseIds simply ends up a
+ * single-element list instead of the full subtree.
  *
  * @return array{partsByCategory: array<string, array>, minifigs: array}
  */
-function getLocationContentRecursive(PDO $pdo, int $locationId): array
+function getLocationContentRecursive(PDO $pdo, int $locationId, bool $recursive = true): array
 {
-    $looseIds = getLocationSubtreeIds($locationId);
+    $looseIds = $recursive ? getLocationSubtreeIds($locationId) : [$locationId];
     $loosePlaceholders = implode(',', array_fill(0, count($looseIds), '?'));
 
     // pci (part_color_images) joins on c.color_id — Rebrickable's own
