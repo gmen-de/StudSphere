@@ -2534,6 +2534,12 @@ SCRIPT;
   // this runs. The 800px check mirrors that stylesheet's own mobile
   // breakpoint, where the panes stack instead of sitting side by side and
   // should size to their content (height:auto), not a computed pixel value.
+  //
+  // Also reserves space for <footer> (rendered right after .container's
+  // <main> in renderApp()) — without this the explorer filled the entire
+  // remaining viewport on its own, pushing the footer below the fold and
+  // forcing a page-level scroll just to reach it, even though the pane
+  // itself already used all visible space.
   function sizeExplorer() {
     if (!explorer) {
       return;
@@ -2543,7 +2549,13 @@ SCRIPT;
       return;
     }
     var top = explorer.getBoundingClientRect().top;
-    var height = window.innerHeight - top - 24;
+    var reserved = 24;
+    var footerEl = document.querySelector('footer');
+    if (footerEl) {
+      var footerStyle = window.getComputedStyle(footerEl);
+      reserved += footerEl.offsetHeight + parseFloat(footerStyle.marginTop || '0');
+    }
+    var height = window.innerHeight - top - reserved;
     explorer.style.height = Math.max(320, height) + 'px';
   }
   sizeExplorer();
