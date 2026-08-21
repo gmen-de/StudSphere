@@ -501,6 +501,65 @@ SCRIPT;
 </script>
 SCRIPT;
 
+    // "Bauanleitungen" condition criteria (src/instruction_manuals.php) —
+    // fully user-manageable, not admin-gated (the criteria catalog is
+    // personal-collection data, same footing as the other settings above,
+    // not a multi-user admin concern like the user list below).
+    $editCriterionId = isset($_GET['edit_criterion']) ? (int) $_GET['edit_criterion'] : null;
+    $editCriterion = null;
+    $allInstructionCriteria = getInstructionManualCriteria($pdo);
+    if ($editCriterionId !== null) {
+        foreach ($allInstructionCriteria as $criterionRow) {
+            if ($criterionRow['id'] === $editCriterionId) {
+                $editCriterion = $criterionRow;
+                break;
+            }
+        }
+    }
+
+    $content .= '<h2>' . htmlspecialchars(t('instruction_manual_criteria_settings_title')) . '</h2>';
+    $content .= '<p>' . htmlspecialchars(t('instruction_manual_criteria_settings_help')) . '</p>';
+    if ($instructionCriteriaMessage !== '') {
+        $content .= '<p><strong>' . htmlspecialchars($instructionCriteriaMessage) . '</strong></p>';
+    }
+
+    $content .= '<ul class="admin-user-list">';
+    foreach ($allInstructionCriteria as $criterionRow) {
+        $usageCount = getInstructionManualCriterionUsageCount($pdo, $criterionRow['id']);
+        $deleteConfirmText = $usageCount > 0
+            ? t('instruction_manual_criterion_delete_confirm_in_use', ['count' => (string) $usageCount])
+            : t('instruction_manual_criterion_delete_confirm');
+        $content .= '<li>';
+        $content .= htmlspecialchars($criterionRow['label']);
+        $content .= ' <span class="hint">(' . htmlspecialchars(t('instruction_manual_criterion_usage_count', ['count' => (string) $usageCount])) . ')</span>';
+        $content .= ' <a href="?page=settings&edit_criterion=' . $criterionRow['id'] . '">' . htmlspecialchars(t('location_edit_link')) . '</a>';
+        $content .= ' <form method="post" style="display:inline;" onsubmit="return confirm(' . htmlspecialchars(json_encode($deleteConfirmText), ENT_QUOTES) . ');">';
+        $content .= '<input type="hidden" name="action" value="delete_instruction_manual_criterion">';
+        $content .= '<input type="hidden" name="id" value="' . $criterionRow['id'] . '">';
+        $content .= '<button type="submit">' . htmlspecialchars(t('location_delete_link')) . '</button>';
+        $content .= '</form>';
+        $content .= '</li>';
+    }
+    $content .= '</ul>';
+
+    if ($editCriterion !== null) {
+        $content .= '<h3>' . htmlspecialchars(t('instruction_manual_criterion_edit_heading')) . '</h3>';
+        $content .= '<form method="post">';
+        $content .= '<input type="hidden" name="action" value="update_instruction_manual_criterion">';
+        $content .= '<input type="hidden" name="id" value="' . $editCriterion['id'] . '">';
+        $content .= '<label>' . htmlspecialchars(t('instruction_manual_criterion_label_label')) . '<input name="label" value="' . htmlspecialchars($editCriterion['label']) . '" required></label>';
+        $content .= '<button type="submit">' . htmlspecialchars(t('location_save_button')) . '</button>';
+        $content .= ' <a href="?page=settings">' . htmlspecialchars(t('location_cancel_edit')) . '</a>';
+        $content .= '</form>';
+    } else {
+        $content .= '<h3>' . htmlspecialchars(t('instruction_manual_criterion_add_heading')) . '</h3>';
+        $content .= '<form method="post">';
+        $content .= '<input type="hidden" name="action" value="add_instruction_manual_criterion">';
+        $content .= '<label>' . htmlspecialchars(t('instruction_manual_criterion_label_label')) . '<input name="label" required></label>';
+        $content .= '<button type="submit">' . htmlspecialchars(t('instruction_manual_criterion_add_button')) . '</button>';
+        $content .= '</form>';
+    }
+
     if ($user['is_admin']) {
         $content .= '<h2>' . htmlspecialchars(t('admin_users_title')) . '</h2>';
         if ($adminUserMessage !== '') {
@@ -784,10 +843,6 @@ SCRIPT;
         'instructionAddSubmitFailed' => t('instruction_manual_add_failed'),
         'instructionFieldCondition' => t('instruction_manual_field_condition'),
         'instructionIsNewLabel' => t('instruction_manual_criterion_is_new'),
-        'instructionCriteriaLabels' => array_map(
-            fn (string $criterion): array => ['key' => $criterion, 'label' => t('instruction_manual_criterion_' . $criterion)],
-            INSTRUCTION_MANUAL_CRITERIA
-        ),
         'instructionGradeTooltip' => t('instruction_manual_grade_tooltip'),
         'instructionGradeNewTooltip' => t('instruction_manual_grade_new_tooltip'),
         'instructionDetailTabDetails' => t('instruction_manual_tab_details'),
@@ -1322,83 +1377,111 @@ SCRIPT;
 
   // Shared by the add-manual mini-form and the detail modal's edit form —
   // one "Neu" checkbox (disables + visually overrides the other 6 when
-  // checked) plus the 6 defect-criteria checkboxes, with a live grade badge
-  // that updates on every change. Mirrors computeInstructionManualGrade()
-  // (src/instruction_manuals.php) exactly: each checked criterion worsens
-  // the grade by one step, floored at 6, is_new always forces grade 1.
+  // checked) plus checkboxes for the currently-defined condition criteria —
+  // fetched fresh via action=instruction_manual_criteria_list every time
+  // this opens rather than embedded once at page load, since the catalog is
+  // user-manageable via ?page=settings at any time (see that action's own
+  // doc comment, src/routes/actions.php). Live grade badge updates on every
+  // change, mirroring computeInstructionManualGrade()
+  // (src/instruction_manuals.php) exactly: 0 checked -> grade 1, all
+  // checked -> grade 6, everything in between spread evenly across 2-5.
   //
-  // @param initial {is_new?, is_holed?, has_tears?, is_painted?, has_stickers?, is_glued?, binding_broken?}
-  // @return {el: Element, getState: function(): same shape as initial}
-  function buildInstructionCriteriaFieldset(initial) {
+  // @param initial {is_new?: boolean, selected_criterion_ids?: number[]}
+  // @param callback function({el: Element, getState: function(): {is_new: boolean, criterionIds: number[]}})
+  function buildInstructionCriteriaFieldset(initial, callback) {
     var wrap = document.createElement('div');
     wrap.className = 'instruction-manual-criteria-fieldset';
+    wrap.innerHTML = '<p class="hint">' + texts.loading + '</p>';
+    var initialSelectedIds = (initial.selected_criterion_ids || []).map(Number);
 
-    var newLabel = document.createElement('label');
-    newLabel.className = 'instruction-manual-criteria-item instruction-manual-criteria-item-new';
-    var newCheckbox = document.createElement('input');
-    newCheckbox.type = 'checkbox';
-    newCheckbox.checked = !!initial.is_new;
-    newLabel.appendChild(newCheckbox);
-    newLabel.appendChild(document.createTextNode(' ' + texts.instructionIsNewLabel));
-    wrap.appendChild(newLabel);
+    fetch('?action=instruction_manual_criteria_list', { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        wrap.innerHTML = '';
+        var criteria = data.criteria || [];
+        var totalCriteria = criteria.length;
 
-    var list = document.createElement('div');
-    list.className = 'instruction-manual-criteria-list';
-    var criterionCheckboxes = {};
-    texts.instructionCriteriaLabels.forEach(function(c) {
-      var label = document.createElement('label');
-      label.className = 'instruction-manual-criteria-item';
-      var cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = !!initial[c.key];
-      criterionCheckboxes[c.key] = cb;
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(' ' + c.label));
-      list.appendChild(label);
-      cb.addEventListener('change', update);
-    });
-    wrap.appendChild(list);
+        var newLabel = document.createElement('label');
+        newLabel.className = 'instruction-manual-criteria-item instruction-manual-criteria-item-new';
+        var newCheckbox = document.createElement('input');
+        newCheckbox.type = 'checkbox';
+        newCheckbox.checked = !!initial.is_new;
+        newLabel.appendChild(newCheckbox);
+        newLabel.appendChild(document.createTextNode(' ' + texts.instructionIsNewLabel));
+        wrap.appendChild(newLabel);
 
-    var preview = document.createElement('div');
-    preview.className = 'instruction-manual-grade-preview';
-    wrap.appendChild(preview);
-
-    function computeGrade() {
-      if (newCheckbox.checked) {
-        return { isNew: true, grade: 1 };
-      }
-      var count = 0;
-      Object.keys(criterionCheckboxes).forEach(function(key) {
-        if (criterionCheckboxes[key].checked) {
-          count++;
-        }
-      });
-      return { isNew: false, grade: Math.min(6, count + 1) };
-    }
-
-    function update() {
-      var disabled = newCheckbox.checked;
-      Object.keys(criterionCheckboxes).forEach(function(key) {
-        criterionCheckboxes[key].disabled = disabled;
-      });
-      preview.innerHTML = '';
-      var g = computeGrade();
-      preview.appendChild(buildInstructionGradeBadge(g.grade, g.isNew));
-    }
-
-    newCheckbox.addEventListener('change', update);
-    update();
-
-    return {
-      el: wrap,
-      getState: function() {
-        var state = { is_new: newCheckbox.checked };
-        Object.keys(criterionCheckboxes).forEach(function(key) {
-          state[key] = criterionCheckboxes[key].checked;
+        var list = document.createElement('div');
+        list.className = 'instruction-manual-criteria-list';
+        var criterionCheckboxes = {};
+        criteria.forEach(function(c) {
+          var label = document.createElement('label');
+          label.className = 'instruction-manual-criteria-item';
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = initialSelectedIds.indexOf(c.id) !== -1;
+          criterionCheckboxes[c.id] = cb;
+          label.appendChild(cb);
+          label.appendChild(document.createTextNode(' ' + c.label));
+          list.appendChild(label);
+          cb.addEventListener('change', update);
         });
-        return state;
-      }
-    };
+        wrap.appendChild(list);
+
+        var preview = document.createElement('div');
+        preview.className = 'instruction-manual-grade-preview';
+        wrap.appendChild(preview);
+
+        // Mirrors computeInstructionManualGrade() (src/instruction_manuals.php).
+        function computeGrade() {
+          if (newCheckbox.checked) {
+            return { isNew: true, grade: 1 };
+          }
+          var count = 0;
+          Object.keys(criterionCheckboxes).forEach(function(id) {
+            if (criterionCheckboxes[id].checked) {
+              count++;
+            }
+          });
+          if (totalCriteria <= 0 || count <= 0) {
+            return { isNew: false, grade: 1 };
+          }
+          if (count >= totalCriteria) {
+            return { isNew: false, grade: 6 };
+          }
+          var span = Math.max(1, totalCriteria - 2);
+          var grade = 2 + Math.round((count - 1) / span * 3);
+          return { isNew: false, grade: Math.min(5, Math.max(2, grade)) };
+        }
+
+        function update() {
+          var disabled = newCheckbox.checked;
+          Object.keys(criterionCheckboxes).forEach(function(id) {
+            criterionCheckboxes[id].disabled = disabled;
+          });
+          preview.innerHTML = '';
+          var g = computeGrade();
+          preview.appendChild(buildInstructionGradeBadge(g.grade, g.isNew));
+        }
+
+        newCheckbox.addEventListener('change', update);
+        update();
+
+        callback({
+          el: wrap,
+          getState: function() {
+            var criterionIds = [];
+            Object.keys(criterionCheckboxes).forEach(function(id) {
+              if (criterionCheckboxes[id].checked) {
+                criterionIds.push(Number(id));
+              }
+            });
+            return { is_new: newCheckbox.checked, criterionIds: criterionIds };
+          }
+        });
+      })
+      .catch(function() {
+        wrap.innerHTML = '<p class="hint">' + texts.errorRetry + '</p>';
+      });
   }
 
   function buildInstructionManualTile(manual) {
@@ -1634,22 +1717,25 @@ SCRIPT;
     var instructionAddCriteriaFieldset = null;
     if (instructionAddCriteriaContainer) {
       instructionAddCriteriaContainer.innerHTML = '';
-      instructionAddCriteriaFieldset = buildInstructionCriteriaFieldset({});
-      instructionAddCriteriaContainer.appendChild(instructionAddCriteriaFieldset.el);
+      buildInstructionCriteriaFieldset({}, function(fieldset) {
+        instructionAddCriteriaFieldset = fieldset;
+        instructionAddCriteriaContainer.innerHTML = '';
+        instructionAddCriteriaContainer.appendChild(fieldset.el);
+      });
     }
 
     instructionAddForm.onsubmit = function(e) {
       e.preventDefault();
-      if (!instructionAddSelectedSetId) {
+      if (!instructionAddSelectedSetId || !instructionAddCriteriaFieldset) {
         return;
       }
-      var criteriaState = instructionAddCriteriaFieldset ? instructionAddCriteriaFieldset.getState() : {};
+      var criteriaState = instructionAddCriteriaFieldset.getState();
       var formData = new FormData();
       formData.set('action', 'add_instruction_manual');
       formData.set('set_id', instructionAddSelectedSetId);
       formData.set('is_new', criteriaState.is_new ? '1' : '0');
-      texts.instructionCriteriaLabels.forEach(function(c) {
-        formData.set(c.key, criteriaState[c.key] ? '1' : '0');
+      criteriaState.criterionIds.forEach(function(id) {
+        formData.append('criteria[]', id);
       });
       formData.set('notes', instructionAddNotes ? instructionAddNotes.value : '');
       fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
@@ -1749,8 +1835,14 @@ SCRIPT;
     conditionHint.className = 'hint';
     conditionHint.textContent = texts.instructionFieldCondition;
     editForm.appendChild(conditionHint);
-    var criteriaFieldset = buildInstructionCriteriaFieldset(manual);
-    editForm.appendChild(criteriaFieldset.el);
+    var criteriaFieldsetContainer = document.createElement('div');
+    editForm.appendChild(criteriaFieldsetContainer);
+    var criteriaFieldset = null;
+    buildInstructionCriteriaFieldset(manual, function(fieldset) {
+      criteriaFieldset = fieldset;
+      criteriaFieldsetContainer.innerHTML = '';
+      criteriaFieldsetContainer.appendChild(fieldset.el);
+    });
 
     var notesLabel = document.createElement('label');
     var notesTextarea = document.createElement('textarea');
@@ -1766,13 +1858,16 @@ SCRIPT;
 
     editForm.addEventListener('submit', function(e) {
       e.preventDefault();
+      if (!criteriaFieldset) {
+        return;
+      }
       var criteriaState = criteriaFieldset.getState();
       var formData = new FormData();
       formData.set('action', 'update_instruction_manual');
       formData.set('instance_id', manual.id);
       formData.set('is_new', criteriaState.is_new ? '1' : '0');
-      texts.instructionCriteriaLabels.forEach(function(c) {
-        formData.set(c.key, criteriaState[c.key] ? '1' : '0');
+      criteriaState.criterionIds.forEach(function(id) {
+        formData.append('criteria[]', id);
       });
       formData.set('notes', notesTextarea.value);
       fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })

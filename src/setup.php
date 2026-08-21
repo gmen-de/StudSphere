@@ -270,15 +270,6 @@ function installDatabase(): void
             location_id INT NOT NULL,
             set_id INT NOT NULL,
             is_new TINYINT(1) NOT NULL DEFAULT 0,
-            is_holed TINYINT(1) NOT NULL DEFAULT 0,
-            is_creased TINYINT(1) NOT NULL DEFAULT 0,
-            has_dog_ears TINYINT(1) NOT NULL DEFAULT 0,
-            has_tears TINYINT(1) NOT NULL DEFAULT 0,
-            has_scratches TINYINT(1) NOT NULL DEFAULT 0,
-            is_painted TINYINT(1) NOT NULL DEFAULT 0,
-            has_stickers TINYINT(1) NOT NULL DEFAULT 0,
-            is_glued TINYINT(1) NOT NULL DEFAULT 0,
-            binding_broken TINYINT(1) NOT NULL DEFAULT 0,
             notes TEXT DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -286,6 +277,19 @@ function installDatabase(): void
             CONSTRAINT fk_instructionmanual_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE RESTRICT,
             INDEX idx_instructionmanual_location (location_id),
             INDEX idx_instructionmanual_set (set_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        'CREATE TABLE IF NOT EXISTS instruction_manual_criteria (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            label VARCHAR(255) NOT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+        'CREATE TABLE IF NOT EXISTS instruction_manual_criteria_selections (
+            manual_id INT NOT NULL,
+            criterion_id INT NOT NULL,
+            PRIMARY KEY (manual_id, criterion_id),
+            CONSTRAINT fk_imcs_manual FOREIGN KEY (manual_id) REFERENCES instruction_manuals(id) ON DELETE CASCADE,
+            CONSTRAINT fk_imcs_criterion FOREIGN KEY (criterion_id) REFERENCES instruction_manual_criteria(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
 
         'CREATE TABLE IF NOT EXISTS storage_movements (
@@ -593,17 +597,24 @@ function installDatabase(): void
         "INSERT INTO storage_locations (parent_id, name, location_type) VALUES (NULL, 'Pick Lager', 'pick_lager_root')"
     )->execute();
 
-    // "Bauanleitungen" is the single top-level root every user-created
-    // instruction-manual location nests under (src/instruction_manuals.php)
-    // — same self-identifying-marker idiom as 'pick_lager_root' above.
-    // Unlike Pick Lager, whose children are only ever created
-    // programmatically, this root's children are freely created by the user
-    // through the normal Location Explorer UI; the root itself just marks
-    // "everything under here is instruction-manual-only storage" for
-    // isLocationInInstructionsSubtree()'s ancestor walk.
+    // "Bauanleitungen" is the single top-level root every instruction-manual
+    // location nests under (src/instruction_manuals.php) — same self-
+    // identifying-marker idiom as 'pick_lager_root' above. Its children are
+    // fully auto-managed "virtual" per-theme locations
+    // (getOrCreateInstructionsThemeLocation()), never user-created; the root
+    // itself just marks "everything under here is instruction-manual-only
+    // storage" for isLocationInInstructionsSubtree()'s ancestor walk.
     $pdo->prepare(
         "INSERT INTO storage_locations (parent_id, name, location_type) VALUES (NULL, 'Bauanleitungen', 'instructions_root')"
     )->execute();
+
+    // Seed condition criteria (src/instruction_manuals.php) — fully user-
+    // manageable afterward via ?page=settings (add/edit/delete), this is
+    // just the starting set. Order matches sort_order.
+    $seedCriteriaStmt = $pdo->prepare('INSERT INTO instruction_manual_criteria (label, sort_order) VALUES (?, ?)');
+    foreach (['Gelocht', 'Geknickt', 'Eselohren', 'Risse', 'Kratzer', 'Bemalt', 'Beklebt', 'Geklebt', 'Bindung defekt'] as $seedIndex => $seedLabel) {
+        $seedCriteriaStmt->execute([$seedLabel, $seedIndex]);
+    }
 
     // A fresh install already has the current shape (CREATE TABLE above), so it
     // starts at the latest schema version and never replays old migrations —

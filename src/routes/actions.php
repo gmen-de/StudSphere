@@ -2060,6 +2060,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'search_sets_for_instructions'
     exit;
 }
 
+// Fetched fresh on every open of the add/edit criteria checkboxes (not
+// embedded once at page load like most of this Explorer's static labels) —
+// the catalog is user-manageable via ?page=settings at any time, so a stale
+// embedded copy could silently omit a criterion someone just added in
+// another tab.
+if (isset($_GET['action']) && $_GET['action'] === 'instruction_manual_criteria_list') {
+    header('Content-Type: application/json');
+    echo json_encode(['criteria' => getInstructionManualCriteria($pdo)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // Adds one physical instruction-manual instance. Best-effort, synchronous
 // BrickLink price refresh for both catalog entries (the Set itself and its
 // separate Instructions catalog item) if either has never been checked —
@@ -2071,10 +2082,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_i
     try {
         $newManualSetId = (int) ($_POST['set_id'] ?? 0);
         $newManualIsNew = ($_POST['is_new'] ?? '') === '1';
-        $newManualCriteria = [];
-        foreach (INSTRUCTION_MANUAL_CRITERIA as $criterion) {
-            $newManualCriteria[$criterion] = ($_POST[$criterion] ?? '') === '1';
-        }
+        // Criteria are now a user-manageable catalog, not fixed column
+        // names — the client sends whichever ids it has checked
+        // (criteria[]=3&criteria[]=7&...); filtered against the catalog's
+        // actual current ids so a stale/crafted id can't create an orphaned
+        // selection row (the FK would reject it anyway, but this fails with
+        // a clean error instead of a DB exception).
+        $validCriterionIds = array_column(getInstructionManualCriteria($pdo), 'id');
+        $newManualCriterionIds = array_values(array_intersect(
+            array_map('intval', (array) ($_POST['criteria'] ?? [])),
+            $validCriterionIds
+        ));
         $newManualNotesRaw = trim((string) ($_POST['notes'] ?? ''));
         $newManualNotes = $newManualNotesRaw !== '' ? $newManualNotesRaw : null;
 
@@ -2086,7 +2104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_i
         // Location is auto-derived from the set's own theme (auto-creating
         // that virtual theme location on first use) — no location_id from
         // the client anymore, see addInstructionManual()'s own doc comment.
-        $newManualId = addInstructionManual($newManualSet, $newManualIsNew, $newManualCriteria, $newManualNotes);
+        $newManualId = addInstructionManual($newManualSet, $newManualIsNew, $newManualCriterionIds, $newManualNotes);
 
         try {
             if ($newManualSet['bricklink_item_id'] === null && $newManualSet['bricklink_price_checked_at'] === null) {
@@ -2116,10 +2134,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     try {
         $updateManualId = (int) ($_POST['instance_id'] ?? 0);
         $updateManualIsNew = ($_POST['is_new'] ?? '') === '1';
-        $updateManualCriteria = [];
-        foreach (INSTRUCTION_MANUAL_CRITERIA as $criterion) {
-            $updateManualCriteria[$criterion] = ($_POST[$criterion] ?? '') === '1';
-        }
+        $validCriterionIds = array_column(getInstructionManualCriteria($pdo), 'id');
+        $updateManualCriterionIds = array_values(array_intersect(
+            array_map('intval', (array) ($_POST['criteria'] ?? [])),
+            $validCriterionIds
+        ));
         $updateManualNotesRaw = trim((string) ($_POST['notes'] ?? ''));
         $updateManualNotes = $updateManualNotesRaw !== '' ? $updateManualNotesRaw : null;
 
@@ -2127,7 +2146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
             throw new RuntimeException(t('instruction_manual_not_found'));
         }
 
-        updateInstructionManual($updateManualId, $updateManualIsNew, $updateManualCriteria, $updateManualNotes);
+        updateInstructionManual($updateManualId, $updateManualIsNew, $updateManualCriterionIds, $updateManualNotes);
 
         echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
@@ -2153,6 +2172,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
     exit;
+}
+
+// ---- Condition-criteria catalog management (?page=settings) ----
+// Plain-form, full-page-reload actions (not fetch-based) — same convention
+// as this file's other Settings-page handlers (e.g. add_location,
+// admin_create_user in index.php), unlike the Explorer's own instruction-
+// manual actions above, which are all fetch-based since that page is a
+// JS-driven SPA-style view.
+
+$instructionCriteriaMessage = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_instruction_manual_criterion') {
+    $newCriterionLabel = trim((string) ($_POST['label'] ?? ''));
+    if ($newCriterionLabel === '') {
+        $instructionCriteriaMessage = t('instruction_manual_criterion_label_required');
+    } else {
+        addInstructionManualCriterion($pdo, $newCriterionLabel);
+        $instructionCriteriaMessage = t('instruction_manual_criterion_added', ['label' => $newCriterionLabel]);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_instruction_manual_criterion') {
+    $editCriterionId = (int) ($_POST['id'] ?? 0);
+    $editCriterionLabel = trim((string) ($_POST['label'] ?? ''));
+    if ($editCriterionLabel === '') {
+        $instructionCriteriaMessage = t('instruction_manual_criterion_label_required');
+    } else {
+        updateInstructionManualCriterion($pdo, $editCriterionId, $editCriterionLabel);
+        $instructionCriteriaMessage = t('instruction_manual_criterion_updated', ['label' => $editCriterionLabel]);
+    }
+}
+
+// The usage-count warning already happened client-side (a JS confirm()
+// showing the count the page rendered — see the Settings list markup,
+// src/routes/pages.php) before this form could even submit, so this just
+// deletes unconditionally; instruction_manual_criteria_selections' own FK
+// (ON DELETE CASCADE) removes every manual's selection of it in the same
+// statement.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_instruction_manual_criterion') {
+    $deleteCriterionId = (int) ($_POST['id'] ?? 0);
+    if ($deleteCriterionId > 0) {
+        deleteInstructionManualCriterion($pdo, $deleteCriterionId);
+        $instructionCriteriaMessage = t('instruction_manual_criterion_deleted');
+    }
 }
 
 // Full detail-modal payload: the manual itself, a link to the catalog set,

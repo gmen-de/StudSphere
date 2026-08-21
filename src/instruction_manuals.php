@@ -29,39 +29,45 @@ require_once __DIR__ . '/sets.php';
  * copies of the same set's manual can be in different condition.
  */
 
-// The checkable defect criteria a manual's condition is derived from (see
-// computeInstructionManualGrade()) — column names on instruction_manuals,
-// each a plain 0/1. 'is_new' is handled separately: checking it overrides
-// all of these to false rather than being one more entry in this list.
-const INSTRUCTION_MANUAL_CRITERIA = ['is_holed', 'is_creased', 'has_dog_ears', 'has_tears', 'has_scratches', 'is_painted', 'has_stickers', 'is_glued', 'binding_broken'];
-
 /**
  * Derives a school-grade-style condition (1 = best/"sehr gut", 6 = worst/
- * "sehr schlecht") from the checkable defect criteria — confirmed with the
- * user: each checked criterion worsens the grade by exactly one step, 0
- * checked -> 1, floored at 6 once 5 or more are checked (still true now that
- * there are more than 6 possible criteria — the floor doesn't change).
- * 'is_new' overrides everything to a fixed best grade (1) regardless of the
- * criteria's actual values — addInstructionManual()/updateInstructionManual()
- * also force all of them to false when is_new is true, so this never
- * actually needs to reconcile a contradictory is_new+criteria combination,
- * but doesn't rely on that.
+ * "sehr schlecht") from how many of the currently-defined condition criteria
+ * (instruction_manual_criteria, user-manageable via Settings —
+ * getInstructionManualCriteria()) are checked on this manual, out of how
+ * many exist in total right now. Confirmed with the user via a concrete
+ * worked table (9 criteria): 0 checked -> 1, all checked -> 6, and every
+ * count in between is spread as evenly as possible across grades 2-5 —
+ * checking even just one criterion already means "not perfect" (grade 2),
+ * and only checking literally everything means "sehr schlecht" (grade 6).
+ * This has to be a live formula parameterized by $totalCriteria (not a fixed
+ * table) because the criteria catalog itself can grow or shrink at any time.
  *
- * @param array{is_new:bool|int, is_holed?:bool|int, is_creased?:bool|int, has_dog_ears?:bool|int, has_tears?:bool|int, has_scratches?:bool|int, is_painted?:bool|int, has_stickers?:bool|int, is_glued?:bool|int, binding_broken?:bool|int} $manual
+ * 'is_new' overrides everything to a fixed best grade (1) regardless of
+ * $selectedCount — addInstructionManual()/updateInstructionManual() also
+ * clear all criteria selections when is_new is true, so this never actually
+ * needs to reconcile a contradictory is_new+criteria combination, but
+ * doesn't rely on that.
+ *
  * @return array{isNew:bool, grade:int}
  */
-function computeInstructionManualGrade(array $manual): array
+function computeInstructionManualGrade(bool $isNew, int $selectedCount, int $totalCriteria): array
 {
-    if (!empty($manual['is_new'])) {
+    if ($isNew) {
         return ['isNew' => true, 'grade' => 1];
     }
-    $count = 0;
-    foreach (INSTRUCTION_MANUAL_CRITERIA as $criterion) {
-        if (!empty($manual[$criterion])) {
-            $count++;
-        }
+    if ($totalCriteria <= 0 || $selectedCount <= 0) {
+        return ['isNew' => false, 'grade' => 1];
     }
-    return ['isNew' => false, 'grade' => min(6, $count + 1)];
+    if ($selectedCount >= $totalCriteria) {
+        return ['isNew' => false, 'grade' => 6];
+    }
+    // Maps selectedCount 1..(totalCriteria-1) linearly onto grades 2..5 —
+    // $span is the number of "steps" that range covers; guarded at 1 so a
+    // very small criteria catalog (1 or 2 entries, leaving no room for a
+    // middle count) can't divide by zero.
+    $span = max(1, $totalCriteria - 2);
+    $grade = 2 + (int) round(($selectedCount - 1) / $span * 3);
+    return ['isNew' => false, 'grade' => min(5, max(2, $grade))];
 }
 
 /**
@@ -248,20 +254,109 @@ function pruneEmptyInstructionsThemeLocation(PDO $pdo, int $locationId): void
 }
 
 /**
- * $isNew, when true, forces all 6 criteria to false regardless of what's
- * passed in $criteria — server-side enforcement (not just the add/edit
- * form's UI disabling them) so a crafted request can't store a
- * contradictory is_new+defects combination.
+ * All condition criteria the user has currently defined, in display order —
+ * see instruction_manual_criteria (migration 49). Fully user-manageable
+ * (add/edit/delete via ?page=settings, src/routes/pages.php), unlike
+ * 'is_new', which stays a fixed, non-deletable concept (see
+ * computeInstructionManualGrade()).
  *
- * @param array<string, bool> $criteria keyed by INSTRUCTION_MANUAL_CRITERIA
+ * @return array<int, array{id:int, label:string}>
  */
-function normalizeInstructionManualCriteria(bool $isNew, array $criteria): array
+function getInstructionManualCriteria(PDO $pdo): array
 {
-    $normalized = [];
-    foreach (INSTRUCTION_MANUAL_CRITERIA as $criterion) {
-        $normalized[$criterion] = $isNew ? false : !empty($criteria[$criterion]);
+    $rows = $pdo->query('SELECT id, label FROM instruction_manual_criteria ORDER BY sort_order, id')->fetchAll();
+    foreach ($rows as &$row) {
+        $row['id'] = (int) $row['id'];
     }
-    return $normalized;
+    unset($row);
+    return $rows;
+}
+
+/**
+ * New criteria are appended at the end (highest sort_order + 1) — no
+ * reordering UI exists (not requested), so display order is simply
+ * creation order.
+ */
+function addInstructionManualCriterion(PDO $pdo, string $label): int
+{
+    $nextSortOrder = (int) $pdo->query('SELECT COALESCE(MAX(sort_order), -1) + 1 FROM instruction_manual_criteria')->fetchColumn();
+    $stmt = $pdo->prepare('INSERT INTO instruction_manual_criteria (label, sort_order) VALUES (?, ?)');
+    $stmt->execute([$label, $nextSortOrder]);
+    return (int) $pdo->lastInsertId();
+}
+
+function updateInstructionManualCriterion(PDO $pdo, int $id, string $label): void
+{
+    $pdo->prepare('UPDATE instruction_manual_criteria SET label = ? WHERE id = ?')->execute([$label, $id]);
+}
+
+/**
+ * How many manuals currently have $id checked — shown in the Settings list
+ * and used to warn before a delete that would silently drop the criterion
+ * off however many manuals still have it checked (confirmed with the user:
+ * warn-and-confirm, not a silent cascade).
+ */
+function getInstructionManualCriterionUsageCount(PDO $pdo, int $id): int
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM instruction_manual_criteria_selections WHERE criterion_id = ?');
+    $stmt->execute([$id]);
+    return (int) $stmt->fetchColumn();
+}
+
+/**
+ * Deletes a criterion outright — instruction_manual_criteria_selections'
+ * own FK (ON DELETE CASCADE, migration 49) removes every manual's selection
+ * of it in the same statement, so a manual that had it checked just quietly
+ * ends up with one fewer selection afterward; its grade is computed live
+ * from whatever's still selected (computeInstructionManualGrade()), so
+ * nothing else needs updating.
+ */
+function deleteInstructionManualCriterion(PDO $pdo, int $id): void
+{
+    $pdo->prepare('DELETE FROM instruction_manual_criteria WHERE id = ?')->execute([$id]);
+}
+
+/**
+ * Batch-reads which criteria are currently checked on each of $manualIds —
+ * one query for a whole location's worth of tiles instead of one per
+ * manual.
+ *
+ * @param int[] $manualIds
+ * @return array<int, int[]> manual_id => [criterion_id, ...]
+ */
+function getSelectedCriterionIdsForManuals(PDO $pdo, array $manualIds): array
+{
+    $result = array_fill_keys($manualIds, []);
+    if (empty($manualIds)) {
+        return $result;
+    }
+    $placeholders = implode(',', array_fill(0, count($manualIds), '?'));
+    $stmt = $pdo->prepare("SELECT manual_id, criterion_id FROM instruction_manual_criteria_selections WHERE manual_id IN ($placeholders)");
+    $stmt->execute($manualIds);
+    foreach ($stmt->fetchAll() as $row) {
+        $result[(int) $row['manual_id']][] = (int) $row['criterion_id'];
+    }
+    return $result;
+}
+
+/**
+ * Replaces $manualId's full set of checked criteria with exactly
+ * $criterionIds (delete-all-then-insert, not a diff) — shared by
+ * addInstructionManual() (where the DELETE is a no-op, nothing exists yet
+ * for a brand-new manual) and updateInstructionManual(), so there's exactly
+ * one place that knows how a manual's selections are actually stored.
+ */
+function setInstructionManualCriteriaSelections(PDO $pdo, int $manualId, array $criterionIds): void
+{
+    $pdo->prepare('DELETE FROM instruction_manual_criteria_selections WHERE manual_id = ?')->execute([$manualId]);
+    $criterionIds = array_unique(array_map('intval', $criterionIds));
+    if (empty($criterionIds)) {
+        return;
+    }
+    $stmt = $pdo->prepare('INSERT INTO instruction_manual_criteria_selections (manual_id, criterion_id) VALUES (?, ?)');
+    foreach ($criterionIds as $criterionId) {
+        $stmt->execute([$manualId, $criterionId]);
+    }
 }
 
 /**
@@ -270,54 +365,46 @@ function normalizeInstructionManualCriteria(bool $isNew, array $criteria): array
  * getOrCreateInstructionsThemeLocation()). $set is the getSetById() row for
  * $setId's catalog set — the caller already has it (to validate the set
  * exists before calling this), so it's passed in rather than re-fetched.
- * No storage_movements audit row — same reasoning as addMinifigStock():
- * that log's schema is part-specific (part_id/color_id), and instance-based
- * storage doesn't write there either.
+ * $isNew, when true, forces the checked-criteria set to empty regardless of
+ * what's in $selectedCriterionIds — server-side enforcement (not just the
+ * add/edit form's UI disabling the checkboxes) so a crafted request can't
+ * store a contradictory is_new+criteria combination. No storage_movements
+ * audit row — same reasoning as addMinifigStock(): that log's schema is
+ * part-specific (part_id/color_id), and instance-based storage doesn't
+ * write there either.
+ *
+ * @param int[] $selectedCriterionIds
  */
-function addInstructionManual(array $set, bool $isNew, array $criteria, ?string $notes): int
+function addInstructionManual(array $set, bool $isNew, array $selectedCriterionIds, ?string $notes): int
 {
     $pdo = getPDO();
     $themeId = $set['theme_id'] ?? INSTRUCTIONS_THEME_FALLBACK_ID;
     $themeName = $set['theme_id'] !== null ? $set['theme_name'] : INSTRUCTIONS_THEME_FALLBACK_NAME;
     $locationId = getOrCreateInstructionsThemeLocation($pdo, $themeId, $themeName);
 
-    $c = normalizeInstructionManualCriteria($isNew, $criteria);
-    // Column list built from INSTRUCTION_MANUAL_CRITERIA rather than spelled
-    // out (like the SELECTs below still are) since this one has both an
-    // INSERT and an UPDATE variant to keep in lockstep with the constant —
-    // one shared source for the column order removes that duplication.
-    $criteriaColumns = implode(', ', INSTRUCTION_MANUAL_CRITERIA);
-    $criteriaPlaceholders = implode(', ', array_fill(0, count(INSTRUCTION_MANUAL_CRITERIA), '?'));
-    $stmt = $pdo->prepare(
-        "INSERT INTO instruction_manuals (location_id, set_id, is_new, $criteriaColumns, notes)
-         VALUES (?, ?, ?, $criteriaPlaceholders, ?)"
-    );
-    $stmt->execute([
-        $locationId, $set['id'], $isNew ? 1 : 0,
-        ...array_map(fn (string $criterion): int => $c[$criterion] ? 1 : 0, INSTRUCTION_MANUAL_CRITERIA),
-        $notes,
-    ]);
-    return (int) $pdo->lastInsertId();
+    $stmt = $pdo->prepare('INSERT INTO instruction_manuals (location_id, set_id, is_new, notes) VALUES (?, ?, ?, ?)');
+    $stmt->execute([$locationId, $set['id'], $isNew ? 1 : 0, $notes]);
+    $manualId = (int) $pdo->lastInsertId();
+
+    setInstructionManualCriteriaSelections($pdo, $manualId, $isNew ? [] : $selectedCriterionIds);
+    return $manualId;
 }
 
-function updateInstructionManual(int $id, bool $isNew, array $criteria, ?string $notes): void
+/**
+ * @param int[] $selectedCriterionIds
+ */
+function updateInstructionManual(int $id, bool $isNew, array $selectedCriterionIds, ?string $notes): void
 {
     $pdo = getPDO();
-    $c = normalizeInstructionManualCriteria($isNew, $criteria);
-    $criteriaAssignments = implode(', ', array_map(fn (string $criterion): string => "$criterion = ?", INSTRUCTION_MANUAL_CRITERIA));
-    $pdo->prepare(
-        "UPDATE instruction_manuals SET is_new = ?, $criteriaAssignments, notes = ? WHERE id = ?"
-    )->execute([
-        $isNew ? 1 : 0,
-        ...array_map(fn (string $criterion): int => $c[$criterion] ? 1 : 0, INSTRUCTION_MANUAL_CRITERIA),
-        $notes, $id,
-    ]);
+    $pdo->prepare('UPDATE instruction_manuals SET is_new = ?, notes = ? WHERE id = ?')->execute([$isNew ? 1 : 0, $notes, $id]);
+    setInstructionManualCriteriaSelections($pdo, $id, $isNew ? [] : $selectedCriterionIds);
 }
 
 /**
  * Removes one manual instance and, if that was the last one filed under its
  * theme location, that now-empty virtual location too (see
- * pruneEmptyInstructionsThemeLocation()).
+ * pruneEmptyInstructionsThemeLocation()). Its criteria selections cascade
+ * away via instruction_manual_criteria_selections' own FK.
  */
 function deleteInstructionManual(int $id): void
 {
@@ -334,45 +421,49 @@ function deleteInstructionManual(int $id): void
 }
 
 /**
- * Casts the raw DB row's int flags (0/1) to bool and attaches the derived
- * isNew/grade pair (computeInstructionManualGrade()) — shared by every
- * reader below so a row always carries both the raw criteria (for
- * pre-filling the edit form's checkboxes) and the already-computed grade
- * (for the tile badge / detail view), without every caller re-deriving it.
+ * Casts the raw DB row's flags and attaches the derived isNew/grade pair
+ * (computeInstructionManualGrade()) plus the manual's own selected criteria
+ * ids (for pre-filling the edit form's checkboxes) — shared by every reader
+ * below so a row always carries both, without every caller re-deriving it.
+ * $selectedCriterionIds/$totalCriteria come from the batch lookups
+ * getSelectedCriterionIdsForManuals()/getInstructionManualCriteria() so a
+ * multi-row read only pays for those once, not once per row.
+ *
+ * @param int[] $selectedCriterionIds
  */
-function hydrateInstructionManualRow(array $row): array
+function hydrateInstructionManualRow(array $row, array $selectedCriterionIds, int $totalCriteria): array
 {
     $row['id'] = (int) $row['id'];
     $row['location_id'] = (int) $row['location_id'];
     $row['set_id'] = (int) $row['set_id'];
     $row['is_new'] = (bool) $row['is_new'];
-    foreach (INSTRUCTION_MANUAL_CRITERIA as $criterion) {
-        $row[$criterion] = (bool) $row[$criterion];
-    }
-    $graded = computeInstructionManualGrade($row);
+    $row['selected_criterion_ids'] = $selectedCriterionIds;
+    $graded = computeInstructionManualGrade($row['is_new'], count($selectedCriterionIds), $totalCriteria);
     $row['grade'] = $graded['grade'];
     return $row;
 }
 
 /**
- * @return ?array{id:int, location_id:int, set_id:int, is_new:bool, is_holed:bool, is_creased:bool, has_dog_ears:bool, has_tears:bool, has_scratches:bool, is_painted:bool, has_stickers:bool, is_glued:bool, binding_broken:bool, grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string}
+ * @return ?array{id:int, location_id:int, set_id:int, is_new:bool, selected_criterion_ids:int[], grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string}
  */
 function getInstructionManualById(PDO $pdo, int $id): ?array
 {
-    $criteriaColumns = implode(', ', array_map(fn (string $c): string => "im.$c", INSTRUCTION_MANUAL_CRITERIA));
     $stmt = $pdo->prepare(
-        "SELECT im.id, im.location_id, im.set_id, im.is_new, $criteriaColumns, im.notes,
+        'SELECT im.id, im.location_id, im.set_id, im.is_new, im.notes,
                 s.rebrickable_set_num AS set_num, s.name AS set_name, s.local_image_path AS thumbnail
          FROM instruction_manuals im
          INNER JOIN sets s ON s.id = im.set_id
-         WHERE im.id = ?"
+         WHERE im.id = ?'
     );
     $stmt->execute([$id]);
     $row = $stmt->fetch();
     if ($row === false) {
         return null;
     }
-    return hydrateInstructionManualRow($row);
+    $manualId = (int) $row['id'];
+    $selections = getSelectedCriterionIdsForManuals($pdo, [$manualId]);
+    $totalCriteria = count(getInstructionManualCriteria($pdo));
+    return hydrateInstructionManualRow($row, $selections[$manualId], $totalCriteria);
 }
 
 /**
@@ -381,15 +472,14 @@ function getInstructionManualById(PDO $pdo, int $id): ?array
  * getLocationContentRecursive()). Raw rows, no percent_complete yet — see
  * getInstructionManualTilesForLocation() for that.
  *
- * @return array<int, array{id:int, location_id:int, set_id:int, is_new:bool, is_holed:bool, is_creased:bool, has_dog_ears:bool, has_tears:bool, has_scratches:bool, is_painted:bool, has_stickers:bool, is_glued:bool, binding_broken:bool, grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string, bricklink_instructions_price_new:?float, bricklink_instructions_price_used:?float, bricklink_instructions_price_currency:?string, set_bricklink_price_new:?float, set_bricklink_price_used:?float, set_bricklink_price_currency:?string}>
+ * @return array<int, array{id:int, location_id:int, set_id:int, is_new:bool, selected_criterion_ids:int[], grade:int, notes:?string, set_num:string, set_name:string, thumbnail:?string, bricklink_instructions_price_new:?float, bricklink_instructions_price_used:?float, bricklink_instructions_price_currency:?string, set_bricklink_price_new:?float, set_bricklink_price_used:?float, set_bricklink_price_currency:?string}>
  */
 function getInstructionManualsForLocation(PDO $pdo, int $locationId): array
 {
     $ids = getLocationSubtreeIds($locationId);
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $criteriaColumns = implode(', ', array_map(fn (string $c): string => "im.$c", INSTRUCTION_MANUAL_CRITERIA));
     $stmt = $pdo->prepare(
-        "SELECT im.id, im.location_id, im.set_id, im.is_new, $criteriaColumns, im.notes,
+        "SELECT im.id, im.location_id, im.set_id, im.is_new, im.notes,
                 s.rebrickable_set_num AS set_num, s.name AS set_name, s.local_image_path AS thumbnail,
                 s.bricklink_instructions_price_new, s.bricklink_instructions_price_used, s.bricklink_instructions_price_currency,
                 s.bricklink_price_new AS set_bricklink_price_new, s.bricklink_price_used AS set_bricklink_price_used, s.bricklink_price_currency AS set_bricklink_price_currency
@@ -399,7 +489,16 @@ function getInstructionManualsForLocation(PDO $pdo, int $locationId): array
          ORDER BY s.name, im.id"
     );
     $stmt->execute($ids);
-    $rows = array_map('hydrateInstructionManualRow', $stmt->fetchAll());
+    $rawRows = $stmt->fetchAll();
+
+    $manualIds = array_map(fn (array $r): int => (int) $r['id'], $rawRows);
+    $selectionsByManual = getSelectedCriterionIdsForManuals($pdo, $manualIds);
+    $totalCriteria = count(getInstructionManualCriteria($pdo));
+
+    $rows = array_map(
+        fn (array $r): array => hydrateInstructionManualRow($r, $selectionsByManual[(int) $r['id']], $totalCriteria),
+        $rawRows
+    );
     foreach ($rows as &$row) {
         $row['bricklink_instructions_price_new'] = $row['bricklink_instructions_price_new'] !== null ? (float) $row['bricklink_instructions_price_new'] : null;
         $row['bricklink_instructions_price_used'] = $row['bricklink_instructions_price_used'] !== null ? (float) $row['bricklink_instructions_price_used'] : null;

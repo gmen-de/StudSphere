@@ -1020,6 +1020,93 @@ function getSchemaMigrations(): array
             addColumnIfMissing($pdo, 'instruction_manuals', 'has_dog_ears', 'TINYINT(1) NOT NULL DEFAULT 0');
             addColumnIfMissing($pdo, 'instruction_manuals', 'has_scratches', 'TINYINT(1) NOT NULL DEFAULT 0');
         },
+        49 => function (PDO $pdo): void {
+            // Condition criteria become fully user-manageable (add/edit/
+            // delete via ?page=settings) — per explicit follow-up request,
+            // right after the previous migration hardcoded 3 more of them.
+            // A fixed boolean column per criterion can't support that
+            // (adding one would always mean another schema migration), so
+            // criteria move from columns on instruction_manuals to rows in
+            // their own catalog table, with a manual's checked criteria now
+            // a many-to-many junction instead of flat booleans — see
+            // getInstructionManualCriteria()/computeInstructionManualGrade()
+            // (src/instruction_manuals.php).
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS instruction_manual_criteria (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    label VARCHAR(255) NOT NULL,
+                    sort_order INT NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS instruction_manual_criteria_selections (
+                    manual_id INT NOT NULL,
+                    criterion_id INT NOT NULL,
+                    PRIMARY KEY (manual_id, criterion_id),
+                    CONSTRAINT fk_imcs_manual FOREIGN KEY (manual_id) REFERENCES instruction_manuals(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_imcs_criterion FOREIGN KEY (criterion_id) REFERENCES instruction_manual_criteria(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+
+            // Seed once with the 9 criteria that existed as fixed columns up
+            // to this point, in their previous display order — idempotent
+            // via the empty-table check, so a re-run after a partial failure
+            // can't double-seed.
+            $alreadySeeded = (int) $pdo->query('SELECT COUNT(*) FROM instruction_manual_criteria')->fetchColumn() > 0;
+            $oldColumnToCriterionId = [];
+            if (!$alreadySeeded) {
+                $seedLabelsByColumn = [
+                    'is_holed' => 'Gelocht',
+                    'is_creased' => 'Geknickt',
+                    'has_dog_ears' => 'Eselohren',
+                    'has_tears' => 'Risse',
+                    'has_scratches' => 'Kratzer',
+                    'is_painted' => 'Bemalt',
+                    'has_stickers' => 'Beklebt',
+                    'is_glued' => 'Geklebt',
+                    'binding_broken' => 'Bindung defekt',
+                ];
+                $insertCriterion = $pdo->prepare('INSERT INTO instruction_manual_criteria (label, sort_order) VALUES (?, ?)');
+                $sortOrder = 0;
+                foreach ($seedLabelsByColumn as $column => $label) {
+                    $insertCriterion->execute([$label, $sortOrder++]);
+                    $oldColumnToCriterionId[$column] = (int) $pdo->lastInsertId();
+                }
+
+                // Only the old boolean columns still exist to read from on
+                // an install actually upgrading through this step — a fresh
+                // install never runs migrations at all (installDatabase()
+                // stamps CURRENT_SCHEMA_VERSION directly), and a re-run after
+                // this same migration already dropped them below would find
+                // nothing here, hence the existence check rather than an
+                // unconditional SELECT.
+                $columnCheck = $pdo->prepare(
+                    "SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'instruction_manuals' AND column_name = 'is_holed'"
+                );
+                $columnCheck->execute();
+                if ((int) $columnCheck->fetchColumn() > 0) {
+                    $oldColumns = array_keys($seedLabelsByColumn);
+                    $columnList = implode(', ', $oldColumns);
+                    $manuals = $pdo->query("SELECT id, $columnList FROM instruction_manuals")->fetchAll();
+                    $insertSelection = $pdo->prepare(
+                        'INSERT INTO instruction_manual_criteria_selections (manual_id, criterion_id) VALUES (?, ?)'
+                    );
+                    foreach ($manuals as $manual) {
+                        foreach ($oldColumns as $column) {
+                            if (!empty($manual[$column])) {
+                                $insertSelection->execute([(int) $manual['id'], $oldColumnToCriterionId[$column]]);
+                            }
+                        }
+                    }
+                }
+            }
+
+            foreach (['is_holed', 'is_creased', 'has_dog_ears', 'has_tears', 'has_scratches', 'is_painted', 'has_stickers', 'is_glued', 'binding_broken'] as $column) {
+                dropColumnIfExists($pdo, 'instruction_manuals', $column);
+            }
+        },
     ];
 }
 
@@ -1163,7 +1250,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 48;
+const CURRENT_SCHEMA_VERSION = 49;
 
 function getInstalledSchemaVersion(): int
 {

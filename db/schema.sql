@@ -281,25 +281,17 @@ CREATE TABLE IF NOT EXISTS minifig_storage_item_sales (
 -- is always either the fixed 'instructions_root' location or one of its
 -- descendants — enforced in the application layer
 -- (isLocationInInstructionsSubtree()), not by this FK, since a plain FK
--- can't express "must be inside a subtree". Condition is derived from the
--- checkable defect columns (is_holed..binding_broken, see
--- INSTRUCTION_MANUAL_CRITERIA) rather than stored as a fixed grade — see
--- computeInstructionManualGrade(). is_new, when set, overrides all of them
--- to 0 (enforced application-side).
+-- can't express "must be inside a subtree". Condition criteria are NOT
+-- columns here — they're a user-manageable catalog (instruction_manual_criteria
+-- below) linked via instruction_manual_criteria_selections, so criteria can
+-- be added/edited/deleted (?page=settings) without a schema migration each
+-- time — see computeInstructionManualGrade(). is_new, when set, overrides
+-- all of a manual's criteria selections to none (enforced application-side).
 CREATE TABLE IF NOT EXISTS instruction_manuals (
     id INT AUTO_INCREMENT PRIMARY KEY,
     location_id INT NOT NULL,
     set_id INT NOT NULL,
     is_new TINYINT(1) NOT NULL DEFAULT 0,
-    is_holed TINYINT(1) NOT NULL DEFAULT 0,
-    is_creased TINYINT(1) NOT NULL DEFAULT 0,
-    has_dog_ears TINYINT(1) NOT NULL DEFAULT 0,
-    has_tears TINYINT(1) NOT NULL DEFAULT 0,
-    has_scratches TINYINT(1) NOT NULL DEFAULT 0,
-    is_painted TINYINT(1) NOT NULL DEFAULT 0,
-    has_stickers TINYINT(1) NOT NULL DEFAULT 0,
-    is_glued TINYINT(1) NOT NULL DEFAULT 0,
-    binding_broken TINYINT(1) NOT NULL DEFAULT 0,
     notes TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -307,6 +299,28 @@ CREATE TABLE IF NOT EXISTS instruction_manuals (
     CONSTRAINT fk_instructionmanual_set FOREIGN KEY (set_id) REFERENCES sets(id) ON DELETE RESTRICT,
     INDEX idx_instructionmanual_location (location_id),
     INDEX idx_instructionmanual_set (set_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- User-manageable catalog of condition-criteria (checkboxes) for instruction
+-- manuals — add/edit/delete via ?page=settings
+-- (getInstructionManualCriteria() and friends, src/instruction_manuals.php).
+CREATE TABLE IF NOT EXISTS instruction_manual_criteria (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    label VARCHAR(255) NOT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Many-to-many: which criteria are currently checked on which manual.
+-- Deleting a criterion (ON DELETE CASCADE) silently drops it off every
+-- manual that had it checked — a manual's grade is computed live from
+-- whatever's still selected, so nothing else needs to change.
+CREATE TABLE IF NOT EXISTS instruction_manual_criteria_selections (
+    manual_id INT NOT NULL,
+    criterion_id INT NOT NULL,
+    PRIMARY KEY (manual_id, criterion_id),
+    CONSTRAINT fk_imcs_manual FOREIGN KEY (manual_id) REFERENCES instruction_manuals(id) ON DELETE CASCADE,
+    CONSTRAINT fk_imcs_criterion FOREIGN KEY (criterion_id) REFERENCES instruction_manual_criteria(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS storage_movements (

@@ -800,20 +800,29 @@ return [
     'instruction_manual_field_total' => 'Teile gesamt',
     'instruction_manual_field_minifigs' => 'Minifiguren',
 
-    // Zustands-Kriterien (Checkboxen) und daraus abgeleitete Schulnote 1-6 —
-    // mit dem Nutzer abgestimmt: jedes angehakte Kriterium verschlechtert
-    // die Note um eine Stufe (0 angehakt -> 1, ab 5 angehakt -> 6), siehe
-    // computeInstructionManualGrade() (src/instruction_manuals.php).
+    // 'is_new' bleibt ein fester Sonderfall (nicht Teil des vom Nutzer
+    // verwaltbaren Kriterien-Katalogs, siehe unten) — die übrigen
+    // Zustands-Kriterien werden jetzt in der Datenbank verwaltet
+    // (instruction_manual_criteria) statt als feste Lang-Keys. Die daraus
+    // abgeleitete Schulnote 1-6 ist mit dem Nutzer abgestimmt: 0 angehakt
+    // -> 1, alle angehakt -> 6, dazwischen gleichmäßig auf 2-5 verteilt —
+    // siehe computeInstructionManualGrade() (src/instruction_manuals.php).
     'instruction_manual_criterion_is_new' => 'Neu',
-    'instruction_manual_criterion_is_holed' => 'Gelocht',
-    'instruction_manual_criterion_is_creased' => 'Geknickt',
-    'instruction_manual_criterion_has_dog_ears' => 'Eselohren',
-    'instruction_manual_criterion_has_tears' => 'Risse',
-    'instruction_manual_criterion_has_scratches' => 'Kratzer',
-    'instruction_manual_criterion_is_painted' => 'Bemalt',
-    'instruction_manual_criterion_has_stickers' => 'Beklebt',
-    'instruction_manual_criterion_is_glued' => 'Geklebt',
-    'instruction_manual_criterion_binding_broken' => 'Bindung defekt',
     'instruction_manual_grade_tooltip' => 'Zustandsnote {grade} von 6',
     'instruction_manual_grade_new_tooltip' => 'Neuwertig',
+
+    // Kriterien-Verwaltung (?page=settings)
+    'instruction_manual_criteria_settings_title' => 'Bauanleitungen-Zustandskriterien',
+    'instruction_manual_criteria_settings_help' => 'Diese Kriterien stehen beim Hinzufügen/Bearbeiten einer Bauanleitung als Häkchen zur Auswahl und ergeben zusammen die Zustandsnote.',
+    'instruction_manual_criterion_usage_count' => '{count} Anleitungen',
+    'instruction_manual_criterion_add_heading' => 'Kriterium hinzufügen',
+    'instruction_manual_criterion_edit_heading' => 'Kriterium bearbeiten',
+    'instruction_manual_criterion_label_label' => 'Bezeichnung',
+    'instruction_manual_criterion_add_button' => 'Hinzufügen',
+    'instruction_manual_criterion_label_required' => 'Bitte eine Bezeichnung angeben.',
+    'instruction_manual_criterion_added' => 'Kriterium "{label}" hinzugefügt.',
+    'instruction_manual_criterion_updated' => 'Kriterium "{label}" aktualisiert.',
+    'instruction_manual_criterion_deleted' => 'Kriterium gelöscht.',
+    'instruction_manual_criterion_delete_confirm' => 'Dieses Kriterium wirklich löschen?',
+    'instruction_manual_criterion_delete_confirm_in_use' => 'Dieses Kriterium ist bei {count} Anleitungen angehakt. Trotzdem löschen?',
 ];

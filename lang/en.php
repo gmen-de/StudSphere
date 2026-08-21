@@ -800,20 +800,28 @@ return [
     'instruction_manual_field_total' => 'Total parts',
     'instruction_manual_field_minifigs' => 'Minifigs',
 
-    // Condition criteria (checkboxes) and the school-grade-style 1-6 rating
-    // derived from them — agreed with the user: each checked criterion
-    // worsens the grade by one step (0 checked -> 1, 5+ checked -> 6), see
-    // computeInstructionManualGrade() (src/instruction_manuals.php).
+    // 'is_new' stays a fixed special case (not part of the user-manageable
+    // criteria catalog, see below) — the other condition criteria now live
+    // in the database (instruction_manual_criteria) instead of fixed lang
+    // keys. The derived 1-6 grade is agreed with the user: 0 checked -> 1,
+    // all checked -> 6, everything in between spread evenly across 2-5 —
+    // see computeInstructionManualGrade() (src/instruction_manuals.php).
     'instruction_manual_criterion_is_new' => 'New',
-    'instruction_manual_criterion_is_holed' => 'Holed',
-    'instruction_manual_criterion_is_creased' => 'Creased',
-    'instruction_manual_criterion_has_dog_ears' => 'Dog-ears',
-    'instruction_manual_criterion_has_tears' => 'Tears',
-    'instruction_manual_criterion_has_scratches' => 'Scratches',
-    'instruction_manual_criterion_is_painted' => 'Painted',
-    'instruction_manual_criterion_has_stickers' => 'Stickers',
-    'instruction_manual_criterion_is_glued' => 'Glued',
-    'instruction_manual_criterion_binding_broken' => 'Binding broken',
     'instruction_manual_grade_tooltip' => 'Condition grade {grade} of 6',
     'instruction_manual_grade_new_tooltip' => 'Mint condition',
+
+    // Criteria management (?page=settings)
+    'instruction_manual_criteria_settings_title' => 'Instruction manual condition criteria',
+    'instruction_manual_criteria_settings_help' => 'These criteria show up as checkboxes when adding/editing an instruction manual and together determine its condition grade.',
+    'instruction_manual_criterion_usage_count' => '{count} manuals',
+    'instruction_manual_criterion_add_heading' => 'Add criterion',
+    'instruction_manual_criterion_edit_heading' => 'Edit criterion',
+    'instruction_manual_criterion_label_label' => 'Label',
+    'instruction_manual_criterion_add_button' => 'Add',
+    'instruction_manual_criterion_label_required' => 'Please enter a label.',
+    'instruction_manual_criterion_added' => 'Criterion "{label}" added.',
+    'instruction_manual_criterion_updated' => 'Criterion "{label}" updated.',
+    'instruction_manual_criterion_deleted' => 'Criterion deleted.',
+    'instruction_manual_criterion_delete_confirm' => 'Really delete this criterion?',
+    'instruction_manual_criterion_delete_confirm_in_use' => 'This criterion is checked on {count} manuals. Delete anyway?',
 ];
