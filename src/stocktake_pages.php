@@ -63,7 +63,7 @@ function renderStocktakeOverview(PDO $pdo, int $userId): string
     return $html;
 }
 
-function renderStocktakeCreate(PDO $pdo, string $tab, string $query): string
+function renderStocktakeCreate(PDO $pdo, string $tab): string
 {
     $tab = $tab === 'sets' ? 'sets' : 'locations';
 
@@ -95,19 +95,19 @@ function renderStocktakeCreate(PDO $pdo, string $tab, string $query): string
             $html .= '</div>';
         }
     } else {
-        $html .= '<form method="get" class="pick-search-form">';
-        $html .= '<input type="hidden" name="screen" value="stocktake_create">';
-        $html .= '<input type="hidden" name="tab" value="sets">';
-        $html .= '<input type="search" name="q" value="' . htmlspecialchars($query) . '" placeholder="' . htmlspecialchars(t('stocktake_create_search_placeholder')) . '">';
-        $html .= '<button type="submit" class="pick-btn">' . htmlspecialchars(t('pick_create_search_button')) . '</button>';
-        $html .= '</form>';
-
-        if ($query !== '') {
-            $results = searchOwnedSetsForStocktake($pdo, $query);
+        // Deliberately a list of sets already added via owned_set_detail's
+        // "Zur Inventurliste hinzufügen" choice, not a live search — per
+        // explicit request, mirrors the locations tab exactly: adding a set
+        // to this list only happens on the desktop, working through the
+        // list only happens here.
+        $sets = getFlaggedStocktakeOwnedSets($pdo);
+        if (empty($sets)) {
+            $html .= '<p class="pick-empty-hint">' . htmlspecialchars(t('stocktake_create_sets_empty')) . '</p>';
+        } else {
             $html .= '<div class="pick-search-results">';
-            foreach ($results as $result) {
-                if ($result['hasActiveStocktake']) {
-                    $html .= '<div class="pick-search-result stocktake-set-result-done">';
+            foreach ($sets as $result) {
+                if ($result['activeStocktakeId'] !== null) {
+                    $html .= '<a class="pick-search-result" href="?screen=stocktake&id=' . $result['activeStocktakeId'] . '">';
                 } else {
                     $html .= '<button type="button" class="pick-search-result stocktake-start-set-btn" data-owned-set-id="' . $result['ownedSetId'] . '">';
                 }
@@ -115,10 +115,7 @@ function renderStocktakeCreate(PDO $pdo, string $tab, string $query): string
                     $html .= '<img src="' . htmlspecialchars(pickAssetUrl($result['thumbnail'])) . '" alt="">';
                 }
                 $html .= '<span>' . htmlspecialchars($result['label']) . '</span>';
-                $html .= $result['hasActiveStocktake'] ? '</div>' : '</button>';
-            }
-            if (empty($results)) {
-                $html .= '<p class="pick-empty-hint">' . htmlspecialchars(t('pick_create_no_results')) . '</p>';
+                $html .= $result['activeStocktakeId'] !== null ? '</a>' : '</button>';
             }
             $html .= '</div>';
         }

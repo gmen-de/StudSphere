@@ -1513,43 +1513,6 @@ button[type='submit'] {
   cursor: pointer;
 }
 
-/* Inventur controls, right under the recursive toggle (buildStocktakeControls(),
-   src/routes/pages.php) — only shown for a directly-editable location. */
-.location-stocktake-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin: 0 0 1rem;
-}
-
-.location-stocktake-start-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  width: auto;
-  padding: 0.4rem 0.9rem;
-  border-radius: 0.6rem;
-  border: 1px solid rgba(37,99,235,0.25);
-  background: #eff6ff;
-  color: #111827;
-  box-shadow: none;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.location-stocktake-start-button:hover {
-  background: #dbeafe;
-  transform: none;
-}
-
-.location-stocktake-start-button svg {
-  width: 18px;
-  height: 18px;
-  color: #2563eb;
-  flex-shrink: 0;
-}
-
 .location-tree-row-actions {
   display: none;
   align-items: center;

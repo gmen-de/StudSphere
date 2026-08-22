@@ -1180,6 +1180,17 @@ function getSchemaMigrations(): array
 
             addColumnIfMissing($pdo, 'storage_locations', 'flagged_for_stocktake_at', 'TIMESTAMP NULL DEFAULT NULL');
         },
+        51 => function (PDO $pdo): void {
+            // "Zur Inventurliste hinzufügen" for owned sets — mirrors
+            // storage_locations.flagged_for_stocktake_at (migration 50)
+            // exactly. Per explicit follow-up request, the set-detail
+            // "Inventur starten" button now asks the user to choose between
+            // doing it right there on the PC (the existing modal) or queuing
+            // it here for later, worked off entirely from the /pick/ app's
+            // own Inventur screens (src/stocktake_pages.php) — same as how
+            // a flagged location already only gets counted from there.
+            addColumnIfMissing($pdo, 'owned_sets', 'flagged_for_stocktake_at', 'TIMESTAMP NULL DEFAULT NULL');
+        },
     ];
 }
 
@@ -1323,7 +1334,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 50;
+const CURRENT_SCHEMA_VERSION = 51;
 
 function getInstalledSchemaVersion(): int
 {

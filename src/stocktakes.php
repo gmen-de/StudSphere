@@ -233,37 +233,38 @@ function getFlaggedStocktakeLocations(PDO $pdo): array
 }
 
 /**
- * Owned (not catalog) sets matching $query by set number or name — feeds the
- * /pick/ app's "Inventur starten" set tab. Unlike the Pickliste creation
- * screen's catalog search, an Inventur always targets an already-owned
- * instance, so this searches owned_sets joined to the catalog, not sets
- * directly. Excludes still-sealed instances (startStocktakeForOwnedSet()
- * would refuse them anyway — filtered here too so they never show up as a
- * tappable dead end) and ones with a session already running.
+ * Owned sets currently "zur Inventurliste hinzugefügt" (owned_sets.
+ * flagged_for_stocktake_at IS NOT NULL) — feeds the /pick/ app's "Inventur
+ * starten" set tab, mirroring getFlaggedStocktakeLocations() exactly. Per
+ * explicit follow-up request, the set-detail "Inventur starten" button now
+ * offers a choice between doing it right there on the PC or adding it to
+ * this list instead — worked off entirely from /pick/, same as a flagged
+ * location. Excludes still-sealed instances defensively (the flag toggle
+ * action already refuses to set it on one, but a set can't un-seal itself
+ * either way once flagged, so this is belt-and-suspenders, not the only
+ * guard).
  *
- * @return array<int, array{ownedSetId:int, label:string, thumbnail:?string, hasActiveStocktake:bool}>
+ * @return array<int, array{ownedSetId:int, label:string, thumbnail:?string, activeStocktakeId:?int}>
  */
-function searchOwnedSetsForStocktake(PDO $pdo, string $query): array
+function getFlaggedStocktakeOwnedSets(PDO $pdo): array
 {
-    $stmt = $pdo->prepare(
+    $stmt = $pdo->query(
         "SELECT os.id AS owned_set_id, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
          FROM owned_sets os
          INNER JOIN sets s ON s.id = os.set_id
-         WHERE os.condition_type != 'new' AND (s.rebrickable_set_num LIKE ? OR s.name LIKE ?)
-         ORDER BY s.rebrickable_set_num
-         LIMIT 30"
+         WHERE os.flagged_for_stocktake_at IS NOT NULL AND os.condition_type != 'new'
+         ORDER BY os.flagged_for_stocktake_at"
     );
-    $like = '%' . $query . '%';
-    $stmt->execute([$like, $like]);
 
     $result = [];
     foreach ($stmt->fetchAll() as $row) {
         $ownedSetId = (int) $row['owned_set_id'];
+        $active = getActiveStocktakeForOwnedSet($pdo, $ownedSetId);
         $result[] = [
             'ownedSetId' => $ownedSetId,
             'label' => $row['rebrickable_set_num'] . ' — ' . $row['name'],
             'thumbnail' => $row['thumbnail'],
-            'hasActiveStocktake' => getActiveStocktakeForOwnedSet($pdo, $ownedSetId) !== null,
+            'activeStocktakeId' => $active !== null ? (int) $active['id'] : null,
         ];
     }
     return $result;
@@ -436,6 +437,13 @@ function completeStocktake(PDO $pdo, int $stocktakeId): void
     $pdo->prepare("UPDATE stocktakes SET status = 'completed', completed_at = NOW() WHERE id = ?")->execute([$stocktakeId]);
     if ($stocktake['source_type'] === 'location') {
         $pdo->prepare('UPDATE storage_locations SET flagged_for_stocktake_at = NULL WHERE id = ?')->execute([$stocktake['location_id']]);
+    } elseif ($stocktake['owned_set_id'] !== null) {
+        // Clears the "auf der Inventurliste" flag too, whether this session
+        // came from that list or was started straight on the PC despite
+        // already being flagged — either way it's no longer outstanding.
+        // cancelStocktake() deliberately does NOT do this (an abandoned
+        // session should stay on the list, not silently drop off it).
+        $pdo->prepare('UPDATE owned_sets SET flagged_for_stocktake_at = NULL WHERE id = ?')->execute([$stocktake['owned_set_id']]);
     }
 }
 
@@ -474,8 +482,98 @@ function cancelStocktake(PDO $pdo, int $stocktakeId, ?int $userId): void
 }
 
 /**
- * Shared modal markup + inline script for both entry points (owned_set_detail,
- * the location Explorer) — embedded once in renderApp() (like
+ * "Am PC durchführen" vs. "Zur Inventurliste hinzufügen/entfernen" choice,
+ * shown when owned_set_detail's "Inventur starten" button is clicked and no
+ * session is already active for that set — per explicit request, doing an
+ * owned-set Inventur is now a real fork rather than always opening the modal
+ * directly: the PC path is unchanged (window.openStocktakeModal() below),
+ * the list path just toggles owned_sets.flagged_for_stocktake_at (action
+ * toggle_owned_set_stocktake_flag) and closes again, no counting UI opens at
+ * all. Exposed as window.openStocktakeChoiceModal(ownedSetId, flagged,
+ * onPcChosen, onListToggled) — the second button's label/action flips
+ * between add/remove based on $flagged, which the caller already knows from
+ * its own stocktake_status check. Only ever embedded on owned_set_detail (a
+ * flagged *location*, by contrast, is worked exclusively from /pick/ per the
+ * same request — the location Explorer's "Zur Inventur vormerken" checkbox
+ * has no matching "start on PC" option, so it needs no choice step).
+ */
+function renderStocktakeChoiceModal(): string
+{
+    $html = '<div class="modal-overlay" id="stocktake-choice-modal" style="display:none;">';
+    $html .= '<div class="modal-box">';
+    $html .= '<div class="owned-set-wizard-header">';
+    $html .= '<h2>' . htmlspecialchars(t('stocktake_choice_heading')) . '</h2>';
+    $html .= '<button type="button" class="modal-close" id="stocktake-choice-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $html .= '</div>';
+    $html .= '<p>' . htmlspecialchars(t('stocktake_choice_hint')) . '</p>';
+    $html .= '<p class="owned-set-wizard-error" id="stocktake-choice-error"></p>';
+    $html .= '<div class="owned-set-wizard-nav">';
+    $html .= '<button type="button" class="owned-set-wizard-back" id="stocktake-choice-list-btn"></button>';
+    $html .= '<button type="button" id="stocktake-choice-pc-btn">' . htmlspecialchars(t('stocktake_choice_pc_button')) . '</button>';
+    $html .= '</div>';
+    $html .= '</div></div>';
+
+    $addLabelJson = json_encode(t('stocktake_choice_add_to_list_button'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $removeLabelJson = json_encode(t('stocktake_choice_remove_from_list_button'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $errorGenericJson = json_encode(t('pick_error_generic'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $html .= <<<SCRIPT
+<script>
+(function(){
+  var modal = document.getElementById('stocktake-choice-modal');
+  var closeBtn = document.getElementById('stocktake-choice-modal-close');
+  var listBtn = document.getElementById('stocktake-choice-list-btn');
+  var pcBtn = document.getElementById('stocktake-choice-pc-btn');
+  var errorEl = document.getElementById('stocktake-choice-error');
+  if (!modal) { return; }
+
+  function close() { modal.style.display = 'none'; }
+  if (closeBtn) { closeBtn.addEventListener('click', close); }
+
+  window.openStocktakeChoiceModal = function(ownedSetId, flagged, onPcChosen, onListToggled) {
+    errorEl.textContent = '';
+    listBtn.textContent = flagged ? $removeLabelJson : $addLabelJson;
+    listBtn.disabled = false;
+    modal.style.display = 'flex';
+
+    pcBtn.onclick = function() {
+      close();
+      onPcChosen();
+    };
+
+    listBtn.onclick = function() {
+      listBtn.disabled = true;
+      var formData = new FormData();
+      formData.set('action', 'toggle_owned_set_stocktake_flag');
+      formData.set('owned_set_id', String(ownedSetId));
+      formData.set('flagged', flagged ? '0' : '1');
+      fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (!res.success) {
+            errorEl.textContent = res.message || $errorGenericJson;
+            listBtn.disabled = false;
+            return;
+          }
+          close();
+          onListToggled(res.flagged);
+        })
+        .catch(function() {
+          errorEl.textContent = $errorGenericJson;
+          listBtn.disabled = false;
+        });
+    };
+  };
+})();
+</script>
+SCRIPT;
+
+    return $html;
+}
+
+/**
+ * Shared modal markup + inline script for the guided per-item counting step
+ * (opened either directly, when resuming an active session, or after the
+ * "Am PC durchführen" choice above) — embedded once in renderApp() (like
  * renderPartDetailModal()) and driven entirely via window.openStocktakeModal(),
  * which each entry point calls with its own start action/params. Fetch-based
  * throughout, no page reload — same self-contained .modal-overlay/.modal-box

@@ -841,9 +841,6 @@ SCRIPT;
         'setReadOnlyNote' => t('location_content_set_readonly'),
         'recursiveToggleLabel' => t('location_content_recursive_toggle'),
         'stocktakeFlagLabel' => t('stocktake_flag_label'),
-        'stocktakeStartLabel' => t('stocktake_start_button'),
-        'stocktakeResumeLabel' => t('stocktake_resume_button'),
-        'stocktakeIcon' => getActionIcon('stocktake'),
         'openSetDetailsLink' => t('location_content_open_set_details'),
         'instructionsAddTileLabel' => t('instruction_manual_add_tile_label'),
         'instructionPercentTooltip' => t('instruction_manual_percent_tooltip'),
@@ -2221,16 +2218,16 @@ SCRIPT;
     });
   }
 
-  // "Zur Inventur vormerken" checkbox + "Inventur starten/fortsetzen" button
-  // — only ever shown for a genuine, directly-editable location (the caller
-  // already gates this on !currentReadOnly), never for an owned_set/pick_list
-  // node or the Bauanleitungen root. Rebuilt fresh on every renderContent()
-  // call so it always reflects that specific location's own flag/active
-  // session state, exactly like the recursive toggle right above it.
+  // "Zur Inventur vormerken" checkbox — only ever shown for a genuine,
+  // directly-editable location (the caller already gates this on
+  // !currentReadOnly), never for an owned_set/pick_list node or the
+  // Bauanleitungen root. Rebuilt fresh on every renderContent() call so it
+  // always reflects that specific location's own flag state, exactly like
+  // the recursive toggle right above it. Per explicit request, actually
+  // WORKING a flagged location's Inventur only ever happens in the /pick/
+  // app (see src/stocktake_pages.php) — no "Inventur starten" button here
+  // anymore, this checkbox only ever sets/clears the flag itself.
   function buildStocktakeControls(locationId, data) {
-    var wrap = document.createElement('div');
-    wrap.className = 'location-stocktake-controls';
-
     var flagLabel = document.createElement('label');
     flagLabel.className = 'location-recursive-toggle';
     var flagInput = document.createElement('input');
@@ -2245,29 +2242,7 @@ SCRIPT;
     });
     flagLabel.appendChild(flagInput);
     flagLabel.appendChild(document.createTextNode(' ' + texts.stocktakeFlagLabel));
-    wrap.appendChild(flagLabel);
-
-    var startBtn = document.createElement('button');
-    startBtn.type = 'button';
-    startBtn.className = 'location-stocktake-start-button';
-    var active = data.stocktakeActive;
-    startBtn.innerHTML = texts.stocktakeIcon;
-    startBtn.appendChild(document.createTextNode(' ' + (active ? texts.stocktakeResumeLabel + ' (' + active.confirmed + '/' + active.total + ')' : texts.stocktakeStartLabel)));
-    startBtn.addEventListener('click', function() {
-      window.openStocktakeModal(
-        'start_stocktake_for_location',
-        { location_id: locationId, recursive: recursiveEnabled ? '1' : '0' },
-        active ? active.stocktakeId : null,
-        function(changed) {
-          if (changed) {
-            refreshContent();
-          }
-        }
-      );
-    });
-    wrap.appendChild(startBtn);
-
-    return wrap;
+    return flagLabel;
   }
 
   function renderContent(id, name, data) {
@@ -2633,7 +2608,6 @@ SCRIPT;
     // .part-card document-click delegate, but the modal's own markup/script
     // still needs to be present on the page for that to exist at all.
     $content .= renderPartDetailModal();
-    $content .= renderStocktakeModal();
 
     renderApp(t('locations_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('locations_title'), 'url' => null]]);
     exit;
@@ -4746,9 +4720,11 @@ SCRIPT;
     $content .= '</div>'; // .owned-set-layout
 
     if ($ownedSet['condition_type'] !== 'new') {
+        $content .= renderStocktakeChoiceModal();
         $content .= renderStocktakeModal();
         $stocktakeOwnedSetIdJson = json_encode($ownedSet['id']);
         $stocktakeResumeLabelJson = json_encode(t('stocktake_resume_button'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $stocktakeListedHintJson = json_encode(t('stocktake_flagged_hint'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         $content .= <<<SCRIPT
 <script>
 (function(){
@@ -4756,7 +4732,9 @@ SCRIPT;
   var openBtn = document.getElementById('owned-set-stocktake-open');
   if (!openBtn) { return; }
 
-  function applyResumeState(res) {
+  var currentFlagged = false;
+
+  function applyStatus(res) {
     if (res && res.active) {
       openBtn.dataset.resumeId = res.stocktakeId;
       var label = $stocktakeResumeLabelJson + ' (' + res.confirmed + '/' + res.total + ')';
@@ -4764,25 +4742,44 @@ SCRIPT;
       openBtn.setAttribute('aria-label', label);
     } else {
       delete openBtn.dataset.resumeId;
+      currentFlagged = !!(res && res.flagged);
+      var baseLabel = openBtn.dataset.baseLabel;
+      openBtn.title = currentFlagged ? baseLabel + $stocktakeListedHintJson : baseLabel;
+      openBtn.setAttribute('aria-label', openBtn.title);
     }
   }
 
-  fetch('?action=stocktake_status&owned_set_id=' + ownedSetId, { credentials: 'same-origin' })
-    .then(function(r) { return r.json(); })
-    .then(applyResumeState)
-    .catch(function() {});
+  function fetchStatus() {
+    return fetch('?action=stocktake_status&owned_set_id=' + ownedSetId, { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(applyStatus)
+      .catch(function() {});
+  }
 
-  openBtn.addEventListener('click', function() {
-    var resumeId = openBtn.dataset.resumeId ? parseInt(openBtn.dataset.resumeId, 10) : null;
+  openBtn.dataset.baseLabel = openBtn.title;
+  fetchStatus();
+
+  function openCountingModal(resumeId) {
     window.openStocktakeModal('start_stocktake_for_owned_set', { owned_set_id: ownedSetId }, resumeId, function(changed) {
       if (changed) {
         window.location.reload();
       } else {
-        fetch('?action=stocktake_status&owned_set_id=' + ownedSetId, { credentials: 'same-origin' })
-          .then(function(r) { return r.json(); })
-          .then(applyResumeState)
-          .catch(function() {});
+        fetchStatus();
       }
+    });
+  }
+
+  openBtn.addEventListener('click', function() {
+    var resumeId = openBtn.dataset.resumeId ? parseInt(openBtn.dataset.resumeId, 10) : null;
+    if (resumeId) {
+      openCountingModal(resumeId);
+      return;
+    }
+    window.openStocktakeChoiceModal(ownedSetId, currentFlagged, function() {
+      openCountingModal(null);
+    }, function(newFlagged) {
+      currentFlagged = newFlagged;
+      applyStatus({ active: false, flagged: newFlagged });
     });
   });
 })();

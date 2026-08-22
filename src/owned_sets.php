@@ -74,7 +74,7 @@ function getOwnedSetById(PDO $pdo, int $id): ?array
     $stmt = $pdo->prepare(
         'SELECT os.id, os.set_id, os.inventory_id, os.location_id, os.condition_type, os.has_instructions, os.has_box, os.box_complete,
                 os.notes, os.instructions_notes, os.box_notes, os.box_complete_notes, os.stickers_applied, os.stickers_notes,
-                os.damaged_missing_show_spares, os.damaged_missing_show_stickers, os.created_at,
+                os.damaged_missing_show_spares, os.damaged_missing_show_stickers, os.flagged_for_stocktake_at, os.created_at,
                 s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail, th.theme_id
          FROM owned_sets os
          INNER JOIN sets s ON s.id = os.set_id

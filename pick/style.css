@@ -1004,11 +1004,6 @@ body.pick-body-no-navbar {
   color: var(--pick-muted);
 }
 
-.stocktake-set-result-done {
-  opacity: 0.6;
-  cursor: default;
-}
-
 .stocktake-color-swatch {
   display: inline-block;
   width: 2rem;

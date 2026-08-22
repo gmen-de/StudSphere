@@ -148,8 +148,7 @@ if ($currentUser !== null) {
             break;
         case 'stocktake_create':
             $stocktakeTab = (string) ($_GET['tab'] ?? 'locations');
-            $stocktakeQuery = trim((string) ($_GET['q'] ?? ''));
-            $content = renderStocktakeCreate($pdo, $stocktakeTab, $stocktakeQuery);
+            $content = renderStocktakeCreate($pdo, $stocktakeTab);
             $screenTitle = t('stocktake_start_button');
             break;
         case 'stocktake':

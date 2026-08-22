@@ -466,6 +466,7 @@ CREATE TABLE IF NOT EXISTS owned_sets (
     stickers_notes TEXT DEFAULT NULL,
     damaged_missing_show_spares TINYINT(1) NOT NULL DEFAULT 0,
     damaged_missing_show_stickers TINYINT(1) NOT NULL DEFAULT 0,
+    flagged_for_stocktake_at TIMESTAMP NULL DEFAULT NULL,
     added_by INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

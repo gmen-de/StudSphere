@@ -903,18 +903,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'location_content') {
     }
     unset($minifig);
 
-    $activeStocktake = $readOnly ? null : getActiveStocktakeForLocation($pdo, $locationId);
-
     echo json_encode([
         'categories' => $categories,
         'minifigs' => $minifigs,
         'ldraw' => $ldrawStatus,
         'readOnly' => $readOnly,
         'ownedSetId' => $ownedSetId,
+        // Whether/how a flagged location's Inventur is actually worked is
+        // /pick/-only now (per explicit request) — the location Explorer
+        // itself only ever needs to know the flag's own on/off state for its
+        // checkbox, not any session progress.
         'stocktakeFlagged' => $location['flagged_for_stocktake_at'] !== null,
-        'stocktakeActive' => $activeStocktake !== null ? (
-            ['stocktakeId' => (int) $activeStocktake['id'], 'recursive' => (bool) $activeStocktake['recursive_scope']] + getStocktakeProgress($pdo, (int) $activeStocktake['id'])
-        ) : null,
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -933,20 +932,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'start
             throw new RuntimeException(t('owned_set_invalid_set'));
         }
         $stocktakeId = startStocktakeForOwnedSet($pdo, (int) $_SESSION['user_id'], $stocktakeOwnedSet);
-        echo json_encode(['success' => true, 'stocktakeId' => $stocktakeId], JSON_UNESCAPED_UNICODE);
-    } catch (Throwable $e) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
-    }
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'start_stocktake_for_location') {
-    header('Content-Type: application/json');
-    try {
-        $stocktakeLocationId = (int) ($_POST['location_id'] ?? 0);
-        $stocktakeRecursive = ($_POST['recursive'] ?? '0') === '1';
-        $stocktakeId = startStocktakeForLocation($pdo, (int) $_SESSION['user_id'], $stocktakeLocationId, $stocktakeRecursive);
         echo json_encode(['success' => true, 'stocktakeId' => $stocktakeId], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
@@ -1036,21 +1021,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'stock
     exit;
 }
 
-// GET status check for the resume banner/pill — owned_set_id OR location_id,
-// whichever the caller has at hand.
+// GET status check for owned_set_detail's "Inventur starten/fortsetzen"
+// button — location_id is no longer accepted here (a flagged location's
+// Inventur is /pick/-only, see toggle_location_stocktake_flag below, which
+// still lives here since flagging itself stays a location-Explorer action).
+// Includes the set's own "auf der Inventurliste" flag alongside any active
+// session, so the button can skip straight to resuming, or otherwise know
+// which label the choice modal's list button needs (see
+// renderStocktakeChoiceModal(), src/stocktakes.php).
 if (isset($_GET['action']) && $_GET['action'] === 'stocktake_status') {
     header('Content-Type: application/json');
-    $active = null;
-    if (isset($_GET['owned_set_id'])) {
-        $active = getActiveStocktakeForOwnedSet($pdo, (int) $_GET['owned_set_id']);
-    } elseif (isset($_GET['location_id'])) {
-        $active = getActiveStocktakeForLocation($pdo, (int) $_GET['location_id']);
-    }
-    if ($active === null) {
-        echo json_encode(['active' => false], JSON_UNESCAPED_UNICODE);
+    $statusOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));
+    if ($statusOwnedSet === null) {
+        http_response_code(404);
+        echo json_encode(['active' => false, 'flagged' => false], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    echo json_encode(['active' => true, 'stocktakeId' => (int) $active['id']] + getStocktakeProgress($pdo, (int) $active['id']), JSON_UNESCAPED_UNICODE);
+    $active = getActiveStocktakeForOwnedSet($pdo, (int) $statusOwnedSet['id']);
+    $flagged = $statusOwnedSet['flagged_for_stocktake_at'] !== null;
+    if ($active === null) {
+        echo json_encode(['active' => false, 'flagged' => $flagged], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode(['active' => true, 'flagged' => $flagged, 'stocktakeId' => (int) $active['id']] + getStocktakeProgress($pdo, (int) $active['id']), JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -1061,6 +1054,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
         $flagged = ($_POST['flagged'] ?? '0') === '1';
         $pdo->prepare('UPDATE storage_locations SET flagged_for_stocktake_at = ' . ($flagged ? 'NOW()' : 'NULL') . ' WHERE id = ?')
             ->execute([$flagLocationId]);
+        echo json_encode(['success' => true, 'flagged' => $flagged], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// owned_set_detail's Inventur choice modal — "Zur Inventurliste hinzufügen"/
+// "entfernen" (see renderStocktakeChoiceModal(), src/stocktakes.php).
+// Refuses a still-sealed instance the same way starting a session on it
+// already does, so a set can't end up flagged with no way to ever actually
+// count it.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_owned_set_stocktake_flag') {
+    header('Content-Type: application/json');
+    try {
+        $flagOwnedSet = getOwnedSetById($pdo, (int) ($_POST['owned_set_id'] ?? 0));
+        if ($flagOwnedSet === null) {
+            throw new RuntimeException(t('owned_set_invalid_set'));
+        }
+        $flagged = ($_POST['flagged'] ?? '0') === '1';
+        if ($flagged && $flagOwnedSet['condition_type'] === 'new') {
+            throw new RuntimeException(t('stocktake_sealed_error'));
+        }
+        $pdo->prepare('UPDATE owned_sets SET flagged_for_stocktake_at = ' . ($flagged ? 'NOW()' : 'NULL') . ' WHERE id = ?')
+            ->execute([$flagOwnedSet['id']]);
         echo json_encode(['success' => true, 'flagged' => $flagged], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);
