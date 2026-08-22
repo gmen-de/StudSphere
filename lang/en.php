@@ -748,6 +748,7 @@ return [
     'pick_app_title' => 'StudSphere Pick List',
     'pick_menu_label' => 'Menu',
     'pick_menu_overview' => 'Overview',
+    'pick_menu_stocktake' => 'Stocktake',
     'pick_menu_putaway' => 'Put away',
     'pick_menu_logout' => 'Log out',
     'pick_error_invalid_request' => 'Invalid request.',
@@ -782,6 +783,20 @@ return [
     'pick_complete_use_for_set_button' => 'Use for a new set',
     'pick_complete_leave_button' => 'Leave in Pick Lager',
     'pick_item_needed_label' => '{picked} of {needed} picked',
+
+    // Stocktake in the pick tool app (/pick/, src/stocktake_pages.php,
+    // src/stocktakes.php) — second front-end for the same stocktake as the
+    // desktop modal on the set detail page/location Explorer.
+    'stocktake_overview_heading' => 'Your stocktakes',
+    'stocktake_overview_group_active' => 'Active',
+    'stocktake_overview_group_completed' => 'Completed',
+    'stocktake_overview_empty' => 'No stocktake started yet.',
+    'stocktake_create_tab_locations' => 'Locations',
+    'stocktake_create_tab_sets' => 'Sets',
+    'stocktake_create_locations_empty' => 'No locations flagged for a stocktake. Flag one in the main app\'s location view.',
+    'stocktake_create_search_placeholder' => 'Search set…',
+    'stocktake_item_counted_label' => 'Counted',
+    'stocktake_confirm_button' => 'Counted',
     'pick_item_available_label' => '{count} available',
     'pick_item_confirm_button' => 'Picked',
     'pick_item_quantity_zero_hint' => 'Enter 0 if there\'s really nothing here (corrects the stock record).',

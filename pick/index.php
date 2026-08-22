@@ -47,6 +47,7 @@ require_once __DIR__ . '/../src/pick_lists.php';
 require_once __DIR__ . '/../src/owned_sets.php';
 require_once __DIR__ . '/../src/updater.php';
 require_once __DIR__ . '/../src/pick_pages.php';
+require_once __DIR__ . '/../src/stocktake_pages.php';
 
 $configPath = __DIR__ . '/../src/config.php';
 if (!is_file($configPath)) {
@@ -100,6 +101,7 @@ if ($currentUser === null) {
     }
 } else {
     require_once __DIR__ . '/../src/routes/pick_actions.php';
+    require_once __DIR__ . '/../src/routes/pick_stocktake_actions.php';
 }
 
 $screen = $_GET['screen'] ?? 'list';
@@ -143,6 +145,25 @@ if ($currentUser !== null) {
             $currentPickListId = (int) $pickList['id'];
             $content = renderPickListActive($pdo, $pickList, (int) $currentUser['id'], ($_GET['skip_render'] ?? '') === '1');
             $screenTitle = $pickList['name'] !== '' ? $pickList['name'] : t('pick_app_title');
+            break;
+        case 'stocktake_create':
+            $stocktakeTab = (string) ($_GET['tab'] ?? 'locations');
+            $stocktakeQuery = trim((string) ($_GET['q'] ?? ''));
+            $content = renderStocktakeCreate($pdo, $stocktakeTab, $stocktakeQuery);
+            $screenTitle = t('stocktake_start_button');
+            break;
+        case 'stocktake':
+            $stocktake = getStocktake($pdo, (int) ($_GET['id'] ?? 0));
+            if ($stocktake === null || (int) $stocktake['user_id'] !== (int) $currentUser['id']) {
+                header('Location: ?screen=stocktake_list');
+                exit;
+            }
+            $content = renderStocktakeActive($pdo, $stocktake);
+            $screenTitle = getStocktakeLabel($pdo, $stocktake);
+            break;
+        case 'stocktake_list':
+            $content = renderStocktakeOverview($pdo, (int) $currentUser['id']);
+            $screenTitle = t('stocktake_overview_heading');
             break;
         case 'list':
         default:
@@ -276,9 +297,12 @@ SCRIPT;
     // rest of the list to be finished first (getPutAwaySuggestions()/
     // putAwayItem() already support a partial list, this just exposes that
     // entry point directly instead of only after full completion), "Übersicht"
-    // is how you switch to a different pick list, and "Abmelden" hits this
-    // file's own ?action=logout branch above, landing back on /pick/'s own
-    // login screen rather than the main app's.
+    // is how you switch to a different pick list, "Inventur" jumps to the
+    // separate Inventur overview (src/stocktake_pages.php — its own "kind of
+    // thing" alongside pick lists, same tables-level split
+    // src/stocktakes.php already keeps from src/pick_lists.php), and
+    // "Abmelden" hits this file's own ?action=logout branch above, landing
+    // back on /pick/'s own login screen rather than the main app's.
     echo '<header class="pick-navbar" id="pick-navbar">';
     echo '<span class="pick-navbar-leading">' . file_get_contents(__DIR__ . '/../logo.svg') . '</span>';
     echo '<span class="pick-navbar-title" id="pick-navbar-title">' . htmlspecialchars($screenTitle) . '</span>';
@@ -286,6 +310,7 @@ SCRIPT;
     echo '</header>';
     echo '<div class="pick-menu-panel" id="pick-menu-panel" hidden>';
     echo '<a href="?screen=list">' . htmlspecialchars(t('pick_menu_overview')) . '</a>';
+    echo '<a href="?screen=stocktake_list">' . htmlspecialchars(t('pick_menu_stocktake')) . '</a>';
     if ($currentPickListId !== null) {
         echo '<a href="?screen=putaway&id=' . $currentPickListId . '">' . htmlspecialchars(t('pick_menu_putaway')) . '</a>';
     }

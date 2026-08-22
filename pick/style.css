@@ -974,3 +974,72 @@ body.pick-body-no-navbar {
   min-height: 1.1em;
   margin: 0 0 1.25rem;
 }
+
+/* ---------- Inventur (src/stocktake_pages.php) ---------- */
+.stocktake-location-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--pick-border);
+}
+
+.stocktake-location-row:last-child {
+  border-bottom: none;
+}
+
+.stocktake-location-path {
+  flex: 1;
+  min-width: 60%;
+  font-size: 0.95rem;
+  color: var(--pick-text);
+}
+
+.stocktake-recursive-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--pick-muted);
+}
+
+.stocktake-set-result-done {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.stocktake-color-swatch {
+  display: inline-block;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid var(--pick-border);
+  margin-bottom: 0.5rem;
+}
+
+.stocktake-item-card-done {
+  border: 2px solid var(--pick-accent);
+}
+
+.stocktake-confirmed-badge {
+  display: inline-block;
+  color: var(--pick-accent);
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin: 0 0 0.5rem;
+}
+
+.stocktake-footer-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.stocktake-footer-actions .pick-btn {
+  flex: 1;
+}
+
+.stocktake-danger-button {
+  color: var(--pick-danger);
+}

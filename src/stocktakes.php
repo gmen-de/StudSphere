@@ -62,6 +62,32 @@ function getActiveStocktakeForLocation(PDO $pdo, int $locationId): ?array
     return $row !== false ? $row : null;
 }
 
+/** @return array<int, array<string,mixed>> */
+function getStocktakesForUser(PDO $pdo, int $userId): array
+{
+    $stmt = $pdo->prepare('SELECT * FROM stocktakes WHERE user_id = ? ORDER BY created_at DESC');
+    $stmt->execute([$userId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Display label for a stocktake row — the owned set's own catalog label, or
+ * the flagged location's full path. Powers the /pick/ app's overview list
+ * (src/stocktake_pages.php).
+ */
+function getStocktakeLabel(PDO $pdo, array $stocktake): string
+{
+    if ($stocktake['source_type'] === 'owned_set') {
+        $stmt = $pdo->prepare(
+            'SELECT s.rebrickable_set_num, s.name FROM owned_sets os INNER JOIN sets s ON s.id = os.set_id WHERE os.id = ?'
+        );
+        $stmt->execute([$stocktake['owned_set_id']]);
+        $row = $stmt->fetch();
+        return $row !== false ? $row['rebrickable_set_num'] . ' — ' . $row['name'] : '?';
+    }
+    return getStorageLocationPath((int) $stocktake['location_id']);
+}
+
 /**
  * @return array{total:int, confirmed:int}
  */
@@ -158,6 +184,89 @@ function getStocktakeItemDisplayById(PDO $pdo, int $stocktakeId, int $stocktakeI
         return null;
     }
     return hydrateStocktakeItemDisplay($pdo, $item);
+}
+
+/**
+ * Every position of a session, hydrated for display, confirmed and
+ * unconfirmed alike — unlike getNextStocktakeItem(), which only ever
+ * surfaces the next unconfirmed one. Powers the /pick/ app's swipe deck
+ * (src/stocktake_pages.php), where — unlike the desktop modal's strictly
+ * linear walkthrough — every card is shown at once so the user can swipe
+ * freely while counting a shelf, with already-confirmed cards just marked
+ * done rather than removed.
+ */
+function getStocktakeItemsWithDisplay(PDO $pdo, int $stocktakeId): array
+{
+    $stmt = $pdo->prepare('SELECT * FROM stocktake_items WHERE stocktake_id = ? ORDER BY id');
+    $stmt->execute([$stocktakeId]);
+    $result = [];
+    foreach ($stmt->fetchAll() as $item) {
+        $result[] = hydrateStocktakeItemDisplay($pdo, $item);
+    }
+    return $result;
+}
+
+/**
+ * Locations currently "zur Inventur vorgemerkt" (storage_locations.
+ * flagged_for_stocktake_at IS NOT NULL), with their full path and whether a
+ * session is already running for them — feeds the /pick/ app's "Inventur
+ * starten" location tab (src/stocktake_pages.php), which deliberately shows
+ * only these, not a full location tree/search (vormerken itself stays a
+ * location-Explorer-only action).
+ *
+ * @return array<int, array{id:int, path:string, activeStocktakeId:?int}>
+ */
+function getFlaggedStocktakeLocations(PDO $pdo): array
+{
+    $stmt = $pdo->query('SELECT id FROM storage_locations WHERE flagged_for_stocktake_at IS NOT NULL ORDER BY flagged_for_stocktake_at');
+    $result = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $locationId) {
+        $locationId = (int) $locationId;
+        $active = getActiveStocktakeForLocation($pdo, $locationId);
+        $result[] = [
+            'id' => $locationId,
+            'path' => getStorageLocationPath($locationId),
+            'activeStocktakeId' => $active !== null ? (int) $active['id'] : null,
+        ];
+    }
+    return $result;
+}
+
+/**
+ * Owned (not catalog) sets matching $query by set number or name — feeds the
+ * /pick/ app's "Inventur starten" set tab. Unlike the Pickliste creation
+ * screen's catalog search, an Inventur always targets an already-owned
+ * instance, so this searches owned_sets joined to the catalog, not sets
+ * directly. Excludes still-sealed instances (startStocktakeForOwnedSet()
+ * would refuse them anyway — filtered here too so they never show up as a
+ * tappable dead end) and ones with a session already running.
+ *
+ * @return array<int, array{ownedSetId:int, label:string, thumbnail:?string, hasActiveStocktake:bool}>
+ */
+function searchOwnedSetsForStocktake(PDO $pdo, string $query): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT os.id AS owned_set_id, s.rebrickable_set_num, s.name, s.local_image_path AS thumbnail
+         FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id
+         WHERE os.condition_type != 'new' AND (s.rebrickable_set_num LIKE ? OR s.name LIKE ?)
+         ORDER BY s.rebrickable_set_num
+         LIMIT 30"
+    );
+    $like = '%' . $query . '%';
+    $stmt->execute([$like, $like]);
+
+    $result = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $ownedSetId = (int) $row['owned_set_id'];
+        $result[] = [
+            'ownedSetId' => $ownedSetId,
+            'label' => $row['rebrickable_set_num'] . ' — ' . $row['name'],
+            'thumbnail' => $row['thumbnail'],
+            'hasActiveStocktake' => getActiveStocktakeForOwnedSet($pdo, $ownedSetId) !== null,
+        ];
+    }
+    return $result;
 }
 
 /**

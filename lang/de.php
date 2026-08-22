@@ -748,6 +748,7 @@ return [
     'pick_app_title' => 'StudSphere Pickliste',
     'pick_menu_label' => 'Menü',
     'pick_menu_overview' => 'Übersicht',
+    'pick_menu_stocktake' => 'Inventur',
     'pick_menu_putaway' => 'Zurücklegen',
     'pick_menu_logout' => 'Abmelden',
     'pick_error_invalid_request' => 'Ungültige Anfrage.',
@@ -782,6 +783,20 @@ return [
     'pick_complete_use_for_set_button' => 'Für neues Set verwenden',
     'pick_complete_leave_button' => 'Im Pick Lager lassen',
     'pick_item_needed_label' => '{picked} von {needed} gepickt',
+
+    // Inventur in der Pick-Tool-App (/pick/, src/stocktake_pages.php,
+    // src/stocktakes.php) — zweite Oberfläche für dieselbe Inventur wie das
+    // Desktop-Modal auf Set-Detail/Lageransicht.
+    'stocktake_overview_heading' => 'Deine Inventuren',
+    'stocktake_overview_group_active' => 'Aktiv',
+    'stocktake_overview_group_completed' => 'Abgeschlossen',
+    'stocktake_overview_empty' => 'Noch keine Inventur gestartet.',
+    'stocktake_create_tab_locations' => 'Lagerorte',
+    'stocktake_create_tab_sets' => 'Sets',
+    'stocktake_create_locations_empty' => 'Keine Lagerorte zur Inventur vorgemerkt. Das geht in der Lageransicht der Hauptapp.',
+    'stocktake_create_search_placeholder' => 'Set suchen…',
+    'stocktake_item_counted_label' => 'Gezählt',
+    'stocktake_confirm_button' => 'Gezählt',
     'pick_item_available_label' => '{count} verfügbar',
     'pick_item_confirm_button' => 'Gepickt',
     'pick_item_quantity_zero_hint' => '0 eingeben, wenn hier tatsächlich nichts liegt (korrigiert den Lagerbestand).',
