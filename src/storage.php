@@ -165,6 +165,41 @@ function getStorageLocationAncestors(int $id): array
 }
 
 /**
+ * "Überlagerort > Lagerort" short label for the part-detail modal's quick-
+ * pick location list (src/part_modal.php) — just the last two segments of
+ * getStorageLocationAncestors(), not the full path (that stays available
+ * separately as $fullPath, for a tooltip). A location whose own name is a
+ * single letter ("A", "B", ...) is treated like a house-number suffix and
+ * appended directly onto the parent's name with no separator ("Schubfach 22"
+ * + "A" -> "Schubfach 22A") rather than "Schubfach 22 > A", since that's how
+ * such sub-locations are actually meant to read.
+ *
+ * @return array{label: string, fullPath: string}
+ */
+function getShortLocationLabel(PDO $pdo, int $locationId): array
+{
+    $ancestors = getStorageLocationAncestors($locationId);
+    $fullPath = implode(' -> ', array_column($ancestors, 'name'));
+
+    $count = count($ancestors);
+    if ($count === 0) {
+        return ['label' => '', 'fullPath' => $fullPath];
+    }
+    $own = $ancestors[$count - 1];
+    $parent = $count >= 2 ? $ancestors[$count - 2] : null;
+
+    if ($parent === null) {
+        $label = $own['name'];
+    } elseif (preg_match('/^[A-Za-z]$/', $own['name']) === 1) {
+        $label = $parent['name'] . $own['name'];
+    } else {
+        $label = $parent['name'] . ' > ' . $own['name'];
+    }
+
+    return ['label' => $label, 'fullPath' => $fullPath];
+}
+
+/**
  * Includes owned-set instance nodes (location_type 'owned_set') — a boxed
  * set's own auto-generated storage node, so it shows up in the "Lagerort-
  * Übersicht" tree right where it physically sits, clickable just like any

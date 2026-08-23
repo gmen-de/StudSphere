@@ -542,14 +542,49 @@ function renderPartDetailModal(): string
     } catch (e) {
       // Private browsing / storage disabled — picker just starts empty.
     }
-    window.createLocationPicker(locationContainer, texts, function(value) {
-      selectedLocationId = value;
-    }, context.locationId || lastAddLocationId);
+    // Named (not a one-shot inline call) so the quick-pick row below can
+    // re-invoke it with a different initialLocationId — createLocationPicker()
+    // has no separate "jump to location X" setter, re-creating it into the
+    // same (cleared) container is the documented way to change its starting
+    // point after construction.
+    function renderLocationPicker(initialLocationId) {
+      locationContainer.innerHTML = '';
+      window.createLocationPicker(locationContainer, texts, function(value) {
+        selectedLocationId = value;
+      }, initialLocationId || undefined);
+    }
+    renderLocationPicker(context.locationId || lastAddLocationId);
 
     var submitBtn = document.createElement('button');
     submitBtn.type = 'submit';
     submitBtn.textContent = texts.addButton;
     form.appendChild(submitBtn);
+
+    // Quick-pick row, below the Hinzufügen button per explicit request:
+    // every location that already holds this part (any color/condition —
+    // deliberately color-agnostic), short-labeled server-side
+    // (getShortLocationLabel(), src/storage.php). Clicking one sets
+    // selectedLocationId directly AND re-points the cascading picker above
+    // at it, so the breadcrumb visibly confirms the choice instead of
+    // silently disagreeing with what's about to submit.
+    var knownStockLocations = data.knownStockLocations || [];
+    if (knownStockLocations.length > 0) {
+      var quickLocations = document.createElement('div');
+      quickLocations.className = 'part-modal-quick-locations';
+      knownStockLocations.forEach(function(loc) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'part-modal-quick-location-btn';
+        btn.textContent = loc.label;
+        btn.title = loc.fullPath;
+        btn.addEventListener('click', function() {
+          selectedLocationId = String(loc.locationId);
+          renderLocationPicker(loc.locationId);
+        });
+        quickLocations.appendChild(btn);
+      });
+      form.appendChild(quickLocations);
+    }
 
     form.addEventListener('submit', function(e) {
       e.preventDefault();

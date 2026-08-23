@@ -1012,6 +1012,121 @@ function computeMinifigStorageBricklinkValueTotal(PDO $pdo): array
 }
 
 /**
+ * Per-location BrickLink value, rolled up to include every sub-location —
+ * feeds the location Explorer tree's "(128,40 €)" suffix per node
+ * (src/routes/pages.php, ?page=locations). Unlike
+ * computeLoosePartsBricklinkValueTotal()/computeMinifigStorageBricklinkValueTotal(),
+ * which each return one grand total for the whole collection (and
+ * deliberately exclude owned_set locations to avoid double-counting against
+ * computeOwnedSetsBricklinkValueTotal()'s own separate total), this returns
+ * one self-contained figure PER node, so an owned_set location's own boxed
+ * contents must be represented somehow or a box full of parts would show a
+ * misleading "0,00 €"/very-low value. Resolved by pricing an owned_set
+ * location's contribution as that set's own whole-set BrickLink price
+ * (same source computeOwnedSetsBricklinkValueTotal() uses) rather than
+ * summing its individual parts, which are frequently missing/incomplete
+ * per-part prices — the double-counting concern the other two functions
+ * guard against doesn't apply here since nothing here is later added to
+ * either of their totals.
+ *
+ * @return array<int, array{total: float, currency: ?string}> location_id => value, plus key 0 for the tree's synthetic root (sum of every top-level location)
+ */
+function computeLocationBricklinkValues(PDO $pdo): array
+{
+    $direct = []; // location_id => ['total' => float, 'currency' => ?string]
+    $addDirect = function (int $locationId, float $amount, ?string $currency) use (&$direct): void {
+        if ($amount === 0.0 && $currency === null) {
+            return;
+        }
+        $existing = $direct[$locationId] ?? ['total' => 0.0, 'currency' => null];
+        $existing['total'] += $amount;
+        $existing['currency'] = $existing['currency'] ?? $currency;
+        $direct[$locationId] = $existing;
+    };
+
+    $partsStmt = $pdo->query(
+        "SELECT si.location_id,
+                SUM(CASE WHEN si.condition_type = 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END
+                    * (si.quantity - si.damaged_quantity)) AS total,
+                MAX(pbp.bricklink_price_currency) AS currency
+         FROM storage_items si
+         INNER JOIN storage_locations sl ON sl.id = si.location_id
+         INNER JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         WHERE (sl.location_type IS NULL OR sl.location_type != 'owned_set')
+         GROUP BY si.location_id"
+    );
+    foreach ($partsStmt->fetchAll() as $row) {
+        $addDirect((int) $row['location_id'], $row['total'] !== null ? (float) $row['total'] : 0.0, $row['currency']);
+    }
+
+    $minifigStmt = $pdo->query(
+        "SELECT msi.location_id,
+                SUM(CASE WHEN msi.condition_type = 'new' THEN m.bricklink_price_new ELSE m.bricklink_price_used END) AS total,
+                MAX(m.bricklink_price_currency) AS currency
+         FROM minifig_storage_items msi
+         INNER JOIN minifigs m ON m.id = msi.minifig_id
+         GROUP BY msi.location_id"
+    );
+    foreach ($minifigStmt->fetchAll() as $row) {
+        $addDirect((int) $row['location_id'], $row['total'] !== null ? (float) $row['total'] : 0.0, $row['currency']);
+    }
+
+    $ownedSetStmt = $pdo->query(
+        "SELECT os.location_id,
+                SUM(CASE WHEN os.condition_type = 'new' THEN s.bricklink_price_new ELSE s.bricklink_price_used END) AS total,
+                MAX(s.bricklink_price_currency) AS currency
+         FROM owned_sets os
+         INNER JOIN sets s ON s.id = os.set_id
+         GROUP BY os.location_id"
+    );
+    foreach ($ownedSetStmt->fetchAll() as $row) {
+        $addDirect((int) $row['location_id'], $row['total'] !== null ? (float) $row['total'] : 0.0, $row['currency']);
+    }
+
+    // Bottom-up rollup via parent_id — plain PHP recursion (memoized), not a
+    // SQL WITH RECURSIVE walk (same shared-hosting MariaDB-version reasoning
+    // getStorageLocationPath() documents), and shelf/box nesting in practice
+    // is never deep enough for PHP's own recursion limit to matter.
+    $childrenOf = [];
+    $allIds = [];
+    foreach ($pdo->query('SELECT id, parent_id FROM storage_locations')->fetchAll() as $row) {
+        $id = (int) $row['id'];
+        $parentKey = $row['parent_id'] !== null ? (int) $row['parent_id'] : 0;
+        $childrenOf[$parentKey][] = $id;
+        $allIds[] = $id;
+    }
+
+    $totals = [];
+    $rollup = function (int $id) use (&$rollup, &$childrenOf, &$direct, &$totals): array {
+        if (isset($totals[$id])) {
+            return $totals[$id];
+        }
+        $sum = $direct[$id]['total'] ?? 0.0;
+        $currency = $direct[$id]['currency'] ?? null;
+        foreach ($childrenOf[$id] ?? [] as $childId) {
+            $childTotal = $rollup($childId);
+            $sum += $childTotal['total'];
+            $currency = $currency ?? $childTotal['currency'];
+        }
+        $totals[$id] = ['total' => $sum, 'currency' => $currency];
+        return $totals[$id];
+    };
+    foreach ($allIds as $id) {
+        $rollup($id);
+    }
+
+    $grandTotal = 0.0;
+    $grandCurrency = null;
+    foreach ($childrenOf[0] ?? [] as $topLevelId) {
+        $grandTotal += $totals[$topLevelId]['total'];
+        $grandCurrency = $grandCurrency ?? $totals[$topLevelId]['currency'];
+    }
+    $totals[0] = ['total' => $grandTotal, 'currency' => $grandCurrency];
+
+    return $totals;
+}
+
+/**
  * Instruction-manual counterpart to computeOwnedSetsBricklinkValueTotal() —
  * same per-condition sum (is_new picks bricklink_instructions_price_new,
  * otherwise _used), one row per stored manual instance, priced from the

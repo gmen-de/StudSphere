@@ -601,10 +601,6 @@ SCRIPT;
 }
 
 if (isset($_GET['page']) && $_GET['page'] === 'locations') {
-    $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : null;
-    $editLocation = $editId !== null ? getStorageLocation($editId) : null;
-    $isEdit = $editLocation !== null;
-
     // No <h1> here (removed per explicit follow-up request, to save
     // vertical space for the tree/content split view below) — the page
     // title/breadcrumb (both still "Mein Lager", via t('locations_title'))
@@ -612,54 +608,6 @@ if (isset($_GET['page']) && $_GET['page'] === 'locations') {
     $content = '';
     if ($locationMessage !== '') {
         $content .= '<p><strong>' . htmlspecialchars($locationMessage) . '</strong></p>';
-    }
-
-    // Edit form only — the "add a new top-level location" toggle/form was
-    // removed per feedback. action=add_location (src/routes/actions.php)
-    // stays as a valid, working backend action even with no UI entry point
-    // here right now, in case a different one (e.g. a "+" in the tree)
-    // replaces it later.
-    if ($isEdit) {
-        $editParentIdValue = $editLocation['parent_id'] !== null ? (int) $editLocation['parent_id'] : '';
-        $content .= '<details class="location-add-form-details" open>';
-        $content .= '<summary>' . htmlspecialchars(t('location_edit_title')) . '</summary>';
-        $content .= '<form method="post" id="location-form">';
-        $content .= '<input type="hidden" name="action" value="rename_location">';
-        $content .= '<input type="hidden" name="location_id" value="' . (int) $editLocation['id'] . '">';
-        $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" value="' . htmlspecialchars($editLocation['name']) . '" required></label>';
-        $content .= '<label>' . htmlspecialchars(t('location_move_parent_label')) . '</label>';
-        $content .= '<div id="location-edit-move-picker" class="location-picker"></div>';
-        $content .= '<input type="hidden" name="parent_id" id="location-edit-move-parent-id" value="' . $editParentIdValue . '">';
-        $content .= '<button type="submit">' . htmlspecialchars(t('location_save_button')) . '</button>';
-        $content .= ' <a href="?page=locations">' . htmlspecialchars(t('location_cancel_edit')) . '</a>';
-        $content .= '</form></details>';
-
-        // Own small script/texts payload rather than reusing the bigger
-        // explorer script further down — that one's built around the tree
-        // JSON and only runs once the explorer's own DOM exists; this picker
-        // needs to work standalone the moment the edit form renders, and
-        // only needs the four generic picker labels.
-        $editMovePickerLabelsJson = json_encode([
-            'levelLabel' => t('location_picker_level_label'),
-            'rootLabel' => t('location_picker_root_label'),
-            'selectPlaceholder' => t('add_stock_select_placeholder'),
-            'noChildren' => t('add_stock_no_children'),
-        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-        $content .= <<<SCRIPT
-<script>
-(function(){
-  var texts = {$editMovePickerLabelsJson};
-  var pickerEl = document.getElementById('location-edit-move-picker');
-  var parentIdField = document.getElementById('location-edit-move-parent-id');
-  if (!pickerEl || !parentIdField || !window.createLocationPicker) {
-    return;
-  }
-  window.createLocationPicker(pickerEl, texts, function(value) {
-    parentIdField.value = value === null ? '' : value;
-  }, parentIdField.value || undefined);
-})();
-</script>
-SCRIPT;
     }
 
     // Explorer split view: left pane is a client-built tree (from the JSON
@@ -673,10 +621,35 @@ SCRIPT;
     // storage_locations row, purely a grouping label the client special-cases)
     // so the tree always has a single, always-expanded starting point.
     $tree = getStorageLocationTree();
+
+    // BrickLink value per location, rolled up to include every sub-location
+    // (computeLocationBricklinkValues(), src/bricklink_prices.php) — attached
+    // onto each tree node as a pre-formatted 'value_text' (or null when
+    // there's nothing priced under that node at all, so buildRow() renders no
+    // parenthetical rather than a noisy "(0,00 €)" on every empty shelf).
+    $locationValues = computeLocationBricklinkValues($pdo);
+    $formatLocationValueText = function (?array $value): ?string {
+        if ($value === null || $value['total'] <= 0.0) {
+            return null;
+        }
+        return formatNumber($value['total'], 2) . ' ' . bricklinkCurrencySymbol($value['currency']);
+    };
+    $attachLocationValues = function (array &$nodes) use (&$attachLocationValues, $locationValues, $formatLocationValueText): void {
+        foreach ($nodes as &$node) {
+            $node['value_text'] = $formatLocationValueText($locationValues[(int) $node['id']] ?? null);
+            if (!empty($node['children'])) {
+                $attachLocationValues($node['children']);
+            }
+        }
+        unset($node);
+    };
+    $attachLocationValues($tree);
+
     $treeRoot = [
         'id' => null,
         'name' => t('location_tree_root_label'),
         'location_type' => null,
+        'value_text' => $formatLocationValueText($locationValues[0] ?? null),
         'children' => $tree,
     ];
     $treeJson = json_encode($treeRoot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
@@ -696,6 +669,40 @@ SCRIPT;
     $content .= '<div id="location-explorer-content"><p class="hint">' . htmlspecialchars(t('location_explorer_select_hint')) . '</p></div>';
     $content .= '</div>';
     $content .= '</div>';
+
+    // Rename and move used to be one combined inline form, reachable only via
+    // ?edit=ID (a full page navigation). Per explicit follow-up request
+    // they're now two separate modals, opened from the content pane's own
+    // option bar for whichever location is currently selected (see
+    // buildLocationOptionsBar(), further down) rather than per-row in the
+    // tree. Both stay plain <form method="post"> submits (not fetch) to the
+    // SAME unchanged action=rename_location — that action already accepts
+    // both name and parent_id together, so the rename modal just carries the
+    // location's current (unchanged) parent_id along, and the move modal
+    // carries its current (unchanged) name along. No backend change needed.
+    $content .= '<div class="modal-overlay" id="location-edit-modal" style="display:none;">';
+    $content .= '<div class="modal-box"><button type="button" class="modal-close" id="location-edit-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $content .= '<h2>' . htmlspecialchars(t('location_edit_modal_heading')) . '</h2>';
+    $content .= '<form method="post">';
+    $content .= '<input type="hidden" name="action" value="rename_location">';
+    $content .= '<input type="hidden" name="location_id" id="location-edit-modal-id" value="">';
+    $content .= '<input type="hidden" name="parent_id" id="location-edit-modal-parent-id" value="">';
+    $content .= '<label>' . htmlspecialchars(t('location_name_label')) . '<input name="name" id="location-edit-modal-name" required></label>';
+    $content .= '<button type="submit">' . htmlspecialchars(t('location_save_button')) . '</button>';
+    $content .= '</form></div></div>';
+
+    $content .= '<div class="modal-overlay" id="location-move-modal" style="display:none;">';
+    $content .= '<div class="modal-box"><button type="button" class="modal-close" id="location-move-modal-close" aria-label="' . htmlspecialchars(t('close_button')) . '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg></button>';
+    $content .= '<h2>' . htmlspecialchars(t('location_move_modal_heading')) . '</h2>';
+    $content .= '<form method="post">';
+    $content .= '<input type="hidden" name="action" value="rename_location">';
+    $content .= '<input type="hidden" name="location_id" id="location-move-modal-id" value="">';
+    $content .= '<input type="hidden" name="name" id="location-move-modal-name" value="">';
+    $content .= '<label>' . htmlspecialchars(t('location_move_parent_label')) . '</label>';
+    $content .= '<div id="location-move-modal-picker" class="location-picker"></div>';
+    $content .= '<input type="hidden" name="parent_id" id="location-move-modal-parent-id" value="">';
+    $content .= '<button type="submit">' . htmlspecialchars(t('location_save_button')) . '</button>';
+    $content .= '</form></div></div>';
 
     // Reached via the "(Neu)" row every tree node gets (see buildRow() below)
     // — one shared modal, not one per node; opening it just points the
@@ -798,8 +805,6 @@ SCRIPT;
 
     $explorerLabelsJson = json_encode([
         'chevronIcon' => getActionIcon('chevron_right'),
-        'editIcon' => getActionIcon('edit'),
-        'deleteIcon' => getActionIcon('delete'),
         'brickIcon' => getNavIcon('bricks'),
         'minifigIcon' => getNavIcon('minifigs'),
         'setIcon' => getNavIcon('sets'),
@@ -807,6 +812,7 @@ SCRIPT;
         'instructionsIcon' => getActionIcon('instructions'),
         'expandLabel' => t('locations_tree_expand_label'),
         'editLabel' => t('location_edit_link'),
+        'moveLabel' => t('location_move_button'),
         'deleteLabel' => t('location_delete_link'),
         'deleteConfirm' => t('location_delete_confirm'),
         'loading' => t('location_explorer_loading'),
@@ -889,6 +895,17 @@ SCRIPT;
   var addModalClose = document.getElementById('location-add-modal-close');
   var addModalHeading = document.getElementById('location-add-modal-heading');
   var addParentIdField = document.getElementById('location-add-parent-id');
+  var editModal = document.getElementById('location-edit-modal');
+  var editModalClose = document.getElementById('location-edit-modal-close');
+  var editModalId = document.getElementById('location-edit-modal-id');
+  var editModalParentId = document.getElementById('location-edit-modal-parent-id');
+  var editModalName = document.getElementById('location-edit-modal-name');
+  var moveModal = document.getElementById('location-move-modal');
+  var moveModalClose = document.getElementById('location-move-modal-close');
+  var moveModalId = document.getElementById('location-move-modal-id');
+  var moveModalName = document.getElementById('location-move-modal-name');
+  var moveModalParentId = document.getElementById('location-move-modal-parent-id');
+  var moveModalPicker = document.getElementById('location-move-modal-picker');
   var itemEditModal = document.getElementById('location-item-edit-modal');
   var itemEditModalClose = document.getElementById('location-item-edit-modal-close');
   var itemEditSubtitle = document.getElementById('location-item-edit-subtitle');
@@ -1015,12 +1032,20 @@ SCRIPT;
 
   var selectedRow = null;
 
-  function selectLocation(id, name, row) {
+  function selectLocation(id, name, row, node) {
     if (selectedRow) {
       selectedRow.classList.remove('location-tree-row-selected');
     }
     row.classList.add('location-tree-row-selected');
     selectedRow = row;
+    // Stashed here (not re-derived from `data` later) since location_type/
+    // parent_id are tree properties, not something action=location_content
+    // returns — buildLocationOptionsBar() needs both to decide whether
+    // Bearbeiten/Verschieben/Löschen apply at all (a set/pick-list/
+    // Bauanleitungen node never gets them, same rule the old per-row tree
+    // icons used) and to pre-fill the two modals.
+    currentLocationType = node ? node.location_type : null;
+    currentLocationParentId = node && node.parent_id !== undefined ? node.parent_id : null;
     loadContent(id, name);
   }
 
@@ -1110,6 +1135,8 @@ SCRIPT;
 
   var currentLocationId = null;
   var currentLocationName = null;
+  var currentLocationType = null;
+  var currentLocationParentId = null;
 
   function refreshContent() {
     if (currentLocationId !== null) {
@@ -2227,63 +2254,173 @@ SCRIPT;
     });
   }
 
-  // "Zur Inventur vormerken" checkbox — only ever shown for a genuine,
-  // directly-editable location (the caller already gates this on
-  // !currentReadOnly), never for an owned_set/pick_list node or the
-  // Bauanleitungen root. Rebuilt fresh on every renderContent() call so it
-  // always reflects that specific location's own flag state, exactly like
-  // the recursive toggle right above it. Per explicit request, actually
-  // WORKING a flagged location's Inventur only ever happens in the /pick/
-  // app (see src/stocktake_pages.php) — no "Inventur starten" button here
-  // anymore, this checkbox only ever sets/clears the flag itself.
-  function buildStocktakeControls(locationId, data) {
-    var flagLabel = document.createElement('label');
-    flagLabel.className = 'location-recursive-toggle';
-    var flagInput = document.createElement('input');
-    flagInput.type = 'checkbox';
-    flagInput.checked = !!data.stocktakeFlagged;
-    flagInput.addEventListener('change', function() {
+  // Bearbeiten/Verschieben — both plain <form method="post"> submits to the
+  // same unchanged action=rename_location (see the PHP comment above these
+  // two modals' markup for why one action serves both without a backend
+  // change). Opening either just prefills its fields from whichever
+  // location is currently selected (id/name/currentLocationParentId, set in
+  // selectLocation()) and reveals the modal — no fetch() involved, saving
+  // reloads the page same as the old inline edit form always did.
+  function openLocationEditModal(id, name) {
+    if (!editModal || !editModalId || !editModalName || !editModalParentId) {
+      return;
+    }
+    editModalId.value = id;
+    editModalName.value = name;
+    editModalParentId.value = currentLocationParentId === null || currentLocationParentId === undefined ? '' : currentLocationParentId;
+    editModal.style.display = 'flex';
+  }
+
+  if (editModalClose) {
+    editModalClose.addEventListener('click', function() {
+      editModal.style.display = 'none';
+    });
+  }
+
+  function openLocationMoveModal(id, name) {
+    if (!moveModal || !moveModalId || !moveModalName || !moveModalPicker || !moveModalParentId) {
+      return;
+    }
+    moveModalId.value = id;
+    moveModalName.value = name;
+    moveModalParentId.value = currentLocationParentId === null || currentLocationParentId === undefined ? '' : currentLocationParentId;
+    moveModalPicker.innerHTML = '';
+    window.createLocationPicker(moveModalPicker, texts, function(value) {
+      moveModalParentId.value = value === null ? '' : value;
+    }, currentLocationParentId === null || currentLocationParentId === undefined ? undefined : currentLocationParentId);
+    moveModal.style.display = 'flex';
+  }
+
+  if (moveModalClose) {
+    moveModalClose.addEventListener('click', function() {
+      moveModal.style.display = 'none';
+    });
+  }
+
+  // A small reusable toggle-switch control (hidden native checkbox + drawn
+  // track/thumb) — used for both the recursive-content toggle and the
+  // "Zur Inventur vormerken" flag, replacing their old plain-checkbox
+  // markup per explicit request. Keeps the native checkbox for state/events
+  // (onChange fires exactly like a normal change listener would), only the
+  // visible shell is custom.
+  function buildToggleSwitch(checked, labelText, onChange) {
+    var label = document.createElement('label');
+    label.className = 'toggle-switch';
+    var input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = checked;
+    input.addEventListener('change', function() {
+      onChange(input.checked);
+    });
+    label.appendChild(input);
+    var track = document.createElement('span');
+    track.className = 'toggle-switch-track';
+    var thumb = document.createElement('span');
+    thumb.className = 'toggle-switch-thumb';
+    track.appendChild(thumb);
+    label.appendChild(track);
+    label.appendChild(document.createTextNode(' ' + labelText));
+    return label;
+  }
+
+  // Recursive-content toggle (always shown) + "Zur Inventur vormerken" flag
+  // and the Bearbeiten/Verschieben/Löschen buttons (only for a genuine,
+  // directly-editable location — pick_lager_root needs its own extra
+  // exclusion here since action=location_content doesn't mark it readOnly,
+  // unlike owned_set/pick_list, which currentReadOnly already covers; see
+  // selectLocation() for where currentLocationType is captured). Rebuilt
+  // fresh on every renderContent() call so it always reflects the
+  // currently-selected location's own state. Per earlier explicit request,
+  // actually WORKING a flagged location's Inventur only ever happens in the
+  // /pick/ app (src/stocktake_pages.php) — this flag toggle only ever
+  // sets/clears the flag itself, nothing more.
+  function buildLocationOptionsBar(id, name, data) {
+    var bar = document.createElement('div');
+    bar.className = 'location-options-bar';
+
+    bar.appendChild(buildToggleSwitch(recursiveEnabled, texts.recursiveToggleLabel, function(checked) {
+      setRecursiveEnabled(checked);
+      refreshContent();
+    }));
+
+    var isEditableLocation = !currentReadOnly && currentLocationType !== 'pick_lager_root';
+    if (!isEditableLocation) {
+      return bar;
+    }
+
+    bar.appendChild(buildToggleSwitch(!!data.stocktakeFlagged, texts.stocktakeFlagLabel, function(checked) {
       var formData = new FormData();
       formData.set('action', 'toggle_location_stocktake_flag');
-      formData.set('location_id', String(locationId));
-      formData.set('flagged', flagInput.checked ? '1' : '0');
+      formData.set('location_id', String(id));
+      formData.set('flagged', checked ? '1' : '0');
       fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' }).catch(function() {});
+    }));
+
+    var actions = document.createElement('div');
+    actions.className = 'location-options-actions';
+
+    var editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'location-options-action-btn';
+    editBtn.textContent = texts.editLabel;
+    editBtn.addEventListener('click', function() {
+      openLocationEditModal(id, name);
     });
-    flagLabel.appendChild(flagInput);
-    flagLabel.appendChild(document.createTextNode(' ' + texts.stocktakeFlagLabel));
-    return flagLabel;
+    actions.appendChild(editBtn);
+
+    var moveBtn = document.createElement('button');
+    moveBtn.type = 'button';
+    moveBtn.className = 'location-options-action-btn';
+    moveBtn.textContent = texts.moveLabel;
+    moveBtn.addEventListener('click', function() {
+      openLocationMoveModal(id, name);
+    });
+    actions.appendChild(moveBtn);
+
+    var deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'location-options-action-btn location-options-action-btn-danger';
+    deleteBtn.textContent = texts.deleteLabel;
+    deleteBtn.addEventListener('click', function() {
+      if (deleteForm && deleteFormId && window.confirm(texts.deleteConfirm.replace('{name}', name))) {
+        deleteFormId.value = id;
+        deleteForm.submit();
+      }
+    });
+    actions.appendChild(deleteBtn);
+
+    bar.appendChild(actions);
+    return bar;
   }
 
   function renderContent(id, name, data) {
     contentEl.innerHTML = '';
     allSelectableItems = [];
     currentReadOnly = !!data.readOnly;
+
+    // Fixed header (heading + option bar) vs. scrollable body — per
+    // explicit request the heading/options no longer scroll away with the
+    // parts grid underneath. .location-explorer-content-pane's own
+    // overflow-y:auto moved onto .location-explorer-content-scroll (style.css).
+    var header = document.createElement('div');
+    header.className = 'location-explorer-content-header';
     var heading = document.createElement('h2');
     heading.textContent = name;
-    contentEl.appendChild(heading);
+    header.appendChild(heading);
+
+    var scroll = document.createElement('div');
+    scroll.className = 'location-explorer-content-scroll';
 
     if (data.isInstructionsLocation) {
-      contentEl.appendChild(buildInstructionManualsGrid(data.instructionManuals || []));
+      contentEl.appendChild(header);
+      scroll.appendChild(buildInstructionManualsGrid(data.instructionManuals || []));
+      contentEl.appendChild(scroll);
       updateBulkBar();
       return;
     }
 
-    var recursiveToggleLabel = document.createElement('label');
-    recursiveToggleLabel.className = 'location-recursive-toggle';
-    var recursiveToggleInput = document.createElement('input');
-    recursiveToggleInput.type = 'checkbox';
-    recursiveToggleInput.checked = recursiveEnabled;
-    recursiveToggleInput.addEventListener('change', function() {
-      setRecursiveEnabled(recursiveToggleInput.checked);
-      refreshContent();
-    });
-    recursiveToggleLabel.appendChild(recursiveToggleInput);
-    recursiveToggleLabel.appendChild(document.createTextNode(' ' + texts.recursiveToggleLabel));
-    contentEl.appendChild(recursiveToggleLabel);
-
-    if (!currentReadOnly) {
-      contentEl.appendChild(buildStocktakeControls(id, data));
-    }
+    header.appendChild(buildLocationOptionsBar(id, name, data));
+    contentEl.appendChild(header);
 
     if (currentReadOnly) {
       var readOnlyNote = document.createElement('p');
@@ -2296,7 +2433,7 @@ SCRIPT;
         readOnlyNote.appendChild(document.createTextNode(' '));
         readOnlyNote.appendChild(detailLink);
       }
-      contentEl.appendChild(readOnlyNote);
+      scroll.appendChild(readOnlyNote);
     }
 
     if (data.ldraw && data.ldraw.missingCount > 0) {
@@ -2309,7 +2446,7 @@ SCRIPT;
       } else {
         status.textContent = texts.ldrawWaiting;
       }
-      contentEl.appendChild(status);
+      scroll.appendChild(status);
       // Missing color-correct images (see getMissingLdrawRenderPairs() in
       // src/ldraw.php) were already enqueued server-side by this same
       // request — just keep polling the same content until none are left,
@@ -2341,7 +2478,7 @@ SCRIPT;
     var showLocationGroups = Object.keys(allLocationLabels).length > 1;
 
     data.categories.forEach(function(cat) {
-      contentEl.appendChild(buildGroup(cat.name, buildPartsGrid(cat.parts, showLocationGroups)));
+      scroll.appendChild(buildGroup(cat.name, buildPartsGrid(cat.parts, showLocationGroups)));
     });
 
     var minifigsBody;
@@ -2352,8 +2489,9 @@ SCRIPT;
       minifigsBody.className = 'hint';
       minifigsBody.textContent = texts.minifigsEmpty;
     }
-    contentEl.appendChild(buildGroup(texts.groupMinifigs, minifigsBody));
+    scroll.appendChild(buildGroup(texts.groupMinifigs, minifigsBody));
 
+    contentEl.appendChild(scroll);
     updateBulkBar();
   }
 
@@ -2469,44 +2607,30 @@ SCRIPT;
       nameBtn.appendChild(setIconEl);
     }
     nameBtn.appendChild(document.createTextNode(node.name));
-    row.appendChild(nameBtn);
-
-    if (!isRoot && !isOwnedSet && !isPickList && !isPickLagerRoot && !isInstructionsRoot && !isInstructionsTheme) {
-      var actions = document.createElement('span');
-      actions.className = 'location-tree-row-actions';
-
-      var editLink = document.createElement('a');
-      editLink.href = '?page=locations&edit=' + node.id;
-      editLink.className = 'location-tree-edit';
-      editLink.title = texts.editLabel;
-      editLink.setAttribute('aria-label', texts.editLabel);
-      editLink.innerHTML = texts.editIcon;
-      editLink.addEventListener('click', function(e) { e.stopPropagation(); });
-      actions.appendChild(editLink);
-
-      var deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.className = 'location-tree-delete';
-      deleteBtn.title = texts.deleteLabel;
-      deleteBtn.setAttribute('aria-label', texts.deleteLabel);
-      deleteBtn.innerHTML = texts.deleteIcon;
-      deleteBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        if (deleteForm && deleteFormId && window.confirm(texts.deleteConfirm.replace('{name}', node.name))) {
-          deleteFormId.value = node.id;
-          deleteForm.submit();
-        }
-      });
-      actions.appendChild(deleteBtn);
-      row.appendChild(actions);
+    // BrickLink value of this node + everything nested under it
+    // (computeLocationBricklinkValues(), src/bricklink_prices.php) —
+    // pre-formatted server-side, omitted entirely (no node.value_text at
+    // all) when there's nothing priced under this node, rather than a noisy
+    // "(0,00 €)" on every empty shelf.
+    if (node.value_text) {
+      var valueEl = document.createElement('span');
+      valueEl.className = 'location-tree-value';
+      valueEl.textContent = ' (' + node.value_text + ')';
+      nameBtn.appendChild(valueEl);
     }
+    row.appendChild(nameBtn);
+    // Bearbeiten/Verschieben/Löschen no longer live here per-row (hover
+    // icons cluttered the tree and only ever applied to one node at a time
+    // anyway) — they've moved to the content pane's own option bar for
+    // whichever location is currently selected, see
+    // buildLocationOptionsBar() and selectLocation() above.
 
     wrap.appendChild(row);
 
     if (isLeafOnly) {
       // No children, no "(Neu)" row — nothing to expand.
       nameBtn.addEventListener('click', function() {
-        selectLocation(node.id, node.name, row);
+        selectLocation(node.id, node.name, row, node);
       });
       return wrap;
     }
@@ -2550,7 +2674,7 @@ SCRIPT;
       if (isRoot) {
         toggleExpand();
       } else {
-        selectLocation(node.id, node.name, row);
+        selectLocation(node.id, node.name, row, node);
       }
     });
     nameBtn.addEventListener('dblclick', function() {

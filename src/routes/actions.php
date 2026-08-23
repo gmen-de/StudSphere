@@ -1253,11 +1253,35 @@ if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
     $part['translated_name'] = $locale !== 'en' ? getPartTranslation($pdo, $partId, $locale) : null;
     $part['translation_locale'] = $locale;
     $colors = getColorsForPartPicker($pdo, $partId);
+
+    // Quick-pick list for the "Zum Lager hinzufügen" tab (part_modal.php,
+    // buildAddStockPanel()) — every location that already has ANY stock of
+    // this part, regardless of color/condition (per explicit request, only
+    // the part itself matters here, not which color). getPartStock()
+    // without $colorId already covers exactly that (and already excludes
+    // owned_set/pick_list locations, which aren't valid "add more stock
+    // here" targets). Deduplicated to one entry per location_id since a
+    // location can hold this part in several colors/conditions at once.
+    $knownStockLocationIds = [];
+    foreach (getPartStock($partId) as $stockRow) {
+        $knownStockLocationIds[$stockRow['location_id']] = true;
+    }
+    $knownStockLocations = [];
+    foreach (array_keys($knownStockLocationIds) as $stockLocationId) {
+        $shortLabel = getShortLocationLabel($pdo, $stockLocationId);
+        $knownStockLocations[] = [
+            'locationId' => $stockLocationId,
+            'label' => $shortLabel['label'],
+            'fullPath' => $shortLabel['fullPath'],
+        ];
+    }
+
     echo json_encode([
         'part' => $part,
         'knownColors' => $colors['known'],
         'otherColors' => $colors['other'],
         'printParent' => getPrintParent($pdo, $partId),
+        'knownStockLocations' => $knownStockLocations,
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
