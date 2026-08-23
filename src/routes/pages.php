@@ -1321,9 +1321,17 @@ SCRIPT;
     });
   }
 
-  function buildLocationGroupedGrid(items, buildCard) {
-    var groups = groupByLocationLabel(items);
-    if (groups.length <= 1) {
+  // $showGroups is decided once for the whole location view (see
+  // renderContent() below), not per call — deciding it locally per category
+  // used to mean a category whose own items all happened to sit in a single
+  // sub-location rendered flat (no header) even though a DIFFERENT category
+  // on the very same page spanned several sub-locations, so two categories
+  // on one location's page disagreed about whether sub-location info existed
+  // at all. Once the location as a whole genuinely spans more than one spot,
+  // every category shows its own header(s) consistently, even a category
+  // that (for now) happens to sit entirely in just one of them.
+  function buildLocationGroupedGrid(items, buildCard, showGroups) {
+    if (!showGroups) {
       var grid = document.createElement('div');
       grid.className = 'location-detail-grid';
       items.forEach(function(item) {
@@ -1332,6 +1340,7 @@ SCRIPT;
       return grid;
     }
 
+    var groups = groupByLocationLabel(items);
     var wrap = document.createElement('div');
     wrap.className = 'location-content-subgroups';
     groups.forEach(function(group) {
@@ -1352,12 +1361,12 @@ SCRIPT;
     return wrap;
   }
 
-  function buildPartsGrid(parts) {
-    return buildLocationGroupedGrid(parts, buildOnePartCard);
+  function buildPartsGrid(parts, showGroups) {
+    return buildLocationGroupedGrid(parts, buildOnePartCard, showGroups);
   }
 
-  function buildMinifigsGrid(minifigs) {
-    return buildLocationGroupedGrid(minifigs, buildOneMinifigCard);
+  function buildMinifigsGrid(minifigs, showGroups) {
+    return buildLocationGroupedGrid(minifigs, buildOneMinifigCard, showGroups);
   }
 
   // ---- "Bauanleitungen" (src/instruction_manuals.php) --------------------
@@ -2315,13 +2324,29 @@ SCRIPT;
       }, 1000);
     }
 
+    // Decided once for the whole location view (not per category — see
+    // buildLocationGroupedGrid()'s own doc comment for why that used to be
+    // inconsistent): true once ANY two items on this page — a part in one
+    // category, a minifig, anything — actually sit in different physical
+    // sub-locations.
+    var allLocationLabels = {};
     data.categories.forEach(function(cat) {
-      contentEl.appendChild(buildGroup(cat.name, buildPartsGrid(cat.parts)));
+      cat.parts.forEach(function(part) {
+        allLocationLabels[part.location_label === null || part.location_label === undefined ? '' : part.location_label] = true;
+      });
+    });
+    data.minifigs.forEach(function(fig) {
+      allLocationLabels[fig.location_label === null || fig.location_label === undefined ? '' : fig.location_label] = true;
+    });
+    var showLocationGroups = Object.keys(allLocationLabels).length > 1;
+
+    data.categories.forEach(function(cat) {
+      contentEl.appendChild(buildGroup(cat.name, buildPartsGrid(cat.parts, showLocationGroups)));
     });
 
     var minifigsBody;
     if (data.minifigs.length > 0) {
-      minifigsBody = buildMinifigsGrid(data.minifigs);
+      minifigsBody = buildMinifigsGrid(data.minifigs, showLocationGroups);
     } else {
       minifigsBody = document.createElement('p');
       minifigsBody.className = 'hint';
