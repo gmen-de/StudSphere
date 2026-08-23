@@ -1262,9 +1262,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
     // owned_set/pick_list locations, which aren't valid "add more stock
     // here" targets). Deduplicated to one entry per location_id since a
     // location can hold this part in several colors/conditions at once.
+    //
+    // Walks the whole print family (getPrintFamilyPartIds(), src/parts.php),
+    // not just this exact part_id — per explicit follow-up request, "3024"
+    // and "3024pr0005" are the same physical part, so looking at either one
+    // should surface every location ANY of them is actually stored in, not
+    // just wherever this one exact print/non-print variant happens to sit.
     $knownStockLocationIds = [];
-    foreach (getPartStock($partId) as $stockRow) {
-        $knownStockLocationIds[$stockRow['location_id']] = true;
+    foreach (getPrintFamilyPartIds($pdo, $partId) as $familyPartId) {
+        foreach (getPartStock($familyPartId) as $stockRow) {
+            $knownStockLocationIds[$stockRow['location_id']] = true;
+        }
     }
     $knownStockLocations = [];
     foreach (array_keys($knownStockLocationIds) as $stockLocationId) {

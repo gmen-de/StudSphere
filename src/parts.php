@@ -312,6 +312,37 @@ function getPrintParent(PDO $pdo, int $partId): ?array
 }
 
 /**
+ * Every part_id physically the same brick as $partId for storage purposes —
+ * itself, its unprinted "print parent" if it's a print variant
+ * (getPrintParent()), and every OTHER print variant of that same parent.
+ * Powers the part-detail modal's quick-pick location list
+ * (action=part_detail, src/routes/actions.php): per explicit request, "3024"
+ * and "3024pr0005" are the same physical part for this purpose, so looking
+ * at either one should surface every location any of them are actually
+ * stored in, not just whichever exact part_id happens to have its own
+ * storage_items rows.
+ *
+ * @return int[]
+ */
+function getPrintFamilyPartIds(PDO $pdo, int $partId): array
+{
+    $rootStmt = $pdo->prepare(
+        "SELECT parent_part_id FROM part_relationships WHERE child_part_id = ? AND relationship_type = 'P' LIMIT 1"
+    );
+    $rootStmt->execute([$partId]);
+    $rootId = $rootStmt->fetchColumn();
+    $rootId = $rootId !== false ? (int) $rootId : $partId;
+
+    $childrenStmt = $pdo->prepare(
+        "SELECT child_part_id FROM part_relationships WHERE parent_part_id = ? AND relationship_type = 'P'"
+    );
+    $childrenStmt->execute([$rootId]);
+    $childIds = array_map('intval', $childrenStmt->fetchAll(PDO::FETCH_COLUMN));
+
+    return array_values(array_unique(array_merge([$rootId], $childIds, [$partId])));
+}
+
+/**
  * The actual sets a part appears in — backs the "N Sets" link in the
  * part-detail overlay. Same inventory_parts/rebrickable_inventories/sets
  * join as the summary stats in getPartDetail(), just returned as rows
