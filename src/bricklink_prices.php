@@ -864,19 +864,31 @@ function getBricklinkPartPriceCoverage(PDO $pdo): array
  * Quantity-weighted (unlike the set/minifig totals, which sum one row per
  * instance) since a storage_items row can hold quantity > 1.
  *
+ * Falls back to a printed part's own unprinted "print parent" price
+ * (part_relationships.relationship_type = 'P') when the printed variant has
+ * no BrickLink price of its own yet — per explicit request, e.g. "3024" and
+ * "3024pr0005" are the same physical part for valuation purposes, and
+ * BrickLink frequently has no separate price history for a specific print.
+ * Only ever a fallback: a print variant's own price, once synced, always
+ * wins over its parent's.
+ *
  * @return array{total: float, currency: ?string}
  */
 function computeLoosePartsBricklinkValueTotal(PDO $pdo): array
 {
     $stmt = $pdo->query(
         "SELECT
-            SUM(CASE WHEN si.condition_type = 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END
+            SUM(CASE WHEN si.condition_type = 'new' THEN COALESCE(pbp.bricklink_price_new, pbp_parent.bricklink_price_new)
+                     ELSE COALESCE(pbp.bricklink_price_used, pbp_parent.bricklink_price_used) END
                 * (si.quantity - si.damaged_quantity)) AS total,
-            MAX(pbp.bricklink_price_currency) AS currency
+            MAX(COALESCE(pbp.bricklink_price_currency, pbp_parent.bricklink_price_currency)) AS currency
          FROM storage_items si
          INNER JOIN storage_locations sl ON sl.id = si.location_id
-         INNER JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
-         WHERE (sl.location_type IS NULL OR sl.location_type != 'owned_set')"
+         LEFT JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         LEFT JOIN part_relationships prel ON prel.child_part_id = si.part_id AND prel.relationship_type = 'P'
+         LEFT JOIN part_bricklink_prices pbp_parent ON pbp_parent.part_id = prel.parent_part_id AND pbp_parent.color_id = si.color_id
+         WHERE (sl.location_type IS NULL OR sl.location_type != 'owned_set')
+           AND (pbp.part_id IS NOT NULL OR pbp_parent.part_id IS NOT NULL)"
     );
     $row = $stmt->fetch();
     return [
@@ -903,6 +915,9 @@ function computeLoosePartsBricklinkValueTotal(PDO $pdo): array
  * the actual display thumbnail (ldraw_thumbnail, falling back to a generic
  * catalog image) the same way those two callers do, via renderPartCard().
  *
+ * Same print-parent price fallback as computeLoosePartsBricklinkValueTotal()
+ * — see that function's doc comment.
+ *
  * @return array<array{part_id:int, color_id:int, condition_type:string, part_num:string, part_name:string, color_name:?string, color_rgb:?string, rebrickable_color_id:?int, ldraw_thumbnail:?string, quantity:int, unit_price:float, currency:?string, total_value:float}>
  */
 function getTopValuedOwnedParts(PDO $pdo, int $limit = 100): array
@@ -912,18 +927,25 @@ function getTopValuedOwnedParts(PDO $pdo, int $limit = 100): array
                 p.part_num, p.name AS part_name, c.name AS color_name, c.rgb AS color_rgb,
                 c.color_id AS rebrickable_color_id, MAX(pci.local_image_path) AS ldraw_thumbnail,
                 SUM(si.quantity - si.damaged_quantity) AS quantity,
-                CASE si.condition_type WHEN 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END AS unit_price,
-                pbp.bricklink_price_currency AS currency
+                CASE si.condition_type
+                    WHEN 'new' THEN COALESCE(pbp.bricklink_price_new, pbp_parent.bricklink_price_new)
+                    ELSE COALESCE(pbp.bricklink_price_used, pbp_parent.bricklink_price_used) END AS unit_price,
+                COALESCE(pbp.bricklink_price_currency, pbp_parent.bricklink_price_currency) AS currency
          FROM storage_items si
          INNER JOIN parts p ON p.id = si.part_id
          INNER JOIN colors c ON c.id = si.color_id
          INNER JOIN storage_locations sl ON sl.id = si.location_id
-         INNER JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         LEFT JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         LEFT JOIN part_relationships prel ON prel.child_part_id = si.part_id AND prel.relationship_type = 'P'
+         LEFT JOIN part_bricklink_prices pbp_parent ON pbp_parent.part_id = prel.parent_part_id AND pbp_parent.color_id = si.color_id
          LEFT JOIN part_color_images pci ON pci.part_id = si.part_id AND pci.color_id = c.color_id AND pci.angle = 'home'
          WHERE (sl.location_type IS NULL OR sl.location_type != 'owned_set')
-            AND (CASE si.condition_type WHEN 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END) IS NOT NULL
+            AND (CASE si.condition_type
+                    WHEN 'new' THEN COALESCE(pbp.bricklink_price_new, pbp_parent.bricklink_price_new)
+                    ELSE COALESCE(pbp.bricklink_price_used, pbp_parent.bricklink_price_used) END) IS NOT NULL
          GROUP BY si.part_id, si.color_id, si.condition_type, p.part_num, p.name, c.name, c.rgb,
-                  c.color_id, pbp.bricklink_price_new, pbp.bricklink_price_used, pbp.bricklink_price_currency
+                  c.color_id, pbp.bricklink_price_new, pbp.bricklink_price_used, pbp.bricklink_price_currency,
+                  pbp_parent.bricklink_price_new, pbp_parent.bricklink_price_used, pbp_parent.bricklink_price_currency
          HAVING SUM(si.quantity - si.damaged_quantity) > 0"
     );
     $rows = $stmt->fetchAll();
@@ -1044,15 +1066,21 @@ function computeLocationBricklinkValues(PDO $pdo): array
         $direct[$locationId] = $existing;
     };
 
+    // Same print-parent price fallback as computeLoosePartsBricklinkValueTotal()
+    // — see that function's doc comment.
     $partsStmt = $pdo->query(
         "SELECT si.location_id,
-                SUM(CASE WHEN si.condition_type = 'new' THEN pbp.bricklink_price_new ELSE pbp.bricklink_price_used END
+                SUM(CASE WHEN si.condition_type = 'new' THEN COALESCE(pbp.bricklink_price_new, pbp_parent.bricklink_price_new)
+                         ELSE COALESCE(pbp.bricklink_price_used, pbp_parent.bricklink_price_used) END
                     * (si.quantity - si.damaged_quantity)) AS total,
-                MAX(pbp.bricklink_price_currency) AS currency
+                MAX(COALESCE(pbp.bricklink_price_currency, pbp_parent.bricklink_price_currency)) AS currency
          FROM storage_items si
          INNER JOIN storage_locations sl ON sl.id = si.location_id
-         INNER JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         LEFT JOIN part_bricklink_prices pbp ON pbp.part_id = si.part_id AND pbp.color_id = si.color_id
+         LEFT JOIN part_relationships prel ON prel.child_part_id = si.part_id AND prel.relationship_type = 'P'
+         LEFT JOIN part_bricklink_prices pbp_parent ON pbp_parent.part_id = prel.parent_part_id AND pbp_parent.color_id = si.color_id
          WHERE (sl.location_type IS NULL OR sl.location_type != 'owned_set')
+           AND (pbp.part_id IS NOT NULL OR pbp_parent.part_id IS NOT NULL)
          GROUP BY si.location_id"
     );
     foreach ($partsStmt->fetchAll() as $row) {
