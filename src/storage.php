@@ -166,13 +166,16 @@ function getStorageLocationAncestors(int $id): array
 
 /**
  * "Überlagerort > Lagerort" short label for the part-detail modal's quick-
- * pick location list (src/part_modal.php) — just the last two segments of
+ * pick location list (src/part_modal.php) — the last two segments of
  * getStorageLocationAncestors(), not the full path (that stays available
  * separately as $fullPath, for a tooltip). A location whose own name is a
- * single letter ("A", "B", ...) is treated like a house-number suffix and
- * appended directly onto the parent's name with no separator ("Schubfach 22"
- * + "A" -> "Schubfach 22A") rather than "Schubfach 22 > A", since that's how
- * such sub-locations are actually meant to read.
+ * single letter ("A", "B", ...) is treated like a house-number suffix: it's
+ * merged onto ITS OWN parent's name with no separator ("Schubfach 32" + "A"
+ * -> "Schubfach 32A"), and that merged name becomes the "Lagerort" half of
+ * the pair — the "Überlagerort" half then shifts up one level further (e.g.
+ * "Kleinteilesortiment #2"), so the result still reads
+ * "Kleinteilesortiment #2 > Schubfach 32A" rather than losing that
+ * context and showing just the bare merged pair on its own.
  *
  * @return array{label: string, fullPath: string}
  */
@@ -185,16 +188,16 @@ function getShortLocationLabel(PDO $pdo, int $locationId): array
     if ($count === 0) {
         return ['label' => '', 'fullPath' => $fullPath];
     }
-    $own = $ancestors[$count - 1];
-    $parent = $count >= 2 ? $ancestors[$count - 2] : null;
 
-    if ($parent === null) {
-        $label = $own['name'];
-    } elseif (preg_match('/^[A-Za-z]$/', $own['name']) === 1) {
-        $label = $parent['name'] . $own['name'];
-    } else {
-        $label = $parent['name'] . ' > ' . $own['name'];
+    $ownName = $ancestors[$count - 1]['name'];
+    $parentIndex = $count - 2; // direct parent's index, or -1 when there isn't one
+
+    if ($parentIndex >= 0 && preg_match('/^[A-Za-z]$/', $ownName) === 1) {
+        $ownName = $ancestors[$parentIndex]['name'] . $ownName;
+        $parentIndex--;
     }
+
+    $label = $parentIndex >= 0 ? $ancestors[$parentIndex]['name'] . ' > ' . $ownName : $ownName;
 
     return ['label' => $label, 'fullPath' => $fullPath];
 }
