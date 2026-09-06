@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS parts (
     bricklink_part_id VARCHAR(20) DEFAULT NULL,
     bricklink_item_id INT DEFAULT NULL,
     brickowl_id VARCHAR(20) DEFAULT NULL,
+    weight_grams DECIMAL(10,3) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_parts_category (part_category)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

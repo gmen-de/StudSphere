@@ -344,6 +344,10 @@ SCRIPT;
     $content .= '<button type="submit">' . htmlspecialchars(t('settings_rebrickable_save_button')) . '</button>';
     $content .= '</form>';
 
+    $content .= '<h2>' . htmlspecialchars(t('settings_weight_scan_title')) . '</h2>';
+    $content .= '<p class="hint">' . htmlspecialchars(t('settings_weight_scan_help')) . '</p>';
+    $content .= '<p><a href="?page=weight_scan">' . htmlspecialchars(t('settings_weight_scan_button')) . '</a></p>';
+
     $content .= '<h2>' . htmlspecialchars(t('update_title')) . '</h2>';
     $content .= '<p>' . htmlspecialchars(t('update_current_version', ['version' => getCurrentVersion()])) . '</p>';
     $content .= '<p class="hint">' . htmlspecialchars(t('update_warning')) . '</p>';
@@ -597,6 +601,83 @@ SCRIPT;
     }
 
     renderApp(t('settings_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('settings_title'), 'url' => null]]);
+    exit;
+}
+
+if (isset($_GET['page']) && $_GET['page'] === 'weight_scan') {
+    $content = '<h1>' . htmlspecialchars(t('weight_scan_heading')) . '</h1>';
+    $content .= '<p><a href="?page=settings">' . htmlspecialchars(t('settings_back')) . '</a></p>';
+    $content .= '<pre class="weight-scan-log" id="weight-scan-log"></pre>';
+    $content .= '<p id="weight-scan-summary" style="display:none;"></p>';
+    $content .= '<div class="weight-scan-failures" id="weight-scan-failures" style="display:none;">';
+    $content .= '<h2>' . htmlspecialchars(t('weight_scan_failures_heading')) . '</h2>';
+    $content .= '<ul id="weight-scan-failures-list"></ul>';
+    $content .= '</div>';
+
+    $payload = json_encode([
+        'summaryLabel' => t('weight_scan_summary'),
+        'errorLabel' => t('import_error_retry'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+    $content .= <<<SCRIPT
+<script>
+(function(){
+  var cfg = {$payload};
+  var log = document.getElementById('weight-scan-log');
+  var summary = document.getElementById('weight-scan-summary');
+  var failuresBox = document.getElementById('weight-scan-failures');
+  var failuresList = document.getElementById('weight-scan-failures-list');
+  if (!log || !summary || !failuresBox || !failuresList) {
+    return;
+  }
+
+  function appendLines(lines) {
+    lines.forEach(function(line) {
+      log.textContent += line + "\\n";
+    });
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function tick() {
+    var formData = new FormData();
+    formData.set('action', 'weight_scan_tick');
+    fetch('?', { method: 'POST', body: formData, credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.logLines && data.logLines.length) {
+          appendLines(data.logLines);
+        }
+        if (data.done) {
+          var failedCount = data.failures ? data.failures.length : 0;
+          summary.style.display = 'block';
+          summary.textContent = cfg.summaryLabel
+            .replace('{processed}', String(data.processed))
+            .replace('{total}', String(data.total))
+            .replace('{failed}', String(failedCount));
+          if (failedCount > 0) {
+            failuresBox.style.display = 'block';
+            data.failures.forEach(function(f) {
+              var li = document.createElement('li');
+              li.textContent = f.part_num + ' — ' + f.name;
+              failuresList.appendChild(li);
+            });
+          }
+          return;
+        }
+        tick();
+      })
+      .catch(function() {
+        appendLines([cfg.errorLabel]);
+        setTimeout(tick, 2000);
+      });
+  }
+
+  tick();
+})();
+</script>
+SCRIPT;
+
+    renderApp(t('weight_scan_heading'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('settings_title'), 'url' => '?page=settings'], ['label' => t('weight_scan_heading'), 'url' => null]]);
     exit;
 }
 

@@ -172,6 +172,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'build
     exit;
 }
 
+// Same tick-based scan pattern as build_sets_scan_tick/build_minifigs_scan_tick
+// above (?page=weight_scan, src/routes/pages.php) — a much smaller batch per
+// tick though (src/part_weights.php's WEIGHT_SCAN_BATCH_SIZE), since each
+// part here costs a real BrickLink HTTP fetch, not a DB query. Returns
+// pre-formatted log lines instead of a bare percent — the client just
+// appends them to the log window and, once done, renders the accumulated
+// failures list.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'weight_scan_tick') {
+    header('Content-Type: application/json');
+    try {
+        $state = $_SESSION['weight_scan_state'] ?? null;
+        if (!is_array($state)) {
+            $state = initWeightScanState($pdo);
+        }
+
+        $result = stepWeightScan($pdo, $state);
+        if ($result['done']) {
+            unset($_SESSION['weight_scan_state']);
+        } else {
+            $_SESSION['weight_scan_state'] = $state;
+        }
+
+        echo json_encode([
+            'logLines' => $result['logLines'],
+            'processed' => $result['processed'],
+            'total' => $result['total'],
+            'done' => $result['done'],
+            'failures' => $result['failures'],
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        unset($_SESSION['weight_scan_state']);
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => t('import_error', ['message' => $e->getMessage()])], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 $collectionMessage = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_collection_settings') {
     $newCollectionName = trim($_POST['collection_name'] ?? '');
@@ -1249,6 +1286,31 @@ if (isset($_GET['action']) && $_GET['action'] === 'part_detail') {
     $part['brickowl_url'] = $part['brickowl_id'] !== null
         ? 'https://www.brickowl.com/catalog/' . urlencode($part['brickowl_id'])
         : 'https://www.brickowl.com/search/catalog?query=' . urlencode($part['part_num']);
+
+    // Weight (src/part_weights.php) — this exact part's own value if it has
+    // one, otherwise the print family's root part's weight (same fallback
+    // computeLooseStockTotalWeightGrams() uses everywhere else), so the
+    // Informationen tab can show "geerbt vom Grundbauteil" rather than
+    // "unbekannt" for a print variant that was never scanned itself (often
+    // impossible — see getPrintRootPartId()'s own doc comment).
+    $part['weight_grams'] = $part['weight_grams'] !== null ? (float) $part['weight_grams'] : null;
+    if ($part['weight_grams'] !== null) {
+        $part['effective_weight_grams'] = $part['weight_grams'];
+        $part['weight_source'] = 'own';
+    } else {
+        $printRootId = getPrintRootPartId($pdo, $partId);
+        $inheritedWeight = null;
+        if ($printRootId !== $partId) {
+            $rootWeightStmt = $pdo->prepare('SELECT weight_grams FROM parts WHERE id = ?');
+            $rootWeightStmt->execute([$printRootId]);
+            $rootWeight = $rootWeightStmt->fetchColumn();
+            $inheritedWeight = $rootWeight !== false && $rootWeight !== null ? (float) $rootWeight : null;
+        }
+        $part['effective_weight_grams'] = $inheritedWeight;
+        $part['weight_source'] = $inheritedWeight !== null ? 'print_parent' : null;
+    }
+    $part['weight_display'] = $part['effective_weight_grams'] !== null ? formatWeightGrams($part['effective_weight_grams']) : null;
+
     $locale = getLocale();
     $part['translated_name'] = $locale !== 'en' ? getPartTranslation($pdo, $partId, $locale) : null;
     $part['translation_locale'] = $locale;
@@ -1395,6 +1457,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
             'success' => true,
             'bricklinkPartId' => $newBricklinkPartId !== '' ? $newBricklinkPartId : null,
             'brickowlId' => $newBrickowlId !== '' ? $newBrickowlId : null,
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// Manual weight override/entry (part-detail modal's "Informationen" tab,
+// src/part_modal.php) — same toggle-to-edit pattern as update_part_external_ids
+// above. Always sets THIS exact part's own weight_grams, even for a print
+// variant (overriding whatever it would otherwise inherit from its print
+// parent via the fallback every other consumer uses) — a deliberate manual
+// correction should always win.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_part_weight') {
+    header('Content-Type: application/json');
+    try {
+        $weightPartId = (int) ($_POST['part_id'] ?? 0);
+        $weightRaw = trim((string) ($_POST['weight_grams'] ?? ''));
+        if ($weightPartId <= 0) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+        if ($weightRaw !== '' && !is_numeric($weightRaw)) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+        $weightGrams = $weightRaw !== '' ? (float) $weightRaw : null;
+        if ($weightGrams !== null && $weightGrams < 0) {
+            throw new RuntimeException(t('add_stock_invalid_input'));
+        }
+
+        $pdo->prepare('UPDATE parts SET weight_grams = ? WHERE id = ?')->execute([$weightGrams, $weightPartId]);
+
+        echo json_encode([
+            'success' => true,
+            'weightGrams' => $weightGrams,
+            'weightDisplay' => $weightGrams !== null ? formatWeightGrams($weightGrams) : null,
         ], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(400);

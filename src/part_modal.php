@@ -73,6 +73,10 @@ function renderPartDetailModal(): string
             'ldrawIdLabel' => t('part_ldraw_id_label'),
             'rebrickableLinkLabel' => t('rebrickable_link'),
             'setsNoThemeLabel' => t('part_sets_no_theme_label'),
+            'weightLabel' => t('part_modal_weight_label'),
+            'weightInheritedHint' => t('part_modal_weight_inherited_hint'),
+            'weightUnknown' => t('part_modal_weight_unknown'),
+            'weightSaveFailed' => t('part_external_ids_save_failed'),
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
         $main .= <<<SCRIPT
@@ -881,6 +885,89 @@ function renderPartDetailModal(): string
 
       panel.appendChild(row);
     });
+
+    // Weight — same toggle-to-edit pattern as the ids above, but a single
+    // numeric field (grams) rather than a text id, and the display text
+    // distinguishes an own value from one inherited from the print family's
+    // root part (part.weight_source, set by action=part_detail).
+    (function() {
+      var row = document.createElement('div');
+      row.className = 'part-modal-id-row';
+
+      function weightDisplayText() {
+        if (part.weight_display === null || part.weight_display === undefined) {
+          return texts.weightLabel + ': ' + texts.weightUnknown;
+        }
+        if (part.weight_source === 'print_parent') {
+          return texts.weightLabel + ': ' + texts.weightInheritedHint.replace('{weight}', part.weight_display);
+        }
+        return texts.weightLabel + ': ' + part.weight_display;
+      }
+
+      var weightText = document.createElement('span');
+      weightText.textContent = weightDisplayText();
+      row.appendChild(weightText);
+
+      var editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'part-modal-id-edit-btn';
+      editBtn.innerHTML = texts.editIcon;
+      row.appendChild(editBtn);
+
+      var weightForm = document.createElement('form');
+      weightForm.className = 'part-modal-id-form';
+      weightForm.style.display = 'none';
+      var weightInput = document.createElement('input');
+      weightInput.type = 'number';
+      weightInput.step = '0.001';
+      weightInput.min = '0';
+      weightInput.value = part.weight_grams !== null && part.weight_grams !== undefined ? part.weight_grams : '';
+      weightForm.appendChild(weightInput);
+      var weightSaveBtn = document.createElement('button');
+      weightSaveBtn.type = 'submit';
+      weightSaveBtn.textContent = texts.externalIdsSaveButton;
+      weightForm.appendChild(weightSaveBtn);
+      var weightMsg = document.createElement('span');
+      weightForm.appendChild(weightMsg);
+      row.appendChild(weightForm);
+
+      editBtn.addEventListener('click', function() {
+        weightText.style.display = 'none';
+        editBtn.style.display = 'none';
+        weightForm.style.display = 'flex';
+        weightInput.focus();
+      });
+
+      weightForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        weightMsg.textContent = '';
+        var weightFormData = new FormData();
+        weightFormData.set('action', 'update_part_weight');
+        weightFormData.set('part_id', part.id);
+        weightFormData.set('weight_grams', weightInput.value);
+        fetch('?', { method: 'POST', body: weightFormData, credentials: 'same-origin' })
+          .then(function(r) { return r.json(); })
+          .then(function(res) {
+            if (res.success) {
+              part.weight_grams = res.weightGrams;
+              part.effective_weight_grams = res.weightGrams;
+              part.weight_source = res.weightGrams !== null ? 'own' : null;
+              part.weight_display = res.weightGrams !== null ? res.weightDisplay : null;
+              weightText.textContent = weightDisplayText();
+              weightText.style.display = '';
+              editBtn.style.display = '';
+              weightForm.style.display = 'none';
+            } else {
+              weightMsg.textContent = texts.weightSaveFailed + ' ' + (res.message || '');
+            }
+          })
+          .catch(function() {
+            weightMsg.textContent = texts.errorRetry;
+          });
+      });
+
+      panel.appendChild(row);
+    })();
 
     // "Erscheint in N Sets" — grouped by theme once expanded.
     var sets = document.createElement('p');

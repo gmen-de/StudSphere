@@ -787,6 +787,33 @@ button[type='submit'] {
   gap: 0.4rem;
 }
 
+.weight-scan-log {
+  width: 100%;
+  max-width: 100%;
+  height: 60vh;
+  overflow-y: auto;
+  overflow-x: auto;
+  margin: 1rem 0;
+  padding: 1rem;
+  border-radius: 0.85rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, 'SFMono-Regular', 'Consolas', 'Liberation Mono', Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.weight-scan-failures ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
 .import-file {
   display: flex;
   align-items: center;

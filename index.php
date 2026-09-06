@@ -17,6 +17,7 @@ require_once __DIR__ . '/src/part_modal.php';
 require_once __DIR__ . '/src/part_images.php';
 require_once __DIR__ . '/src/sets.php';
 require_once __DIR__ . '/src/bricklink_prices.php';
+require_once __DIR__ . '/src/part_weights.php';
 require_once __DIR__ . '/src/instructions.php';
 require_once __DIR__ . '/src/ldraw.php';
 require_once __DIR__ . '/src/pick_lists.php';
@@ -382,6 +383,10 @@ function renderApp(string $title, string $content, array $user, array $stats, ar
     $bricklinkValueCurrency = $bricklinkSetsValue['currency'] ?? $bricklinkMinifigsValue['currency'] ?? $bricklinkLoosePartsValue['currency'] ?? $bricklinkInstructionManualsValue['currency'];
     if ($bricklinkValueTotal > 0) {
         echo '<span class="status-stat" id="status-stat-bricklink_value"><strong>' . formatNumber($bricklinkValueTotal, 2) . ' ' . htmlspecialchars(bricklinkCurrencySymbol($bricklinkValueCurrency)) . '</strong> ' . htmlspecialchars(t('stat_bricklink_value')) . '</span>';
+    }
+    $looseStockTotalWeightGrams = computeLooseStockTotalWeightGrams(getPDO());
+    if ($looseStockTotalWeightGrams > 0) {
+        echo '<span class="status-stat" id="status-stat-weight_total"><strong>' . htmlspecialchars(formatWeightGrams($looseStockTotalWeightGrams)) . '</strong> ' . htmlspecialchars(t('stat_weight_total')) . '</span>';
     }
     echo '</div>';
     echo '<div class="status-user">';

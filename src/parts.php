@@ -165,7 +165,7 @@ function getPartCategoryName(PDO $pdo, string $categoryId): ?string
 function getPartDetail(PDO $pdo, int $partId, ?int $colorId = null, ?int $locationId = null, ?string $conditionType = null): ?array
 {
     $stmt = $pdo->prepare(
-        'SELECT p.id, p.part_num, p.name, p.part_category, p.bricklink_part_id, p.brickowl_id, p.ldraw_id, p.part_url,
+        'SELECT p.id, p.part_num, p.name, p.part_category, p.bricklink_part_id, p.brickowl_id, p.ldraw_id, p.part_url, p.weight_grams,
                 pc.name AS category_name
          FROM parts p
          LEFT JOIN part_categories pc ON pc.part_cat_id = p.part_category
@@ -312,6 +312,24 @@ function getPrintParent(PDO $pdo, int $partId): ?array
 }
 
 /**
+ * The unprinted "print parent" part_id for $partId if it's a print variant
+ * (part_relationships.relationship_type = 'P'), otherwise $partId itself —
+ * i.e. always the "root" of this part's print family. Used wherever a print
+ * variant should be treated as physically identical to its unprinted base
+ * (getPrintFamilyPartIds() below, and the BrickLink weight fallback in
+ * src/part_weights.php).
+ */
+function getPrintRootPartId(PDO $pdo, int $partId): int
+{
+    $rootStmt = $pdo->prepare(
+        "SELECT parent_part_id FROM part_relationships WHERE child_part_id = ? AND relationship_type = 'P' LIMIT 1"
+    );
+    $rootStmt->execute([$partId]);
+    $rootId = $rootStmt->fetchColumn();
+    return $rootId !== false ? (int) $rootId : $partId;
+}
+
+/**
  * Every part_id physically the same brick as $partId for storage purposes —
  * itself, its unprinted "print parent" if it's a print variant
  * (getPrintParent()), and every OTHER print variant of that same parent.
@@ -326,12 +344,7 @@ function getPrintParent(PDO $pdo, int $partId): ?array
  */
 function getPrintFamilyPartIds(PDO $pdo, int $partId): array
 {
-    $rootStmt = $pdo->prepare(
-        "SELECT parent_part_id FROM part_relationships WHERE child_part_id = ? AND relationship_type = 'P' LIMIT 1"
-    );
-    $rootStmt->execute([$partId]);
-    $rootId = $rootStmt->fetchColumn();
-    $rootId = $rootId !== false ? (int) $rootId : $partId;
+    $rootId = getPrintRootPartId($pdo, $partId);
 
     $childrenStmt = $pdo->prepare(
         "SELECT child_part_id FROM part_relationships WHERE parent_part_id = ? AND relationship_type = 'P'"

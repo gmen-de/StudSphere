@@ -1191,6 +1191,15 @@ function getSchemaMigrations(): array
             // a flagged location already only gets counted from there.
             addColumnIfMissing($pdo, 'owned_sets', 'flagged_for_stocktake_at', 'TIMESTAMP NULL DEFAULT NULL');
         },
+        52 => function (PDO $pdo): void {
+            // Physical weight per part, in grams — src/part_weights.php.
+            // Deliberately no separate "last checked" column: unlike the
+            // BrickLink price sync's monthly recheck interval, a manual
+            // weight scan run should simply retry every part that still has
+            // no weight (including ones a previous run failed on), which
+            // `weight_grams IS NULL` already gives for free.
+            addColumnIfMissing($pdo, 'parts', 'weight_grams', 'DECIMAL(10,3) DEFAULT NULL');
+        },
     ];
 }
 
@@ -1334,7 +1343,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 51;
+const CURRENT_SCHEMA_VERSION = 52;
 
 function getInstalledSchemaVersion(): int
 {
