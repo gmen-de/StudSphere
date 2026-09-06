@@ -3722,6 +3722,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
     $buildSetsMeta = getBuildableSetsCacheMeta($pdo);
     $buildSetsExclusiveOnly = ($_GET['exclusive_only'] ?? '') === '1';
     $buildSetsExclusiveRareOnly = ($_GET['exclusive_rare_only'] ?? '') === '1';
+    $buildSetsHasInstructionsOnly = ($_GET['has_instructions_only'] ?? '') === '1';
     $buildSetsBreadcrumbs = [homeBreadcrumb(), ['label' => t('nav_build_sets'), 'url' => null]];
 
     if (isset($_GET['scan'])) {
@@ -3730,7 +3731,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
         $scanYearTo = isset($_GET['year_to']) && $_GET['year_to'] !== '' ? (int) $_GET['year_to'] : null;
 
         $content = '<h1>' . htmlspecialchars(t('nav_build_sets')) . '</h1>';
-        $content .= renderBuildSetsScanOverlay($scanThemeId, $scanYearFrom, $scanYearTo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly);
+        $content .= renderBuildSetsScanOverlay($scanThemeId, $scanYearFrom, $scanYearTo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly, $buildSetsHasInstructionsOnly);
         renderApp(t('nav_build_sets'), $content, $user, computeAppStats($pdo), $buildSetsBreadcrumbs);
         exit;
     }
@@ -3746,7 +3747,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
         // omitting the key when cleared) so the config page's own state
         // never has to fall back to a different source once the user has
         // started navigating it — every link here is fully self-describing.
-        $configUrl = function (array $overrides) use ($configThemeId, $configYearFrom, $configYearTo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly): string {
+        $configUrl = function (array $overrides) use ($configThemeId, $configYearFrom, $configYearTo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly, $buildSetsHasInstructionsOnly): string {
             $params = [
                 'page' => 'build_sets',
                 'configure' => '1',
@@ -3755,6 +3756,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
                 'year_to' => $configYearTo !== null ? (string) $configYearTo : '',
                 'exclusive_only' => $buildSetsExclusiveOnly ? '1' : '',
                 'exclusive_rare_only' => $buildSetsExclusiveRareOnly ? '1' : '',
+                'has_instructions_only' => $buildSetsHasInstructionsOnly ? '1' : '',
             ];
             foreach ($overrides as $key => $value) {
                 $params[$key] = $value !== null ? (string) $value : '';
@@ -3814,6 +3816,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
         $content .= '<h3>' . htmlspecialchars(t('build_sets_filter_completeness')) . '</h3>';
         $content .= '<label class="filter-checkbox"><input type="checkbox" name="exclusive_only" value="1"' . ($buildSetsExclusiveOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_exclusive_only')) . '</label>';
         $content .= '<label class="filter-checkbox"><input type="checkbox" name="exclusive_rare_only" value="1"' . ($buildSetsExclusiveRareOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_exclusive_rare_only')) . '</label>';
+        $content .= '<label class="filter-checkbox"><input type="checkbox" name="has_instructions_only" value="1"' . ($buildSetsHasInstructionsOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_has_instructions')) . '</label>';
 
         $content .= '<button type="submit" class="filter-apply-button">' . htmlspecialchars(t('build_sets_start_scan_button')) . '</button>';
         $content .= '</form>';
@@ -3824,7 +3827,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
     }
 
     $buildSetsPage = max(1, (int) ($_GET['p'] ?? 1));
-    $buildSetsResults = getBuildableSetsResults($pdo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly, $buildSetsPage, BUILD_SETS_RESULTS_PAGE_SIZE);
+    $buildSetsResults = getBuildableSetsResults($pdo, $buildSetsExclusiveOnly, $buildSetsExclusiveRareOnly, $buildSetsHasInstructionsOnly, $buildSetsPage, BUILD_SETS_RESULTS_PAGE_SIZE);
     $buildSetsHasMore = ($buildSetsPage * BUILD_SETS_RESULTS_PAGE_SIZE) < $buildSetsResults['total'];
 
     // Infinite-scroll continuation (same sentinel+IntersectionObserver
@@ -3863,7 +3866,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
     $scopeQuery = ($scope['theme_id'] ?? null) !== null ? '&theme=' . $scope['theme_id'] : '';
     $scopeQuery .= ($scope['year_from'] ?? null) !== null ? '&year_from=' . $scope['year_from'] : '';
     $scopeQuery .= ($scope['year_to'] ?? null) !== null ? '&year_to=' . $scope['year_to'] : '';
-    $filterQuery = ($buildSetsExclusiveOnly ? '&exclusive_only=1' : '') . ($buildSetsExclusiveRareOnly ? '&exclusive_rare_only=1' : '');
+    $filterQuery = ($buildSetsExclusiveOnly ? '&exclusive_only=1' : '') . ($buildSetsExclusiveRareOnly ? '&exclusive_rare_only=1' : '') . ($buildSetsHasInstructionsOnly ? '&has_instructions_only=1' : '');
 
     if ($buildSetsMeta['stale']) {
         $content .= '<section class="card build-sets-stale-banner">';
@@ -3876,6 +3879,7 @@ if (isset($_GET['page']) && $_GET['page'] === 'build_sets') {
     $content .= '<input type="hidden" name="page" value="build_sets">';
     $content .= '<label class="filter-checkbox"><input type="checkbox" name="exclusive_only" value="1"' . ($buildSetsExclusiveOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_exclusive_only')) . '</label>';
     $content .= '<label class="filter-checkbox"><input type="checkbox" name="exclusive_rare_only" value="1"' . ($buildSetsExclusiveRareOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_exclusive_rare_only')) . '</label>';
+    $content .= '<label class="filter-checkbox"><input type="checkbox" name="has_instructions_only" value="1"' . ($buildSetsHasInstructionsOnly ? ' checked' : '') . '> ' . htmlspecialchars(t('build_sets_filter_has_instructions')) . '</label>';
     $content .= '<button type="submit" class="filter-apply-button">' . htmlspecialchars(t('filter_apply_button')) . '</button>';
     $content .= '<a href="?page=build_sets&configure=1' . $scopeQuery . $filterQuery . '">' . htmlspecialchars(t('build_sets_change_filter_link')) . '</a>';
     $content .= '</form>';

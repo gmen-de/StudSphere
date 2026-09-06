@@ -394,6 +394,7 @@ return [
     'build_sets_filter_completeness' => 'Vollständigkeit',
     'build_sets_filter_exclusive_only' => 'Nur Sets mit vollständigen exklusiven Bauteilen',
     'build_sets_filter_exclusive_rare_only' => 'Nur Sets mit vollständigen exklusiven und seltenen Bauteilen',
+    'build_sets_filter_has_instructions' => 'Nur Sets mit vorhandener Bauanleitung',
     'build_sets_start_scan_button' => 'Suche starten',
     'build_sets_scan_heading' => 'Sets werden gescannt …',
     'build_sets_scan_status' => '{processed} / {total} Sets',

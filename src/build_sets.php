@@ -131,7 +131,7 @@ function getBuildableSetsCacheMeta(PDO $pdo): array
  *   rare_percent:float, rare_actual:int, rare_nominal:int,
  *   minifig_percent:float, minifig_actual:int, minifig_nominal:int}>, total: int, page: int, perPage: int}
  */
-function getBuildableSetsResults(PDO $pdo, bool $exclusiveOnly, bool $exclusiveRareOnly, int $page, int $perPage): array
+function getBuildableSetsResults(PDO $pdo, bool $exclusiveOnly, bool $exclusiveRareOnly, bool $hasInstructionsOnly, int $page, int $perPage): array
 {
     // total_nominal = 0 means this catalog entry has no own inventory_parts
     // at all — mostly "Super Pack"/bundle set numbers that just repackage
@@ -145,6 +145,13 @@ function getBuildableSetsResults(PDO $pdo, bool $exclusiveOnly, bool $exclusiveR
     }
     if ($exclusiveRareOnly) {
         $conditions[] = 'bsc.rare_actual >= bsc.rare_nominal';
+    }
+    // Pure filter over the already-cached numbers, same as the two above —
+    // per explicit request, only ever worth building right now if you also
+    // own the instructions for it (instruction_manuals, src/instruction_manuals.php),
+    // regardless of which physical location that manual sits in.
+    if ($hasInstructionsOnly) {
+        $conditions[] = 'EXISTS (SELECT 1 FROM instruction_manuals im WHERE im.set_id = bsc.set_id)';
     }
     $whereSql = 'WHERE ' . implode(' AND ', $conditions);
 
@@ -535,7 +542,7 @@ function stepBuildSetsScan(PDO $pdo, array &$state): array
  * restore them on the results page — they're display filters, not part of
  * what gets scanned.
  */
-function renderBuildSetsScanOverlay(?int $themeId, ?int $yearFrom, ?int $yearTo, bool $exclusiveOnly, bool $exclusiveRareOnly): string
+function renderBuildSetsScanOverlay(?int $themeId, ?int $yearFrom, ?int $yearTo, bool $exclusiveOnly, bool $exclusiveRareOnly, bool $hasInstructionsOnly = false): string
 {
     $html = '<div class="modal-overlay" id="build-sets-scan-overlay" style="display:flex;">';
     $html .= '<div class="modal-box">';
@@ -548,7 +555,8 @@ function renderBuildSetsScanOverlay(?int $themeId, ?int $yearFrom, ?int $yearTo,
 
     $doneUrl = '?page=build_sets'
         . ($exclusiveOnly ? '&exclusive_only=1' : '')
-        . ($exclusiveRareOnly ? '&exclusive_rare_only=1' : '');
+        . ($exclusiveRareOnly ? '&exclusive_rare_only=1' : '')
+        . ($hasInstructionsOnly ? '&has_instructions_only=1' : '');
 
     $payload = json_encode([
         'theme' => $themeId !== null ? (string) $themeId : '',

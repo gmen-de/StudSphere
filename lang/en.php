@@ -394,6 +394,7 @@ return [
     'build_sets_filter_completeness' => 'Completeness',
     'build_sets_filter_exclusive_only' => 'Only sets with all exclusive parts available',
     'build_sets_filter_exclusive_rare_only' => 'Only sets with all exclusive and rare parts available',
+    'build_sets_filter_has_instructions' => 'Only sets with instructions on hand',
     'build_sets_start_scan_button' => 'Start search',
     'build_sets_scan_heading' => 'Scanning sets …',
     'build_sets_scan_status' => '{processed} / {total} sets',
