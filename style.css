@@ -4083,7 +4083,14 @@ footer {
 }
 
 /* Inventur modal (renderStocktakeModal(), src/stocktakes.php) — one item per
-   step, same .modal-overlay/.modal-box shell as the pick-list dialogs above. */
+   step, same .modal-overlay/.modal-box shell as the pick-list dialogs above.
+   Narrowed to half the shared .modal-box max-width (80rem -> 40rem): unlike
+   those content-heavy dialogs, this one only ever shows a single centered
+   item card, so the full shared width just leaves empty space either side. */
+#stocktake-modal .modal-box {
+  max-width: 40rem;
+}
+
 .stocktake-progress-wrap {
   margin: 0 0 1rem;
 }
