@@ -8,6 +8,8 @@ require_once __DIR__ . '/owned_sets.php';
 require_once __DIR__ . '/i18n.php';
 require_once __DIR__ . '/icons.php';
 require_once __DIR__ . '/stats.php';
+require_once __DIR__ . '/parts.php';
+require_once __DIR__ . '/part_images.php';
 
 /**
  * Inventur (re-count) domain logic for owned sets and flagged storage
@@ -107,14 +109,14 @@ function getStocktakeProgress(PDO $pdo, int $stocktakeId): array
 
 /**
  * Joins one stocktake_items row to its catalog display info (part/color or
- * minifig name, plus the physical location path for a location-scoped item —
- * a recursive stocktake can span several sub-locations, so this is what
- * tells the user where to actually go count). Deliberately no photo
- * thumbnail here: resolving a color-correct image needs the
- * colors.id -> Rebrickable color_id -> part_color_images lookup chain
- * (see getCachedPartColorImage(), src/part_images.php) for comparatively
- * little benefit during a quick count — part number + name + a colour swatch
- * (color_rgb) already identifies a part unambiguously while walking a shelf.
+ * minifig name, thumbnail, plus the physical location path for a
+ * location-scoped item — a recursive stocktake can span several
+ * sub-locations, so this is what tells the user where to actually go count).
+ * Thumbnail resolution mirrors getPickItemDisplayInfo() (src/pick_pages.php):
+ * a color-correct cached render (getCachedPartColorImage(), via the
+ * colors.id -> Rebrickable color_id -> part_color_images chain) where one
+ * exists, else the generic per-part fallback from getPartThumbnails() — a
+ * static cached lookup only, no new LDraw render is triggered here.
  */
 function hydrateStocktakeItemDisplay(PDO $pdo, array $item): array
 {
@@ -127,21 +129,23 @@ function hydrateStocktakeItemDisplay(PDO $pdo, array $item): array
         'label' => '',
         'colorName' => null,
         'colorRgb' => null,
+        'thumbnail' => null,
         'locationPath' => $item['location_id'] !== null ? getStorageLocationPath((int) $item['location_id']) : null,
     ];
 
     if ($item['item_type'] === 'minifig') {
-        $stmt = $pdo->prepare('SELECT fig_num, name FROM minifigs WHERE id = ?');
+        $stmt = $pdo->prepare('SELECT fig_num, name, local_image_path FROM minifigs WHERE id = ?');
         $stmt->execute([$item['minifig_id']]);
         $row = $stmt->fetch();
         if ($row !== false) {
             $display['label'] = $row['fig_num'] . ' ' . $row['name'];
+            $display['thumbnail'] = $row['local_image_path'];
         }
         return $display;
     }
 
     $stmt = $pdo->prepare(
-        'SELECT p.part_num, p.name, c.name AS color_name, c.rgb AS color_rgb
+        'SELECT p.part_num, p.name, c.name AS color_name, c.rgb AS color_rgb, c.color_id AS rebrickable_color_id
          FROM parts p LEFT JOIN colors c ON c.id = ?
          WHERE p.id = ?'
     );
@@ -151,6 +155,13 @@ function hydrateStocktakeItemDisplay(PDO $pdo, array $item): array
         $display['label'] = $row['part_num'] . ' ' . $row['name'];
         $display['colorName'] = $row['color_name'];
         $display['colorRgb'] = $row['color_rgb'];
+
+        $thumbnails = getPartThumbnails($pdo, [(int) $item['part_id']]);
+        $thumbnail = $thumbnails[(int) $item['part_id']] ?? null;
+        if ($row['rebrickable_color_id'] !== null) {
+            $thumbnail = getCachedPartColorImage($pdo, (int) $item['part_id'], (int) $row['rebrickable_color_id']) ?? $thumbnail;
+        }
+        $display['thumbnail'] = $thumbnail;
     }
     return $display;
 }
@@ -595,6 +606,7 @@ function renderStocktakeModal(): string
 
     $html .= '<div id="stocktake-item-card" class="stocktake-item-card" style="display:none;">';
     $html .= '<p class="stocktake-item-location" id="stocktake-item-location"></p>';
+    $html .= '<div class="stocktake-item-image" id="stocktake-item-image" style="display:none;"><img id="stocktake-item-image-img" src="" alt=""></div>';
     $html .= '<p class="stocktake-item-swatch" id="stocktake-item-swatch"></p>';
     $html .= '<p class="stocktake-item-label" id="stocktake-item-label"></p>';
     $html .= '<p class="stocktake-item-color" id="stocktake-item-color"></p>';
@@ -640,6 +652,8 @@ function renderStocktakeModal(): string
   var progressLabel = document.getElementById('stocktake-progress-label');
   var itemCard = document.getElementById('stocktake-item-card');
   var itemLocation = document.getElementById('stocktake-item-location');
+  var itemImage = document.getElementById('stocktake-item-image');
+  var itemImageImg = document.getElementById('stocktake-item-image-img');
   var itemSwatch = document.getElementById('stocktake-item-swatch');
   var itemLabel = document.getElementById('stocktake-item-label');
   var itemColor = document.getElementById('stocktake-item-color');
@@ -700,6 +714,13 @@ function renderStocktakeModal(): string
     doneCard.style.display = 'none';
     itemLocation.textContent = item.locationPath || '';
     itemLocation.style.display = item.locationPath ? 'block' : 'none';
+    if (item.thumbnail) {
+      itemImageImg.src = item.thumbnail;
+      itemImage.style.display = 'block';
+    } else {
+      itemImageImg.src = '';
+      itemImage.style.display = 'none';
+    }
     itemLabel.textContent = item.label;
     if (item.colorName) {
       itemColor.textContent = item.colorName;
@@ -714,8 +735,18 @@ function renderStocktakeModal(): string
       itemSwatch.style.display = 'none';
     }
     itemNominal.textContent = $expectedLabelTemplateJson.replace('{nominal}', item.nominalQuantity);
-    quantityInput.value = String(item.confirmedQuantity !== null ? item.confirmedQuantity : 0);
+    // Pre-filled with the expected (Soll) quantity for a not-yet-confirmed
+    // item — most counts match what's expected, so this turns confirming
+    // into "glance, press Enter" rather than "glance, type the number,
+    // press Enter". An already-confirmed item (reached via "Zurück") still
+    // shows what was actually entered, not overwritten back to nominal.
+    quantityInput.value = String(item.confirmedQuantity !== null ? item.confirmedQuantity : item.nominalQuantity);
     backBtn.disabled = history.length === 0;
+    // Refocus + select on every item change so the whole flow stays
+    // keyboard-only: arrow keys adjust the (already-selected) quantity,
+    // Enter confirms and advances — no mouse click needed in between items.
+    quantityInput.focus();
+    quantityInput.select();
   }
 
   function showDone() {
@@ -746,6 +777,16 @@ function renderStocktakeModal(): string
       errorEl.textContent = $errorGenericJson;
     });
   }
+
+  // Enter in the quantity field == clicking "Weiter", so the whole
+  // walkthrough can be driven from the keyboard alone (arrow keys already
+  // step a focused number input natively).
+  quantityInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      nextBtn.click();
+    }
+  });
 
   nextBtn.addEventListener('click', function() {
     if (!currentItem) { return; }
