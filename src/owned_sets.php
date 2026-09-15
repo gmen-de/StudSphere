@@ -999,6 +999,28 @@ function applyOwnedSetMinifigPartInventory(PDO $pdo, array $ownedSet, int $minif
 }
 
 /**
+ * Looks up a minifig's fig_num + nominal count within one owned instance —
+ * every minifig POST/GET action needs both (getOwnedSetMinifigPartsWithStatus()
+ * needs fig_num to resolve the minifig's own Rebrickable inventory, see
+ * getMinifigInventoryId(), and needs the nominal count to scale that
+ * inventory to however many of this minifig the set actually has — see
+ * that function's doc comment), and $minifigId alone doesn't carry either.
+ * Shared by src/routes/actions.php's minifig-parts actions and
+ * src/stocktakes.php's per-part minifig stocktake handling.
+ *
+ * @return array{fig_num:string, nominal_quantity:int}|null
+ */
+function findOwnedSetMinifig(PDO $pdo, array $ownedSet, int $minifigId): ?array
+{
+    foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSet) as $fig) {
+        if ($fig['minifig_id'] === $minifigId) {
+            return ['fig_num' => $fig['fig_num'], 'nominal_quantity' => (int) $fig['nominal_quantity']];
+        }
+    }
+    return null;
+}
+
+/**
  * Records how many of $partId/$colorId this instance actually has
  * ($ownedQuantity, clamped to the nominal count — the rest is "missing",
  * computed as nominal - owned, never stored) and how many of those are

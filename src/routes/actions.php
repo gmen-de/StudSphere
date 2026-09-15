@@ -2226,26 +2226,6 @@ function buildOwnedSetLiveUpdatePayload(PDO $pdo, array $ownedSet): array
     ];
 }
 
-/**
- * Looks up a minifig's fig_num + nominal count within one owned instance —
- * every minifig POST/GET action needs both (getOwnedSetMinifigPartsWithStatus()
- * needs fig_num to resolve the minifig's own Rebrickable inventory, see
- * getMinifigInventoryId(), and needs the nominal count to scale that
- * inventory to however many of this minifig the set actually has — see
- * that function's doc comment), and $minifigId alone doesn't carry either.
- *
- * @return array{fig_num:string, nominal_quantity:int}|null
- */
-function findOwnedSetMinifig(PDO $pdo, array $ownedSet, int $minifigId): ?array
-{
-    foreach (getOwnedSetMinifigsWithStatus($pdo, $ownedSet) as $fig) {
-        if ($fig['minifig_id'] === $minifigId) {
-            return ['fig_num' => $fig['fig_num'], 'nominal_quantity' => (int) $fig['nominal_quantity']];
-        }
-    }
-    return null;
-}
-
 if (isset($_GET['action']) && $_GET['action'] === 'owned_set_minifig_parts') {
     header('Content-Type: application/json');
     $minifigPartsOwnedSet = getOwnedSetById($pdo, (int) ($_GET['owned_set_id'] ?? 0));

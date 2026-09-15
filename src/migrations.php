@@ -1200,6 +1200,16 @@ function getSchemaMigrations(): array
             // `weight_grams IS NULL` already gives for free.
             addColumnIfMissing($pdo, 'parts', 'weight_grams', 'DECIMAL(10,3) DEFAULT NULL');
         },
+        53 => function (PDO $pdo): void {
+            // Minifig stocktake items can now also be broken into their
+            // constituent parts (one stocktake_item per part+color, written
+            // back via owned_set_minifig_parts — see src/stocktakes.php's
+            // startStocktakeForOwnedSet()) instead of only ever the
+            // whole-figure count. MODIFY COLUMN is naturally idempotent
+            // (safe to re-run), unlike ADD COLUMN — no existence guard
+            // needed.
+            $pdo->exec("ALTER TABLE stocktake_items MODIFY COLUMN item_type ENUM('part', 'minifig', 'minifig_part') NOT NULL");
+        },
     ];
 }
 
@@ -1343,7 +1353,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 52;
+const CURRENT_SCHEMA_VERSION = 53;
 
 function getInstalledSchemaVersion(): int
 {

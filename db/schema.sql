@@ -635,7 +635,7 @@ CREATE TABLE IF NOT EXISTS stocktakes (
 CREATE TABLE IF NOT EXISTS stocktake_items (
     id INT AUTO_INCREMENT PRIMARY KEY,
     stocktake_id INT NOT NULL,
-    item_type ENUM('part', 'minifig') NOT NULL,
+    item_type ENUM('part', 'minifig', 'minifig_part') NOT NULL,
     location_id INT DEFAULT NULL,
     part_id INT DEFAULT NULL,
     color_id INT DEFAULT NULL,

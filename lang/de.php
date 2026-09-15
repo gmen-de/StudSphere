@@ -290,6 +290,7 @@ return [
     'stocktake_modal_heading' => 'Inventur',
     'stocktake_quantity_label' => 'Ist-Menge',
     'stocktake_expected_label' => 'Soll: {nominal} Stück',
+    'stocktake_minifig_part_of' => 'Einzelteil von Minifigur: {minifig}',
     'stocktake_progress' => '{done} von {total} gezählt',
     'stocktake_back_button' => 'Zurück',
     'stocktake_next_button' => 'Weiter',

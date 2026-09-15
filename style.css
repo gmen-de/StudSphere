@@ -4119,6 +4119,13 @@ footer {
   color: #64748b;
 }
 
+.stocktake-item-minifig {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #2563eb;
+}
+
 .stocktake-item-image {
   display: flex;
   justify-content: center;

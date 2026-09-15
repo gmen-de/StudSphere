@@ -193,12 +193,19 @@ function renderStocktakeActive(PDO $pdo, array $stocktake): string
             if ($item['locationPath'] !== null) {
                 $html .= '<p class="pick-step-location">' . htmlspecialchars($item['locationPath']) . '</p>';
             }
+            if (!empty($item['minifigLabel'])) {
+                $html .= '<p class="pick-step-location">' . htmlspecialchars(t('stocktake_minifig_part_of', ['minifig' => $item['minifigLabel']])) . '</p>';
+            }
             $html .= '<p>' . htmlspecialchars(t('stocktake_expected_label', ['nominal' => (string) $item['nominalQuantity']])) . '</p>';
             if ($item['confirmed']) {
                 $html .= '<p class="stocktake-confirmed-badge">' . htmlspecialchars(t('stocktake_item_counted_label')) . '</p>';
             }
             $html .= '<div class="pick-step-box">';
-            $html .= '<input type="number" class="pick-quantity-input" min="0" value="' . (int) ($item['confirmedQuantity'] ?? 0) . '">';
+            // Pre-filled with the expected (Soll) quantity for a not-yet-confirmed
+            // item, same as the PC modal (src/stocktakes.php) — most counts
+            // match what's expected.
+            $prefillQuantity = $item['confirmedQuantity'] ?? $item['nominalQuantity'];
+            $html .= '<input type="number" class="pick-quantity-input" min="0" value="' . (int) $prefillQuantity . '">';
             $html .= '<button type="button" class="pick-btn pick-btn-primary pick-confirm-btn" data-stocktake-item-id="' . $item['id'] . '">' . htmlspecialchars(t('stocktake_confirm_button')) . '</button>';
             $html .= '</div>';
             $html .= '</div>';

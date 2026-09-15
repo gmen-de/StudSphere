@@ -290,6 +290,7 @@ return [
     'stocktake_modal_heading' => 'Stocktake',
     'stocktake_quantity_label' => 'Actual quantity',
     'stocktake_expected_label' => 'Expected: {nominal} pcs',
+    'stocktake_minifig_part_of' => 'Part of minifig: {minifig}',
     'stocktake_progress' => '{done} of {total} counted',
     'stocktake_back_button' => 'Back',
     'stocktake_next_button' => 'Next',

@@ -117,6 +117,11 @@ function getStocktakeProgress(PDO $pdo, int $stocktakeId): array
  * colors.id -> Rebrickable color_id -> part_color_images chain) where one
  * exists, else the generic per-part fallback from getPartThumbnails() — a
  * static cached lookup only, no new LDraw render is triggered here.
+ *
+ * A 'minifig_part' item (one of a minifig's own constituent parts, see
+ * startStocktakeForOwnedSet()) is displayed exactly like a 'part' item below
+ * — same part/color/thumbnail lookup — plus a minifigLabel line naming which
+ * minifig it belongs to, since otherwise nothing on the card would say so.
  */
 function hydrateStocktakeItemDisplay(PDO $pdo, array $item): array
 {
@@ -130,6 +135,7 @@ function hydrateStocktakeItemDisplay(PDO $pdo, array $item): array
         'colorName' => null,
         'colorRgb' => null,
         'thumbnail' => null,
+        'minifigLabel' => null,
         'locationPath' => $item['location_id'] !== null ? getStorageLocationPath((int) $item['location_id']) : null,
     ];
 
@@ -142,6 +148,15 @@ function hydrateStocktakeItemDisplay(PDO $pdo, array $item): array
             $display['thumbnail'] = $row['local_image_path'];
         }
         return $display;
+    }
+
+    if ($item['item_type'] === 'minifig_part') {
+        $figStmt = $pdo->prepare('SELECT fig_num, name FROM minifigs WHERE id = ?');
+        $figStmt->execute([$item['minifig_id']]);
+        $figRow = $figStmt->fetch();
+        if ($figRow !== false) {
+            $display['minifigLabel'] = $figRow['fig_num'] . ' ' . $figRow['name'];
+        }
     }
 
     $stmt = $pdo->prepare(
@@ -282,12 +297,18 @@ function getFlaggedStocktakeOwnedSets(PDO $pdo): array
 }
 
 /**
- * Snapshots every regular/sticker part and minifig of this owned instance
- * into stocktake_items (nominal from the set's own BOM, previous_actual from
- * whatever storage_items/owned_set_minifigs currently says), then
- * immediately zeroes all of it for real. Refuses a still-sealed ("new")
- * instance — same rule the existing owned_set_sealed_note already states —
- * and refuses a second concurrent session for the same set.
+ * Snapshots every regular/sticker part, minifig, and — per explicit request —
+ * each minifig's own constituent parts (head/torso/legs/accessories, via
+ * getOwnedSetMinifigPartsWithStatus(), same BOM the "defekt/fehlt" minifig
+ * modal already edits) of this owned instance into stocktake_items (nominal
+ * from the set's/minifig's own BOM, previous_actual from whatever
+ * storage_items/owned_set_minifigs/owned_set_minifig_parts currently says),
+ * then immediately zeroes all of it for real. The whole-figure count stays a
+ * separate item alongside its parts (not replaced by them) — same dual
+ * tracking the rest of the app already does for minifig completeness.
+ * Refuses a still-sealed ("new") instance — same rule the existing
+ * owned_set_sealed_note already states — and refuses a second concurrent
+ * session for the same set.
  */
 function startStocktakeForOwnedSet(PDO $pdo, int $userId, array $ownedSet): int
 {
@@ -301,6 +322,17 @@ function startStocktakeForOwnedSet(PDO $pdo, int $userId, array $ownedSet): int
     $parts = getOwnedSetPartsWithStatus($pdo, $ownedSet);
     $stickers = getOwnedSetStickerPartsWithStatus($pdo, $ownedSet);
     $minifigs = getOwnedSetMinifigsWithStatus($pdo, $ownedSet);
+
+    // Fetched once, up front, before any zeroing happens below — both the
+    // stocktake_items snapshot (previous_actual_quantity) and the zero pass
+    // need the pre-stocktake state, and getOwnedSetMinifigPartsWithStatus()
+    // reflects whatever's currently stored the moment it's called.
+    $minifigPartsByFig = [];
+    foreach ($minifigs as $fig) {
+        $minifigPartsByFig[$fig['minifig_id']] = getOwnedSetMinifigPartsWithStatus(
+            $pdo, $ownedSet, $fig['minifig_id'], $fig['fig_num'], $fig['nominal_quantity']
+        );
+    }
 
     $insertStocktakeStmt = $pdo->prepare(
         "INSERT INTO stocktakes (user_id, source_type, owned_set_id, location_id) VALUES (?, 'owned_set', ?, ?)"
@@ -325,6 +357,12 @@ function startStocktakeForOwnedSet(PDO $pdo, int $userId, array $ownedSet): int
             $stocktakeId, 'minifig', null, null, null,
             null, $fig['minifig_id'], $fig['nominal_quantity'], $fig['actual_quantity'],
         ]);
+        foreach ($minifigPartsByFig[$fig['minifig_id']] as $part) {
+            $insertItemStmt->execute([
+                $stocktakeId, 'minifig_part', null, $part['part_id'], $part['color_id'],
+                null, $fig['minifig_id'], $part['nominal_quantity'], $part['actual_quantity'],
+            ]);
+        }
     }
 
     foreach ([$parts, $stickers] as $group) {
@@ -338,6 +376,18 @@ function startStocktakeForOwnedSet(PDO $pdo, int $userId, array $ownedSet): int
             $zeroInput[$fig['minifig_id']] = 0;
         }
         applyOwnedSetMinifigInventory($pdo, $ownedSet, $zeroInput, []);
+
+        foreach ($minifigs as $fig) {
+            $minifigParts = $minifigPartsByFig[$fig['minifig_id']];
+            if (empty($minifigParts)) {
+                continue;
+            }
+            $zeroPartInput = [];
+            foreach ($minifigParts as $part) {
+                $zeroPartInput[$part['part_id'] . ':' . $part['color_id']] = 0;
+            }
+            applyOwnedSetMinifigPartInventory($pdo, $ownedSet, $fig['minifig_id'], $fig['fig_num'], $fig['nominal_quantity'], $zeroPartInput, []);
+        }
     }
 
     refreshAppStatsCache($pdo);
@@ -396,12 +446,34 @@ function startStocktakeForLocation(PDO $pdo, int $userId, int $locationId, bool 
 }
 
 /**
+ * Writes one 'minifig_part' stocktake_item's count back to
+ * owned_set_minifig_parts — shared by confirmStocktakeItem() (a real count)
+ * and cancelStocktake() (restoring previous_actual_quantity). Needs the
+ * minifig's fig_num/nominal count to resolve its BOM
+ * (applyOwnedSetMinifigPartInventory(), src/owned_sets.php), which
+ * $item alone doesn't carry — see findOwnedSetMinifig()'s own doc comment.
+ */
+function applyStocktakeMinifigPartQuantity(PDO $pdo, array $ownedSet, array $item, int $quantity): void
+{
+    $minifigInfo = findOwnedSetMinifig($pdo, $ownedSet, (int) $item['minifig_id']);
+    if ($minifigInfo === null) {
+        return;
+    }
+    $key = $item['part_id'] . ':' . $item['color_id'];
+    applyOwnedSetMinifigPartInventory(
+        $pdo, $ownedSet, (int) $item['minifig_id'], $minifigInfo['fig_num'], $minifigInfo['nominal_quantity'],
+        [$key => $quantity], []
+    );
+}
+
+/**
  * The single atomic "user confirmed a count" write path (mirrors pickItem()
  * in src/pick_lists.php): writes the real quantity back via the same
  * functions the existing inventory-tab editor uses (setOwnedSetPartInventory()/
- * applyOwnedSetMinifigInventory() for an owned_set item, setStorageItemQuantity()
- * for a location item), then marks the row confirmed. Every write already
- * refreshes the app stats cache, per this project's standing convention.
+ * applyOwnedSetMinifigInventory()/applyStocktakeMinifigPartQuantity() for an
+ * owned_set item, setStorageItemQuantity() for a location item), then marks
+ * the row confirmed. Every write already refreshes the app stats cache, per
+ * this project's standing convention.
  */
 function confirmStocktakeItem(PDO $pdo, int $stocktakeId, int $stocktakeItemId, int $quantity, ?int $userId): array
 {
@@ -422,6 +494,12 @@ function confirmStocktakeItem(PDO $pdo, int $stocktakeId, int $stocktakeItemId, 
             throw new RuntimeException(t('stocktake_not_active_error'));
         }
         applyOwnedSetMinifigInventory($pdo, $ownedSet, [(int) $item['minifig_id'] => $quantity], []);
+    } elseif ($item['item_type'] === 'minifig_part') {
+        $ownedSet = getOwnedSetById($pdo, (int) $stocktake['owned_set_id']);
+        if ($ownedSet === null) {
+            throw new RuntimeException(t('stocktake_not_active_error'));
+        }
+        applyStocktakeMinifigPartQuantity($pdo, $ownedSet, $item, $quantity);
     } elseif ($stocktake['source_type'] === 'owned_set') {
         $ownedSet = getOwnedSetById($pdo, (int) $stocktake['owned_set_id']);
         if ($ownedSet === null) {
@@ -481,6 +559,8 @@ function cancelStocktake(PDO $pdo, int $stocktakeId, ?int $userId): void
         $restoreQuantity = (int) $item['previous_actual_quantity'];
         if ($item['item_type'] === 'minifig' && $ownedSet !== null) {
             applyOwnedSetMinifigInventory($pdo, $ownedSet, [(int) $item['minifig_id'] => $restoreQuantity], []);
+        } elseif ($item['item_type'] === 'minifig_part' && $ownedSet !== null) {
+            applyStocktakeMinifigPartQuantity($pdo, $ownedSet, $item, $restoreQuantity);
         } elseif ($ownedSet !== null) {
             setOwnedSetPartInventory($pdo, $ownedSet, (int) $item['part_id'], (int) $item['color_id'], (int) $item['nominal_quantity'], $restoreQuantity, 0, $userId);
         } else {
@@ -606,6 +686,7 @@ function renderStocktakeModal(): string
 
     $html .= '<div id="stocktake-item-card" class="stocktake-item-card" style="display:none;">';
     $html .= '<p class="stocktake-item-location" id="stocktake-item-location"></p>';
+    $html .= '<p class="stocktake-item-minifig" id="stocktake-item-minifig" style="display:none;"></p>';
     $html .= '<div class="stocktake-item-image" id="stocktake-item-image" style="display:none;"><img id="stocktake-item-image-img" src="" alt=""></div>';
     $html .= '<p class="stocktake-item-swatch" id="stocktake-item-swatch"></p>';
     $html .= '<p class="stocktake-item-label" id="stocktake-item-label"></p>';
@@ -640,6 +721,7 @@ function renderStocktakeModal(): string
     $cancelConfirmJson = json_encode(t('stocktake_cancel_confirm'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $progressLabelTemplateJson = json_encode(t('stocktake_progress'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $expectedLabelTemplateJson = json_encode(t('stocktake_expected_label'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $minifigPartOfTemplateJson = json_encode(t('stocktake_minifig_part_of'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     $errorGenericJson = json_encode(t('pick_error_generic'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     $html .= <<<SCRIPT
@@ -652,6 +734,7 @@ function renderStocktakeModal(): string
   var progressLabel = document.getElementById('stocktake-progress-label');
   var itemCard = document.getElementById('stocktake-item-card');
   var itemLocation = document.getElementById('stocktake-item-location');
+  var itemMinifig = document.getElementById('stocktake-item-minifig');
   var itemImage = document.getElementById('stocktake-item-image');
   var itemImageImg = document.getElementById('stocktake-item-image-img');
   var itemSwatch = document.getElementById('stocktake-item-swatch');
@@ -714,6 +797,12 @@ function renderStocktakeModal(): string
     doneCard.style.display = 'none';
     itemLocation.textContent = item.locationPath || '';
     itemLocation.style.display = item.locationPath ? 'block' : 'none';
+    if (item.minifigLabel) {
+      itemMinifig.textContent = $minifigPartOfTemplateJson.replace('{minifig}', item.minifigLabel);
+      itemMinifig.style.display = 'block';
+    } else {
+      itemMinifig.style.display = 'none';
+    }
     if (item.thumbnail) {
       itemImageImg.src = item.thumbnail;
       itemImage.style.display = 'block';
