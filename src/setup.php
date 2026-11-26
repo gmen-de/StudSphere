@@ -629,6 +629,25 @@ function installDatabase(): void
             missing INT NOT NULL,
             CONSTRAINT fk_buildableminifigscachestaging_minifig FOREIGN KEY (minifig_id) REFERENCES minifigs(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+
+        // One key per sorting machine (src/sorter_api.php).
+        'CREATE TABLE IF NOT EXISTS sorter_api_keys (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            key_hash CHAR(64) NOT NULL UNIQUE,
+            key_hint VARCHAR(20) NOT NULL,
+            user_id INT DEFAULT NULL,
+            machine_id VARCHAR(100) DEFAULT NULL,
+            sorter_name VARCHAR(255) DEFAULT NULL,
+            root_location_id INT DEFAULT NULL,
+            stream_id VARCHAR(64) DEFAULT NULL,
+            last_seq BIGINT NOT NULL DEFAULT 0,
+            last_used_at TIMESTAMP NULL DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            revoked_at TIMESTAMP NULL DEFAULT NULL,
+            CONSTRAINT fk_sorterapikey_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+            CONSTRAINT fk_sorterapikey_root FOREIGN KEY (root_location_id) REFERENCES storage_locations(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
     ];
 
     foreach ($queries as $query) {

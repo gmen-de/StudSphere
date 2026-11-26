@@ -304,7 +304,7 @@ function getChildLocations(?int $parentId): array
  * convention moveStorageItem() already uses — instead of the default 'in').
  * Every existing caller omits both and keeps today's plain 'in' behavior.
  */
-function addStorageStock(int $locationId, int $partId, int $colorId, string $conditionType, int $quantity, ?int $userId, ?string $movementType = null, ?int $relatedMovementId = null): int
+function addStorageStock(int $locationId, int $partId, int $colorId, string $conditionType, int $quantity, ?int $userId, ?string $movementType = null, ?int $relatedMovementId = null, ?string $note = null): int
 {
     $pdo = getPDO();
     $pdo->beginTransaction();
@@ -323,10 +323,10 @@ function addStorageStock(int $locationId, int $partId, int $colorId, string $con
         $resultingQuantity = (int) $resultStmt->fetchColumn();
 
         $moveStmt = $pdo->prepare(
-            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity, related_movement_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity, related_movement_id, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $movementType ?? 'in', $quantity, $resultingQuantity, $relatedMovementId]);
+        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $movementType ?? 'in', $quantity, $resultingQuantity, $relatedMovementId, $note]);
 
         $pdo->commit();
         return $resultingQuantity;
@@ -350,7 +350,7 @@ function addStorageStock(int $locationId, int $partId, int $colorId, string $con
  * storage_movements row's id, so a paired addStorageStock() call can link to
  * it via $relatedMovementId (existing callers all ignore this return value).
  */
-function setStorageItemQuantity(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $userId, ?int $damagedQuantity = null, ?string $movementType = null): int
+function setStorageItemQuantity(int $locationId, int $partId, int $colorId, string $conditionType, int $newQuantity, ?int $userId, ?int $damagedQuantity = null, ?string $movementType = null, ?string $note = null): int
 {
     $pdo = getPDO();
     $pdo->beginTransaction();
@@ -380,10 +380,10 @@ function setStorageItemQuantity(int $locationId, int $partId, int $colorId, stri
         }
 
         $moveStmt = $pdo->prepare(
-            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $movementType ?? 'correction', $newQuantity - $currentQuantity, $newQuantity]);
+        $moveStmt->execute([$userId, $locationId, $partId, $colorId, $conditionType, $movementType ?? 'correction', $newQuantity - $currentQuantity, $newQuantity, $note]);
         $movementId = (int) $pdo->lastInsertId();
 
         $pdo->commit();
@@ -404,7 +404,7 @@ function setStorageItemQuantity(int $locationId, int $partId, int $colorId, stri
  * storage_movements (related_movement_id ties them together), unlike
  * setStorageItemQuantity()'s single 'correction' row.
  */
-function moveStorageItem(int $fromLocationId, int $toLocationId, int $partId, int $colorId, string $conditionType, ?int $userId): void
+function moveStorageItem(int $fromLocationId, int $toLocationId, int $partId, int $colorId, string $conditionType, ?int $userId, ?string $note = null): void
 {
     if ($fromLocationId === $toLocationId) {
         return;
@@ -448,17 +448,17 @@ function moveStorageItem(int $fromLocationId, int $toLocationId, int $partId, in
         $resultingQuantity = (int) $resultStmt->fetchColumn();
 
         $outStmt = $pdo->prepare(
-            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity)
-             VALUES (?, ?, ?, ?, ?, \'move_out\', ?, 0)'
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity, note)
+             VALUES (?, ?, ?, ?, ?, \'move_out\', ?, 0, ?)'
         );
-        $outStmt->execute([$userId, $fromLocationId, $partId, $colorId, $conditionType, -(int) $source['quantity']]);
+        $outStmt->execute([$userId, $fromLocationId, $partId, $colorId, $conditionType, -(int) $source['quantity'], $note]);
         $outId = (int) $pdo->lastInsertId();
 
         $inStmt = $pdo->prepare(
-            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity, related_movement_id)
-             VALUES (?, ?, ?, ?, ?, \'move_in\', ?, ?, ?)'
+            'INSERT INTO storage_movements (user_id, location_id, part_id, color_id, condition_type, movement_type, quantity_change, resulting_quantity, related_movement_id, note)
+             VALUES (?, ?, ?, ?, ?, \'move_in\', ?, ?, ?, ?)'
         );
-        $inStmt->execute([$userId, $toLocationId, $partId, $colorId, $conditionType, (int) $source['quantity'], $resultingQuantity, $outId]);
+        $inStmt->execute([$userId, $toLocationId, $partId, $colorId, $conditionType, (int) $source['quantity'], $resultingQuantity, $outId, $note]);
 
         $pdo->commit();
     } catch (Throwable $e) {

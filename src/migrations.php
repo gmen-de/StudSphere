@@ -1210,6 +1210,27 @@ function getSchemaMigrations(): array
             // needed.
             $pdo->exec("ALTER TABLE stocktake_items MODIFY COLUMN item_type ENUM('part', 'minifig', 'minifig_part') NOT NULL");
         },
+        54 => function (PDO $pdo): void {
+            // API keys for sorting machines (src/sorter_api.php, api/
+            // sorter.php). CREATE TABLE IF NOT EXISTS is safe to re-run.
+            $pdo->exec('CREATE TABLE IF NOT EXISTS sorter_api_keys (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                key_hash CHAR(64) NOT NULL UNIQUE,
+                key_hint VARCHAR(20) NOT NULL,
+                user_id INT DEFAULT NULL,
+                machine_id VARCHAR(100) DEFAULT NULL,
+                sorter_name VARCHAR(255) DEFAULT NULL,
+                root_location_id INT DEFAULT NULL,
+                stream_id VARCHAR(64) DEFAULT NULL,
+                last_seq BIGINT NOT NULL DEFAULT 0,
+                last_used_at TIMESTAMP NULL DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                revoked_at TIMESTAMP NULL DEFAULT NULL,
+                CONSTRAINT fk_sorterapikey_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+                CONSTRAINT fk_sorterapikey_root FOREIGN KEY (root_location_id) REFERENCES storage_locations(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+        },
     ];
 }
 
@@ -1353,7 +1374,7 @@ function dropColumnIfExists(PDO $pdo, string $table, string $columnName): void
     $pdo->exec("ALTER TABLE `$table` DROP COLUMN `$columnName`");
 }
 
-const CURRENT_SCHEMA_VERSION = 53;
+const CURRENT_SCHEMA_VERSION = 54;
 
 function getInstalledSchemaVersion(): int
 {

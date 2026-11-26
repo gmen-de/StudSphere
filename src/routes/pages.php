@@ -600,6 +600,10 @@ SCRIPT;
         $content .= '</form>';
     }
 
+    if ($user['is_admin']) {
+        $content .= renderSorterApiKeysSection($sorterKeyMessage, $newSorterApiKey);
+    }
+
     renderApp(t('settings_title'), $content, $user, computeAppStats($pdo), [homeBreadcrumb(), ['label' => t('settings_title'), 'url' => null]]);
     exit;
 }

@@ -46,6 +46,20 @@ Das ist optional — Web-Cron und Cronjob teilen sich denselben Drossel-Zustand 
 gegenseitig, wenn beide aktiv sind. Ein- und ausschaltbar über die Einstellungen-Seite,
 unabhängig davon, ob der Cronjob eingerichtet ist oder nicht.
 
+## Sortiermaschinen-API
+
+Eine Sortiermaschine (Sorter-v2) bucht einsortierte Teile live in StudSphere ein. Unter **Einstellungen → Sortiermaschinen** (nur für Admins) wird je Maschine ein API-Schlüssel erzeugt. Er wird nur einmal angezeigt, gespeichert wird nur sein SHA-256-Hash. Auf derselben Seite steht die Adresse, die in der Maschine eingetragen wird.
+
+Mit dem Schlüssel legt die Maschine ein Lager mit ihrem Namen an, darunter `BIN-Storage` mit einem Unterlager je Behälter (`L1-S1-B1`, …) und `ZIP-Storage`. Wird ein Behälter mit Inventar-Bon geleert, entsteht unter `ZIP-Storage` ein Lager mit der Bonnummer (`ZIP0004`), und der Inhalt des Behälters wird dorthin umgebucht. Ohne Bon wird der Bestand des Behälters auf null gesetzt. Alle Buchungen laufen über die normalen Lagerfunktionen (`src/storage.php`) und erscheinen in den Lagerbewegungen unter dem Benutzer, der den Schlüssel erzeugt hat, mit „Sorter <Name>“ als Vermerk.
+
+Schnittstelle: `api/sorter.php` mit `Authorization: Bearer <Schlüssel>`, als Ausweichweg `X-Api-Key`, falls der Hoster den Authorization-Header nicht an PHP weiterreicht.
+
+- `GET ?action=hello`: welcher Schlüssel, ob er schon eingerichtet ist.
+- `POST ?action=setup`: `{machine_id, sorter_name, stream_id, bins}`. Bindet den Schlüssel an die Maschine und legt die Lager an.
+- `POST ?action=ops`: `{stream_id, condition, ops: [{seq, type, ...}]}` mit `type` `add`, `set`, `clear` oder `to_zip`.
+
+Die Maschine nummeriert ihre Vorgänge fortlaufend. StudSphere merkt sich je Schlüssel die letzte angewendete Nummer, deshalb zählt ein erneut gesendeter Stapel nur einmal. Teile werden über `parts.bricklink_part_id` (ersatzweise `part_num`) und Farben über `colors.bricklink_color_id` zugeordnet. Unbekannte Paare werden übersprungen und an die Maschine zurückgemeldet.
+
 ## Weiteres
 
 - Der Rebrickable-API-Key wird über den Setup-Assistenten oder die Einstellungen gesetzt und in der Tabelle `app_settings` gespeichert (nicht in `src/config.php`)
