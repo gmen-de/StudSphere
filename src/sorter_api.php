@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/settings.php';
+require_once __DIR__ . '/rebrickable.php';
 require_once __DIR__ . '/stats.php';
 
 /**
@@ -162,34 +164,180 @@ function sorterApiSetup(array $key, array $body): array
     ];
 }
 
-/**
- * BrickLink part number / color id (what the sorter's classifier speaks)
- * to this database's parts.id / colors.id. Falls back to the Rebrickable
- * part number, which is the same for most parts.
- */
-function sorterApiResolvePartColor(string $part, string $color, array &$cache): ?array
+const SORTER_API_REBRICKABLE_LOOKUPS = 5;
+const SORTER_API_ALIAS_SETTING = 'sorter_api_part_aliases';
+const SORTER_API_ALIAS_RETRY_S = 86400;
+// Small enough for app_settings.setting_value (TEXT, 64 KB).
+const SORTER_API_ALIAS_MAX = 500;
+const SORTER_API_LOOKUP_MAX_LENGTH = 40;
+
+function sorterApiNewResolveState(): array
 {
-    $cacheKey = $part . '|' . $color;
-    if (array_key_exists($cacheKey, $cache)) {
-        return $cache[$cacheKey];
+    return ['parts' => [], 'colors' => [], 'via' => [], 'budget' => SORTER_API_REBRICKABLE_LOOKUPS, 'aliases' => null, 'aliasesDirty' => false];
+}
+
+/**
+ * Asks Rebrickable which of its parts is this BrickLink number: the sorter's
+ * classifier speaks BrickLink, and parts.bricklink_part_id is only filled for
+ * parts of owned sets (see applyBricklinkPartIdBatch()), while many printed,
+ * assembled and old parts are numbered differently in the two catalogs.
+ *
+ * What Rebrickable answered is remembered in app_settings (a hit for good, a
+ * miss for a day), and a request asks it at most SORTER_API_REBRICKABLE_LOOKUPS
+ * times, since each call can take seconds. A hit also fills the part's own
+ * bricklink_part_id where that's still empty. Returns parts.id, or null.
+ */
+function sorterApiRebrickableLookup(string $part, array &$state): ?int
+{
+    // An empty bricklink_id would not filter at all and match any part.
+    if ($part === '' || mb_strlen($part) > SORTER_API_LOOKUP_MAX_LENGTH) {
+        return null;
+    }
+    if ($state['aliases'] === null) {
+        $decoded = json_decode((string) getAppSetting(SORTER_API_ALIAS_SETTING, '{}'), true);
+        $state['aliases'] = is_array($decoded) ? $decoded : [];
+    }
+    $known = $state['aliases'][$part] ?? null;
+    if (is_array($known) && ($known['part_num'] !== null || time() - (int) $known['at'] < SORTER_API_ALIAS_RETRY_S)) {
+        $partNum = $known['part_num'];
+    } else {
+        if ($state['budget'] <= 0) {
+            return null;
+        }
+        $state['budget']--;
+        try {
+            $response = callRebrickableApi('lego/parts/?bricklink_id=' . urlencode($part) . '&page_size=1');
+        } catch (Throwable $e) {
+            return null; // not remembered, so it's asked again next time
+        }
+        $found = $response['results'][0]['part_num'] ?? null;
+        $partNum = is_string($found) && $found !== '' ? $found : null;
+        $state['aliases'][$part] = ['part_num' => $partNum, 'at' => time()];
+        $state['aliasesDirty'] = true;
+    }
+    if ($partNum === null) {
+        return null;
+    }
+    $stmt = getPDO()->prepare('SELECT id FROM parts WHERE part_num = ?');
+    $stmt->execute([$partNum]);
+    $partId = $stmt->fetchColumn();
+    if ($partId === false) {
+        return null;
+    }
+    if (mb_strlen($part) <= 20) { // the column's size
+        getPDO()->prepare('UPDATE parts SET bricklink_part_id = ? WHERE id = ? AND bricklink_part_id IS NULL')->execute([$part, $partId]);
+    }
+    return (int) $partId;
+}
+
+function sorterApiSaveAliases(array $state): void
+{
+    if (!$state['aliasesDirty']) {
+        return;
+    }
+    $aliases = $state['aliases'];
+    if (count($aliases) > SORTER_API_ALIAS_MAX) {
+        // Keep the hits and the newest: misses first, oldest first, go.
+        uasort($aliases, fn (array $a, array $b): int => [$a['part_num'] !== null, $a['at']] <=> [$b['part_num'] !== null, $b['at']]);
+        $aliases = array_slice($aliases, count($aliases) - SORTER_API_ALIAS_MAX, null, true);
+    }
+    setAppSetting(SORTER_API_ALIAS_SETTING, json_encode($aliases, JSON_FORCE_OBJECT));
+}
+
+/**
+ * The other numbers the sorter sends along for a part ("alt": what its parts
+ * catalog calls the same part: a Rebrickable-style number, an LDraw id).
+ * Strings only, a few at most.
+ */
+function sorterApiCleanAlts(mixed $value): array
+{
+    $alts = [];
+    $candidates = is_array($value) ? $value : [];
+    foreach ($candidates as $alt) {
+        if (is_string($alt) && $alt !== '' && mb_strlen($alt) <= 100 && !in_array($alt, $alts, true)) {
+            $alts[] = $alt;
+        }
+    }
+    return array_slice($alts, 0, 3);
+}
+
+/**
+ * BrickLink part number (what the sorter's classifier speaks) to parts.id.
+ * The sure ways come first: Rebrickable's own BrickLink mapping, the same
+ * number here, the same LDraw id, and Rebrickable's answer when asked.
+ * Only when all of those find nothing are the sorter's "alt" numbers tried.
+ * That one is a hint, not a mapping (the catalog behind it also uses these
+ * numbers to borrow dimensions from a similar part), so it's never saved on
+ * the part: it's noted on the booking and reported back, to be checked.
+ */
+function sorterApiResolvePart(string $part, array &$state, array $alts = []): ?int
+{
+    if (array_key_exists($part, $state['parts'])) {
+        return $state['parts'][$part];
+    }
+    if ($part === '') {
+        return null;
     }
     $pdo = getPDO();
-    $partStmt = $pdo->prepare('SELECT id FROM parts WHERE bricklink_part_id = ? ORDER BY id LIMIT 1');
-    $partStmt->execute([$part]);
-    $partId = $partStmt->fetchColumn();
-    if ($partId === false) {
-        $partStmt = $pdo->prepare('SELECT id FROM parts WHERE part_num = ?');
-        $partStmt->execute([$part]);
-        $partId = $partStmt->fetchColumn();
+    $partId = false;
+    // Rebrickable's own BrickLink mapping first, then the same number in
+    // Rebrickable's or LDraw's numbering, which is the same for most parts.
+    foreach (['bricklink_part_id', 'part_num', 'ldraw_id'] as $column) {
+        $stmt = $pdo->prepare("SELECT id FROM parts WHERE $column = ? ORDER BY id LIMIT 1");
+        $stmt->execute([$part]);
+        $partId = $stmt->fetchColumn();
+        if ($partId !== false) {
+            break;
+        }
+    }
+    $resolved = $partId !== false ? (int) $partId : sorterApiRebrickableLookup($part, $state);
+    if ($resolved === null) {
+        foreach ($alts as $alt) {
+            foreach (['part_num', 'ldraw_id'] as $column) {
+                $stmt = $pdo->prepare("SELECT id FROM parts WHERE $column = ? ORDER BY id LIMIT 1");
+                $stmt->execute([$alt]);
+                $altId = $stmt->fetchColumn();
+                if ($altId !== false) {
+                    $state['via'][$part] = $alt;
+                    $resolved = (int) $altId;
+                    break 2;
+                }
+            }
+        }
+    }
+    return $state['parts'][$part] = $resolved;
+}
+
+/** BrickLink color id to colors.id (see syncExternalColorIds()). */
+function sorterApiResolveColor(string $color, array &$state): ?int
+{
+    if (array_key_exists($color, $state['colors'])) {
+        return $state['colors'][$color];
     }
     $colorId = false;
     if (ctype_digit($color)) {
-        $colorStmt = $pdo->prepare('SELECT id FROM colors WHERE bricklink_color_id = ? ORDER BY id LIMIT 1');
-        $colorStmt->execute([(int) $color]);
-        $colorId = $colorStmt->fetchColumn();
+        $stmt = getPDO()->prepare('SELECT id FROM colors WHERE bricklink_color_id = ? ORDER BY id LIMIT 1');
+        $stmt->execute([(int) $color]);
+        $colorId = $stmt->fetchColumn();
     }
-    $cache[$cacheKey] = $partId !== false && $colorId !== false ? [(int) $partId, (int) $colorId] : null;
-    return $cache[$cacheKey];
+    return $state['colors'][$color] = $colorId !== false ? (int) $colorId : null;
+}
+
+/** @return array{part: ?int, color: ?int} either null when StudSphere doesn't know it */
+function sorterApiResolvePartColor(string $part, string $color, array &$state, array $alts = []): array
+{
+    return ['part' => sorterApiResolvePart($part, $state, $alts), 'color' => sorterApiResolveColor($color, $state)];
+}
+
+/** The booking's note: says so when the part was found by a hint. */
+function sorterApiNoteFor(string $note, string $part, array $state): string
+{
+    return isset($state['via'][$part]) ? $note . ' (' . $part . ' → ' . $state['via'][$part] . ')' : $note;
+}
+
+function sorterApiNoteUnmapped(array &$unmapped, string $part, string $color, array $resolved): void
+{
+    $unmapped[$part . '|' . $color] = $resolved['part'] === null ? ($resolved['color'] === null ? 'both' : 'part') : 'color';
 }
 
 function sorterApiLocationItems(int $locationId): array
@@ -233,7 +381,7 @@ function sorterApiApplyOps(array $key, array $body): array
     };
 
     $lastSeq = (int) $key['last_seq'];
-    $cache = [];
+    $state = sorterApiNewResolveState();
     $unmapped = [];
     $applied = 0;
     $seqStmt = getPDO()->prepare('UPDATE sorter_api_keys SET last_seq = ? WHERE id = ?');
@@ -247,12 +395,12 @@ function sorterApiApplyOps(array $key, array $body): array
             }
             switch ($op['type'] ?? '') {
                 case 'add':
-                    $resolved = sorterApiResolvePartColor((string) ($op['part'] ?? ''), (string) ($op['color'] ?? ''), $cache);
+                    $resolved = sorterApiResolvePartColor((string) ($op['part'] ?? ''), (string) ($op['color'] ?? ''), $state, sorterApiCleanAlts($op['alt'] ?? null));
                     $quantity = (int) ($op['qty'] ?? 1);
-                    if ($resolved === null) {
-                        $unmapped[(string) ($op['part'] ?? '') . '|' . (string) ($op['color'] ?? '')] = true;
+                    if ($resolved['part'] === null || $resolved['color'] === null) {
+                        sorterApiNoteUnmapped($unmapped, (string) ($op['part'] ?? ''), (string) ($op['color'] ?? ''), $resolved);
                     } elseif ($quantity > 0) {
-                        addStorageStock($binId($op), $resolved[0], $resolved[1], $condition, $quantity, $userId, null, null, $note);
+                        addStorageStock($binId($op), $resolved['part'], $resolved['color'], $condition, $quantity, $userId, null, null, sorterApiNoteFor($note, (string) ($op['part'] ?? ''), $state));
                     }
                     break;
 
@@ -261,14 +409,16 @@ function sorterApiApplyOps(array $key, array $body): array
                     // it (re)connects, so StudSphere starts from the same state.
                     $locationId = $binId($op);
                     $wanted = [];
+                    $wantedPart = [];
                     foreach ((array) ($op['items'] ?? []) as $item) {
-                        $resolved = sorterApiResolvePartColor((string) ($item['part'] ?? ''), (string) ($item['color'] ?? ''), $cache);
-                        if ($resolved === null) {
-                            $unmapped[(string) ($item['part'] ?? '') . '|' . (string) ($item['color'] ?? '')] = true;
+                        $resolved = sorterApiResolvePartColor((string) ($item['part'] ?? ''), (string) ($item['color'] ?? ''), $state, sorterApiCleanAlts($item['alt'] ?? null));
+                        if ($resolved['part'] === null || $resolved['color'] === null) {
+                            sorterApiNoteUnmapped($unmapped, (string) ($item['part'] ?? ''), (string) ($item['color'] ?? ''), $resolved);
                             continue;
                         }
-                        $wantedKey = $resolved[0] . '|' . $resolved[1] . '|' . $condition;
+                        $wantedKey = $resolved['part'] . '|' . $resolved['color'] . '|' . $condition;
                         $wanted[$wantedKey] = ($wanted[$wantedKey] ?? 0) + max(0, (int) ($item['qty'] ?? 0));
+                        $wantedPart[$wantedKey] = (string) ($item['part'] ?? '');
                     }
                     foreach (sorterApiLocationItems($locationId) as $row) {
                         $rowKey = $row['part_id'] . '|' . $row['color_id'] . '|' . $row['condition_type'];
@@ -280,7 +430,7 @@ function sorterApiApplyOps(array $key, array $body): array
                         [$partId, $colorId, $cond] = explode('|', $wantedKey);
                         $current = getStorageItemRow($locationId, (int) $partId, (int) $colorId, $cond);
                         if ($current === null || (int) $current['quantity'] !== $quantity) {
-                            setStorageItemQuantity($locationId, (int) $partId, (int) $colorId, $cond, $quantity, $userId, null, null, $note);
+                            setStorageItemQuantity($locationId, (int) $partId, (int) $colorId, $cond, $quantity, $userId, null, null, sorterApiNoteFor($note, $wantedPart[$wantedKey], $state));
                         }
                     }
                     break;
@@ -314,20 +464,26 @@ function sorterApiApplyOps(array $key, array $body): array
             $seqStmt->execute([$lastSeq, $key['id']]);
         }
     } finally {
+        try {
+            sorterApiSaveAliases($state);
+        } catch (Throwable $e) {
+            // Only a cache of Rebrickable's answers: asked again next time.
+        }
         if ($applied > 0) {
             refreshAppStatsCache(getPDO());
         }
     }
 
-    return [
-        'ok' => true,
-        'applied' => $applied,
-        'last_seq' => $lastSeq,
-        'unmapped' => array_map(
-            fn (string $pair): array => array_combine(['part', 'color'], explode('|', $pair, 2)),
-            array_keys($unmapped)
-        ),
-    ];
+    $report = [];
+    foreach ($unmapped as $pair => $missing) {
+        [$unmappedPart, $unmappedColor] = explode('|', (string) $pair, 2);
+        $report[] = ['part' => $unmappedPart, 'color' => $unmappedColor, 'missing' => $missing];
+    }
+    $hinted = [];
+    foreach ($state['via'] as $viaPart => $viaAs) {
+        $hinted[] = ['part' => (string) $viaPart, 'as' => $viaAs];
+    }
+    return ['ok' => true, 'applied' => $applied, 'last_seq' => $lastSeq, 'unmapped' => $report, 'hinted' => $hinted];
 }
 
 /**

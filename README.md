@@ -58,7 +58,7 @@ Schnittstelle: `api/sorter.php` mit `Authorization: Bearer <Schlüssel>`, als Au
 - `POST ?action=setup`: `{machine_id, sorter_name, stream_id, bins}`. Bindet den Schlüssel an die Maschine und legt die Lager an.
 - `POST ?action=ops`: `{stream_id, condition, ops: [{seq, type, ...}]}` mit `type` `add`, `set`, `clear` oder `to_zip`.
 
-Die Maschine nummeriert ihre Vorgänge fortlaufend. StudSphere merkt sich je Schlüssel die letzte angewendete Nummer, deshalb zählt ein erneut gesendeter Stapel nur einmal. Teile werden über `parts.bricklink_part_id` (ersatzweise `part_num`) und Farben über `colors.bricklink_color_id` zugeordnet. Unbekannte Paare werden übersprungen und an die Maschine zurückgemeldet.
+Die Maschine nummeriert ihre Vorgänge fortlaufend. StudSphere merkt sich je Schlüssel die letzte angewendete Nummer, deshalb zählt ein erneut gesendeter Stapel nur einmal. Farben werden über `colors.bricklink_color_id` zugeordnet. Teile werden der Reihe nach gesucht über `parts.bricklink_part_id`, `part_num`, `ldraw_id` und eine Rückfrage bei Rebrickable (API-Key nötig, höchstens 5 Abfragen je Anfrage; die Antworten werden in `app_settings` gemerkt, Fehlanzeigen einen Tag lang). Findet das nichts, werden die optionalen `alt`-Nummern der Maschine probiert; so zugeordnete Teile stehen mit Hinweis in der Lagerbewegung und in der Antwort unter `hinted`. Unbekannte Paare werden übersprungen und unter `unmapped` (mit `missing`: `part`, `color` oder `both`) zurückgemeldet.
 
 ## Weiteres
 
